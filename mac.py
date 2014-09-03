@@ -29,7 +29,6 @@ except:
 known_ips = {}
 ips = set()
 
-ARP_PACKET_TYPE = 0x0806		# address resolution protocol
 ARP_REQUEST = 0x0800
 ETH_BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
@@ -82,23 +81,9 @@ def arp_request(pcap, address):
 
 	return pcap.sendpacket(str(eth))
 
-# TODO: Make interface(s) configurable
-print pcap.findalldevs()
-interface = pcap.lookupdev()
-local_net, local_mask = pcap.lookupnet(interface)
-print "Listening on {}: {}/{}".format(interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
-
-# Small snaplen as we only care about ARP packets
-pc = pcap.pcap(name=interface, snaplen=256, promisc=True, immediate=True)
-
-# TODO: Filter to see only arp packets (it seems to filter everything)
-#pc.setfilter('2054')
-#pc.setfilter(value="arp")
-
-arp_request(pc, '10.0.0.1')
-
-for ts, pkt in pc:
-	packet = dpkt.ethernet.Ethernet(pkt)
+def monitor_arp(hdr, data):
+	ARP_PACKET_TYPE = 0x0806		# address resolution protocol
+	packet = dpkt.ethernet.Ethernet(data)
 	if (packet.type == ARP_PACKET_TYPE):
 		if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
 			# ARP Request
@@ -112,3 +97,20 @@ for ts, pkt in pc:
 			add_known_ip(ether_decode(packet.src), socket.inet_ntoa(packet.data.spa))
 			for key in sorted(known_ips):
 				print "{}: {}".format(known_ips[key], key)
+
+# TODO: Make interface(s) configurable
+print pcap.findalldevs()
+interface = pcap.lookupdev()
+local_net, local_mask = pcap.lookupnet(interface)
+print "Listening on {}: {}/{}".format(interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
+
+# Small snaplen as we only care about ARP packets
+pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+
+pc.setfilter('arp')
+
+# Loop infinitely and monitory arp packets
+while True:
+	pc.loop(1, monitor_arp)
+
+#arp_request(pc, '10.0.0.1')
