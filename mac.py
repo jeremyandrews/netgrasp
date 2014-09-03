@@ -32,8 +32,8 @@ ips = set()
 ARP_REQUEST = 0x0800
 ETH_BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
-def ether_decode(p):
-	return ':'.join(['%02x' % ord(x) for x in str(p)])
+def unpack_mac(p):
+	return "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", p)
 
 def add_known_ip(ip, mac):
 	if known_ips.has_key(ip):
@@ -90,11 +90,11 @@ def monitor_arp(hdr, data):
 			print "ARP request for {} from {}.".format(socket.inet_ntoa(packet.data.tpa), socket.inet_ntoa(packet.data.spa))
 			add_ip(socket.inet_ntoa(packet.data.spa))
 			add_ip(socket.inet_ntoa(packet.data.tpa))
-			print ips
+			print sorted(ips)
 		elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
 			# ARP Reply
-			print "ARP reply to {}, {}={}.".format(socket.inet_ntoa(packet.data.tpa), socket.inet_ntoa(packet.data.spa), ether_decode(packet.src))
-			add_known_ip(ether_decode(packet.src), socket.inet_ntoa(packet.data.spa))
+			print "ARP reply to {}, {}={}.".format(socket.inet_ntoa(packet.data.tpa), socket.inet_ntoa(packet.data.spa), unpack_mac(packet.src))
+			add_known_ip(unpack_mac(packet.src), socket.inet_ntoa(packet.data.spa))
 			for key in sorted(known_ips):
 				print "{}: {}".format(known_ips[key], key)
 
