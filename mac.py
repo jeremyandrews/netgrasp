@@ -21,6 +21,7 @@ import socket
 import binascii
 import struct
 import time
+import threading
 
 try:
 	import dpkt
@@ -37,6 +38,9 @@ ETH_BROADCAST = 'ff:ff:ff:ff:ff:ff'
 myMAC = 'ff:ff:ff:ff:ff:ff'
 # @todo: support multiple IPs
 myIP = socket.gethostbyname(socket.gethostname())
+
+# @todo: don't use a global
+pcap_instance = False
 
 class HardwareAddress:
 	all_hardwareAddresses = {}
@@ -113,78 +117,123 @@ def unpack_mac(p):
 # TODO: Replace with stdlib
 def eth_aton(buffer):
 	sp = buffer.split(':')
+	i = 0
+	for value in sp:
+		if (len(value) == 1):
+			sp[i] = '0' + value
+		i += 1
 	buffer = ''.join(sp)
 	return binascii.unhexlify(buffer)
- 
-def arp_request(pcap, address):
-	global myMAC
-	global myIP
-	arp = dpkt.arp.ARP()
-	# Senders hardware address (MAC):
-	arp.sha = eth_aton(MyMAC)
-	# Sender's protocol address:
-	# @todo Test with multiple active interfaces.
-	arp.spa = socket.inet_aton(MyIP)
-	# Target hardware address (unknown, hence our request):
-	arp.tha = eth_aton('00:00:00:00:00:00')
-	# Target protocol address:
-	arp.tpa = socket.inet_aton(address)
-	# Request to resolve ha given pa
-	arp.op = dpkt.arp.ARP_OP_REQUEST
 
-	eth = dpkt.ethernet.Ethernet()
-	eth.src = arp.sha
-	# Broadcast ARP request
-	eth.dst = eth_aton(ETH_BROADCAST)
-	eth.data = arp
-	eth.type = dpkt.ethernet.ETH_TYPE_ARP
+class Sniffer(object):
+	def start(self):
+		sniff = threading.Thread(target=self.sniff_interface, args=(interface,))
+		sniff.start()
+		print "DEBUG: Started listener thread."
 
-	return pcap.sendpacket(str(eth))
+	def sniff_interface(self, interface):
+		global pcap_instance
+		# Small snaplen as we only care about ARP packets
+		pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+		pcap_instance = pc
 
-def monitor_arp(hdr, data):
-	global myMAC
-	global myIP
-	ARP_PACKET_TYPE = 0x0806		# address resolution protocol
-	packet = dpkt.ethernet.Ethernet(data)
-	if (packet.type == ARP_PACKET_TYPE):
-		''' Received ARP packet '''
-		if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-			''' Process ARP Request packet '''
-			# Check packet sender
-			if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.spa))):
-				# We've seen this IP before.
-				HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.spa))
-			else:
-				# This is our first time seeing this IP.
-				HardwareAddress(interface, socket.inet_ntoa(packet.data.spa))
-			# Check packet target
-			if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.tpa))):
-				# We've seen this IP before.
-				HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.tpa))
-			else:
-				# This is our first time seeing this IP.
-				HardwareAddress(interface, socket.inet_ntoa(packet.data.tpa))			
-		elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-			''' Process ARP Reply packet '''
-			if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.spa))):
-				# We've seen this IP before.
-				HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.spa))
-			else:
-				# This is our first time seeing this IP.
-				HardwareAddress(interface, socket.inet_ntoa(packet.data.spa))
-			HardwareAddress.macSeen(interface, socket.inet_ntoa(packet.data.spa), unpack_mac(packet.src))
+		pc.setfilter('arp')
 
-			# In case we missed the original ARP Request
-			if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.tpa))):
-				# We've seen this IP before.
-				HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.tpa))
-			else:
-				# This is our first time seeing this IP.
-				HardwareAddress(interface, socket.inet_ntoa(packet.data.tpa))
-	if (myMAC == ETH_BROADCAST):
-		myMAC = HardwareAddress.getMAC(interface, myIP)
-		if (myMAC != ETH_BROADCAST):
-			print "PASSIVE: Learned my MAC: {}".format(myMAC)
+		# Loop infinitely and monitory arp packets
+		while True:
+			pc.loop(1, self.monitor_arp)
+
+	def monitor_arp(self, hdr, data):
+		global myMAC
+		global myIP
+		ARP_PACKET_TYPE = 0x0806		# address resolution protocol
+		packet = dpkt.ethernet.Ethernet(data)
+		if (packet.type == ARP_PACKET_TYPE):
+			''' Received ARP packet '''
+			if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
+				''' Process ARP Request packet '''
+				# Check packet sender
+				if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.spa))):
+					# We've seen this IP before.
+					HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.spa))
+				else:
+					# This is our first time seeing this IP.
+					HardwareAddress(interface, socket.inet_ntoa(packet.data.spa))
+				# Check packet target
+				if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.tpa))):
+					# Don't update ipSeen; this is only a request.
+					#HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.tpa))
+					pass
+				else:
+					# This is our first time seeing this IP.
+					HardwareAddress(interface, socket.inet_ntoa(packet.data.tpa))			
+			elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+				''' Process ARP Reply packet '''
+				if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.spa))):
+					# We've seen this IP before.
+					HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.spa))
+				else:
+					# This is our first time seeing this IP.
+					HardwareAddress(interface, socket.inet_ntoa(packet.data.spa))
+				HardwareAddress.macSeen(interface, socket.inet_ntoa(packet.data.spa), unpack_mac(packet.src))
+
+				# In case we missed the original ARP Request
+				if (HardwareAddress.isKnownIP(interface, socket.inet_ntoa(packet.data.tpa))):
+					# We've seen this IP before.
+					HardwareAddress.ipSeen(interface, socket.inet_ntoa(packet.data.tpa))
+				else:
+					# This is our first time seeing this IP.
+					HardwareAddress(interface, socket.inet_ntoa(packet.data.tpa))
+		if (myMAC == ETH_BROADCAST):
+			myMAC = HardwareAddress.getMAC(interface, myIP)
+			if (myMAC != ETH_BROADCAST):
+				print "PASSIVE: Learned my MAC: {}".format(myMAC)
+
+class Pinger(object):
+	def start(self):
+		global pcap_instance
+		ping_loop = threading.Thread(target=self.ping_loop, args=(pcap_instance,))
+		ping_loop.start()
+		print "DEBUG: Started pinger thread."
+
+	def ping_loop(self, pc):
+		while True:
+			time.sleep(15)
+			all_addresses = HardwareAddress.all_hardwareAddresses
+			for ha in all_addresses.itervalues():
+				if (ha.mac == ETH_BROADCAST):
+					self.arp_request(pc, ha.ip)
+
+	def arp_request(self, pcap, address):
+		global myMAC
+		global myIP
+
+		if (myMAC == ETH_BROADCAST):
+			return False
+
+		arp = dpkt.arp.ARP()
+		# Senders hardware address (MAC):
+		arp.sha = eth_aton(myMAC)
+		# Sender's protocol address:
+		# @todo Test with multiple active interfaces.
+		arp.spa = socket.inet_aton(myIP)
+		# Target hardware address (unknown, hence our request):
+		arp.tha = eth_aton('00:00:00:00:00:00')
+		# Target protocol address:
+		arp.tpa = socket.inet_aton(address)
+		# Request to resolve ha given pa
+		arp.op = dpkt.arp.ARP_OP_REQUEST
+
+		eth = dpkt.ethernet.Ethernet()
+		eth.src = arp.sha
+		# Broadcast ARP request
+		eth.dst = eth_aton(ETH_BROADCAST)
+		eth.data = arp
+		eth.type = dpkt.ethernet.ETH_TYPE_ARP
+		print "ACTIVE: Sent ARP to {}".format(address)
+
+		return pcap.sendpacket(str(eth))
+
 
 # TODO: Make interface(s) configurable
 print pcap.findalldevs()
@@ -192,13 +241,15 @@ interface = pcap.lookupdev()
 local_net, local_mask = pcap.lookupnet(interface)
 print "Listening on {}: {}/{}".format(interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
 
-# Small snaplen as we only care about ARP packets
-pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+listener = Sniffer()
+listener.start()
 
-pc.setfilter('arp')
+pinger = Pinger()
+pinger.start()
 
-# Loop infinitely and monitory arp packets
-while True:
-	pc.loop(1, monitor_arp)
+#sleep(3)
+#aper = Arper()
+
+
 
 #arp_request(pc, '10.0.0.1')
