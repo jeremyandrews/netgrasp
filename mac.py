@@ -78,6 +78,9 @@ class HardwareAddress:
 		# When we last confirmed this hardware address.
 		self.mac_confirmed_last = 0
 
+		# How many confirmation requests we've made without an answer.
+		self.mac_confirm_requests = 0
+
 		# When we last requested confirmation.
 		self.mac_request = 0
 
@@ -101,6 +104,19 @@ class HardwareAddress:
 			ha.mac = mac
 			print "PASSIVE: New MAC {} for {}.".format(mac, ip)
 		ha.mac_confirmed_last = time.time()
+		ha.mac_confirm_requests = 0
+		ha.active = True
+
+	@classmethod
+	def macLookup(cls, interface, ip):
+		ha = cls.all_hardwareAddresses[interface, ip]
+		ha.mac_request = time.time()
+		ha.mac_confirm_requests += 1
+
+	@classmethod
+	def macInactive(cls, interface, ip):
+		ha = cls.all_hardwareAddresses[interface, ip]
+		ha.active = False
 
 	@classmethod
 	def getMAC(cls, interface, ip):
@@ -201,8 +217,14 @@ class Pinger(object):
 			time.sleep(15)
 			all_addresses = HardwareAddress.all_hardwareAddresses
 			for ha in all_addresses.itervalues():
-				if (ha.mac == ETH_BROADCAST):
-					self.arp_request(pc, ha.ip)
+				if (ha.active == True):
+					if (ha.mac == ETH_BROADCAST):
+						if (ha.mac_confirm_requests < 3):
+							HardwareAddress.macLookup(ha.interface, ha.ip)
+							self.arp_request(pc, ha.ip)
+						else:
+							HardwareAddress.macInactive(ha.interface, ha.ip)
+							print "PASSIVE: Ignoring {}".format(ha.ip)
 
 	def arp_request(self, pcap, address):
 		global myMAC
@@ -242,9 +264,11 @@ local_net, local_mask = pcap.lookupnet(interface)
 print "Listening on {}: {}/{}".format(interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
 
 listener = Sniffer()
+listener.daemon = True
 listener.start()
 
 pinger = Pinger()
+pinger.daemon = True
 pinger.start()
 
 #sleep(3)
