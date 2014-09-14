@@ -13,11 +13,14 @@
 # Future:
 # - Identify hardware manufacturer
 #    http://www.macvendorlookup.com/mac-address-api
+# - Be "smart" about reserved IPs
+#    https://en.wikipedia.org/wiki/Reserved_IP_addresses
 
 import sys
 import socket
 import binascii
 import struct
+import time
 
 try:
 	import dpkt
@@ -28,17 +31,18 @@ try:
 except:
 	sys.exit("ERROR: Failed to import pycap http://code.google.com/p/pypcap")
 
-known_ips = {}
-ips = set()
-
 ARP_REQUEST = 0x0800
 ETH_BROADCAST = 'ff:ff:ff:ff:ff:ff'
+
+myMAC = 'ff:ff:ff:ff:ff:ff'
+# @todo: support multiple IPs
+myIP = socket.gethostbyname(socket.gethostname())
 
 class HardwareAddress:
 	all_hardwareAddresses = {}
 
 	def __init__(self, interface, ip):
-		print "New IP {} on {}.".format(ip, interface)
+		print "PASSIVE: New IP {} on {}.".format(ip, interface)
 		# A record of other IP addresses we've associated with
 		# this MAC in the past.
 		self.ip_history = [ip]
@@ -56,13 +60,13 @@ class HardwareAddress:
 		self.network = '0.0.0.0/0'
 
 		# The hardware address, default to broadcast.
-		self.mac = 'ff:ff:ff:ff:ff:ff'
+		self.mac = ETH_BROADCAST
 
 		# When we first saw activity from this IP.
-		self.ip_activity_first = 0
+		self.ip_activity_first = time.time()
 
 		# When we last saw activity from this IP.
-		self.ip_activity_last = 0
+		self.ip_activity_last = time.time()
 
 		# When we first confirmed this hardware address.
 		self.mac_confirmed_first = 0
@@ -83,36 +87,28 @@ class HardwareAddress:
 	@classmethod
 	def ipSeen(cls, interface, ip):
 		ha = cls.all_hardwareAddresses[interface, ip]
-		ha.ip_activity_last = 0
+		ha.ip_activity_last = time.time()
 
 	@classmethod
 	def macSeen(cls, interface, ip, mac):
 		ha = cls.all_hardwareAddresses[interface, ip]
 		if (ha.mac != mac):
-			ha.mac_confirmed_first = 0
+			ha.mac_confirmed_first = time.time()
 			ha.mac = mac
-			print "New MAC {} for {}.".format(mac, ip)
-		ha.mac_confirmed_last = 0
+			print "PASSIVE: New MAC {} for {}.".format(mac, ip)
+		ha.mac_confirmed_last = time.time()
+
+	@classmethod
+	def getMAC(cls, interface, ip):
+		if (HardwareAddress.isKnownIP(interface, ip)):
+			ha = cls.all_hardwareAddresses[interface, ip]
+			return ha.mac
+		else:
+			return ETH_BROADCAST
 
 
 def unpack_mac(p):
 	return "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", p)
-
-def add_known_ip(ip, mac):
-	if known_ips.has_key(ip):
-		print "Already know {}={}".format(ip, mac)
-		return 0
-	else:
-		known_ips[ip] = mac
-		return 1
-
-def add_ip(ip):
-	if ip in ips:
-		print "Already seen {}".format(ip)
-		return 0
-	else:
-		ips.add(ip)
-		return 1
 
 # TODO: Replace with stdlib
 def eth_aton(buffer):
@@ -121,13 +117,14 @@ def eth_aton(buffer):
 	return binascii.unhexlify(buffer)
  
 def arp_request(pcap, address):
+	global myMAC
+	global myIP
 	arp = dpkt.arp.ARP()
 	# Senders hardware address (MAC):
-	## @todo retrieve MAC of active device
-	arp.sha = eth_aton('80:e6:50:0a:6f:98')
+	arp.sha = eth_aton(MyMAC)
 	# Sender's protocol address:
 	# @todo Test with multiple active interfaces.
-	arp.spa = socket.inet_aton(socket.gethostbyname(socket.gethostname()))
+	arp.spa = socket.inet_aton(MyIP)
 	# Target hardware address (unknown, hence our request):
 	arp.tha = eth_aton('00:00:00:00:00:00')
 	# Target protocol address:
@@ -138,13 +135,15 @@ def arp_request(pcap, address):
 	eth = dpkt.ethernet.Ethernet()
 	eth.src = arp.sha
 	# Broadcast ARP request
-	eth.dst = eth_aton('ff:ff:ff:ff:ff:ff')
+	eth.dst = eth_aton(ETH_BROADCAST)
 	eth.data = arp
 	eth.type = dpkt.ethernet.ETH_TYPE_ARP
 
 	return pcap.sendpacket(str(eth))
 
 def monitor_arp(hdr, data):
+	global myMAC
+	global myIP
 	ARP_PACKET_TYPE = 0x0806		# address resolution protocol
 	packet = dpkt.ethernet.Ethernet(data)
 	if (packet.type == ARP_PACKET_TYPE):
@@ -182,6 +181,10 @@ def monitor_arp(hdr, data):
 			else:
 				# This is our first time seeing this IP.
 				HardwareAddress(interface, socket.inet_ntoa(packet.data.tpa))
+	if (myMAC == ETH_BROADCAST):
+		myMAC = HardwareAddress.getMAC(interface, myIP)
+		if (myMAC != ETH_BROADCAST):
+			print "PASSIVE: Learned my MAC: {}".format(myMAC)
 
 # TODO: Make interface(s) configurable
 print pcap.findalldevs()
