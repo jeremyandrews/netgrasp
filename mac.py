@@ -1,11 +1,6 @@
 # TODO
 # 1. Move ARP store into database and track more info
-#   a. track when we last saw a MAC/IP
 #   b. track if multiple MAC's are seen for a single IP
-#   c. allow MAC lookup (so we can look up ourself)
-# 2. Create central dispatch that launches multiple tasks
-#   a. listening for MACs
-#   b. actively requesting MACs (network scan)
 # 3. Test variations
 #   a. multiple interfaces
 #   b. different OS
@@ -95,6 +90,10 @@ class HardwareAddress:
 	def ipSeen(cls, interface, ip):
 		ha = cls.all_hardwareAddresses[interface, ip]
 		ha.ip_activity_last = time.time()
+		if (ha.active == False):
+			print "PASSIVE: Previously inactive IP {} returned".format(ha.ip)
+			ha.active = True
+		ha.mac_confirm_requests = 0
 
 	@classmethod
 	def macSeen(cls, interface, ip, mac):
@@ -105,7 +104,9 @@ class HardwareAddress:
 			print "PASSIVE: New MAC {} for {}.".format(mac, ip)
 		ha.mac_confirmed_last = time.time()
 		ha.mac_confirm_requests = 0
-		ha.active = True
+		if (ha.active == False):
+			print "PASSIVE: Previously inactive MAC {}:{} returned".format(ha.ip, ha.mac)
+			ha.active = True
 
 	@classmethod
 	def macLookup(cls, interface, ip):
@@ -216,15 +217,21 @@ class Pinger(object):
 		while True:
 			time.sleep(15)
 			all_addresses = HardwareAddress.all_hardwareAddresses
+			now = time.time()
 			for ha in all_addresses.itervalues():
-				if (ha.active == True):
-					if (ha.mac == ETH_BROADCAST):
+				if (ha.active == True) and (ha.ip != myIP):
+					if (ha.mac == ETH_BROADCAST) or (ha.mac_confirm_requests > 0):
 						if (ha.mac_confirm_requests < 3):
 							HardwareAddress.macLookup(ha.interface, ha.ip)
 							self.arp_request(pc, ha.ip)
 						else:
 							HardwareAddress.macInactive(ha.interface, ha.ip)
+							# @todo: is this an IP that went away or never was?
 							print "PASSIVE: Ignoring {}".format(ha.ip)
+					else:
+						if (ha.mac_confirmed_last < now - 60 * 5):
+							HardwareAddress.macLookup(ha.interface, ha.ip)
+							self.arp_request(pc, ha.ip)
 
 	def arp_request(self, pcap, address):
 		global myMAC
@@ -270,10 +277,3 @@ listener.start()
 pinger = Pinger()
 pinger.daemon = True
 pinger.start()
-
-#sleep(3)
-#aper = Arper()
-
-
-
-#arp_request(pc, '10.0.0.1')
