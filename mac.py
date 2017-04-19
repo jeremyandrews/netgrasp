@@ -21,11 +21,11 @@ import threading
 try:
 	import dpkt
 except:
-	sys.exit("ERROR: Failed to import dpkt https://code.google.com/p/dpkt/")	
+	sys.exit("ERROR: Failed to import dpkt https://github.com/kbandla/dpkt")
 try:
 	import pcap
 except:
-	sys.exit("ERROR: Failed to import pycap http://code.google.com/p/pypcap")
+	sys.exit("ERROR: Failed to import pycap https://github.com/dugsong/pypcap")
 
 ARP_REQUEST = 0x0800
 ETH_BROADCAST = 'ff:ff:ff:ff:ff:ff'

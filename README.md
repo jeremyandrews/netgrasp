@@ -1,8 +1,8 @@
 Python network observation tool.
 
 Dependencies:
- - dpkt https://code.google.com/p/dpkt
- - pcap http://code.google.com/p/pypcap
+ - dpkt https://github.com/kbandla/dpkt (pip install dpkt)
+ - pcap https://github.com/dugsong/pypcap (pip install pypcap)
 
 Database:
  - macs:
