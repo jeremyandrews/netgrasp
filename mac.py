@@ -25,7 +25,7 @@ except:
 try:
 	import pcap
 except:
-	sys.exit("ERROR: Failed to import pycap https://github.com/dugsong/pypcap")
+	sys.exit("ERROR: Failed to import pypcap https://github.com/dugsong/pypcap")
 
 ARP_REQUEST = 0x0800
 ETH_BROADCAST = 'ff:ff:ff:ff:ff:ff'
@@ -47,6 +47,7 @@ class HardwareAddress:
 		self.ip_history = [ip]
 
 		# The IP address currently associated with this MAC.
+
 		self.ip = ip
 
 		# The interface that this hardware address was seen on.

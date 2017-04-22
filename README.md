@@ -4,6 +4,18 @@ Dependencies:
  - dpkt https://github.com/kbandla/dpkt (pip install dpkt)
  - pcap https://github.com/dugsong/pypcap (pip install pypcap)
 
+Architecture:
+
+ - Multi-process, allows for priv-sep
+   o master process:
+     - spawns other threads
+     - writes MAC info to db
+     - logs
+     - send emails
+   o MAC process:
+     - detects MAC pacets
+   o email process:
+
 Database:
  - macs:
     interface TEXT,
