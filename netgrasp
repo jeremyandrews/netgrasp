@@ -1,0 +1,84 @@
+#!/usr/bin/env python
+import os
+import sys
+import multiprocessing
+import time
+import ConfigParser
+import io
+import logging
+import pwd
+
+def wiretap():
+    name = multiprocessing.current_process().name
+    assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
+    logger.info('Wiretap process running as user %s',  whoami())
+    try:
+        import dpkt
+    except:
+        sys.exit("ERROR: Failed to import dpkt, try: 'pip install dpkt'")
+    try:
+        import pcap
+    except:
+        sys.exit("ERROR: Failed to import pcap, try: 'pip install pypcap'")
+
+def whoami():
+    whoami = pwd.getpwuid(os.getuid())
+    return whoami[0]
+
+if __name__ == '__main__':
+    multiprocessing.log_to_stderr()
+    logger = multiprocessing.get_logger()
+    # @TODO make configurable
+    logger.setLevel(logging.WARN)
+
+    if os.getuid() != 0:
+        sys.exit('ERROR: Netgrasp must be run as root.')
+
+    default_uid = 1 # typically daemon user
+    default_gid = 1 # typically daemon group
+    default_loglevel = logging.WARN
+
+    config = ConfigParser.ConfigParser()
+    found = config.read(['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf'])
+
+    if config.has_section('Logging'):
+        if config.has_option('Logging', 'level'):
+            loglevel = config.get('Logging', 'level')
+            logger.setLevel(loglevel)
+            logger.debug('Logging: setting loglevel to %s', loglevel)
+        else:
+            logger.setLevel(default_loglevel)
+    else:
+        logger.setLevel(default_loglevel)
+
+    logger.debug('configuration files: %s', found)
+
+    if config.has_section('Security'):
+        if config.has_option('Security', 'gid'):
+            gid = config.getint('Security', 'gid');
+        else:
+            gid = default_gid
+        if config.has_option('Security', 'uid'):
+            uid = config.getint('Security', 'uid');
+        else:
+            uid = default_gid
+    else:
+        # Default to uid/gid 1, typically the daemon user
+        gid = default_gid;
+        uid = default_uid;
+    logger.debug('Security: setting uid to %d, gid to %d', uid, gid)
+
+    wiretap = multiprocessing.Process(name='wiretap', target=wiretap)
+    wiretap.daemon = True
+    wiretap.start()
+
+    # remove group privileges
+    os.setgroups([])
+
+    os.setgid(gid)
+    os.setuid(uid)
+
+    assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
+    logger.info('Main process running as user %s' % whoami())
+
+    wiretap.join()
