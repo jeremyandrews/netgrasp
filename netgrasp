@@ -11,7 +11,7 @@ import pwd
 def wiretap():
     name = multiprocessing.current_process().name
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
-    logger.info('Wiretap process running as user %s',  whoami())
+    logger.info('wiretap process running as user %s',  whoami())
     try:
         import dpkt
     except:
@@ -20,6 +20,13 @@ def wiretap():
         import pcap
     except:
         sys.exit("ERROR: Failed to import pcap, try: 'pip install pypcap'")
+    devices = pcap.findalldevs()
+    logger.debug('identified devices: %s', devices)
+    if config.has_section('Listen'):
+      if config.has_option('Listen', 'interface'):
+        interface = config.get('Listen', 'interface');
+        logger.info('configured to listen on interface %s', interface)
+        local_net, local_mask = pcap.lookupnet(interface)
 
 def whoami():
     whoami = pwd.getpwuid(os.getuid())
@@ -79,6 +86,6 @@ if __name__ == '__main__':
     os.setuid(uid)
 
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
-    logger.info('Main process running as user %s' % whoami())
+    logger.info('main process running as user %s' % whoami())
 
     wiretap.join()
