@@ -1,16 +1,18 @@
 #!/usr/bin/env python
 import os
 import sys
+import signal
 import multiprocessing
-import time
 import ConfigParser
 import io
 import logging
 import pwd
 import struct
 import socket
+import sqlite3
 
 def wiretap(child_conn):
+    import sys
     name = multiprocessing.current_process().name
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
     logger.info('wiretap process running as user %s',  whoami())
@@ -50,7 +52,7 @@ def wiretap(child_conn):
 
     pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
 
-    # now that we've established a pcap, we no longer need our root permissions
+    # drop all root privileges, we no longer need them
     os.setgroups([])
     os.setgid(gid)
     os.setuid(uid)
@@ -61,7 +63,12 @@ def wiretap(child_conn):
     pc.setfilter('arp')
 
     while True:
-      pc.loop(1, received_arp, child_conn)
+        if child_conn.poll():
+            message = child_conn.recv()
+            if (message == 'ABORT'):
+                logger.critical('we have received ABORT message, exiting')
+                sys.exit(0)
+        pc.loop(1, received_arp, child_conn)
 
 def received_arp(hdr, data, child_conn):
     import dpkt
@@ -72,6 +79,14 @@ def received_arp(hdr, data, child_conn):
 def whoami():
     whoami = pwd.getpwuid(os.getuid())
     return whoami[0]
+
+def create_database():
+    print 'Create Database...'
+
+def clean_shutdown(signal, frame):
+    # Log the reason we have exited
+    logger.critical("SIGINT received, exiting")
+    sys.exit(0)
 
 if __name__ == '__main__':
     if os.getuid() != 0:
@@ -115,19 +130,39 @@ if __name__ == '__main__':
         uid = default_uid;
     logger.debug('Security: setting uid to %d, gid to %d', uid, gid)
 
+    if config.has_section('Database'):
+        if config.has_option('Database', 'filename'):
+            db_filename = config.get('Database', 'filename');
+        else:
+            logger.critical("No database defined in configuration file, exiting.")
+            sys.exit("No database filename defined in configuration file, exiting.")
+    else:
+        logger.critical("No database defined in configuration file, exiting.")
+        sys.exit("No database filename defined in configuration file, exiting.")
+
     parent_conn, child_conn = multiprocessing.Pipe()
     wiretap = multiprocessing.Process(name='wiretap', target=wiretap, args=[child_conn])
     wiretap.daemon = True
     wiretap.start()
 
-    # remove group privileges
+    # drop all root privileges, we no longer need them
     os.setgroups([])
-
     os.setgid(gid)
     os.setuid(uid)
 
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
     logger.info('main process running as user %s',  whoami())
+
+    signal.signal(signal.SIGINT, clean_shutdown)
+
+    try:
+        db_conn = sqlite3.connect(db_filename)
+    except:
+        logger.critical("failed to open or create %s (as user %s), exiting", db_filename, whoami())
+        parent_conn.send('ABORT')
+        sys.exit("ERROR: Failed to open or create database file.")
+    logger.info('opened %s as user %s', db_filename, whoami());
+    create_database()
 
     myIP = socket.gethostbyname(socket.gethostname())
 
