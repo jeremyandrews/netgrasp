@@ -7,8 +7,10 @@ import ConfigParser
 import io
 import logging
 import pwd
+import struct
+import socket
 
-def wiretap():
+def wiretap(child_conn):
     name = multiprocessing.current_process().name
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
     logger.info('wiretap process running as user %s',  whoami())
@@ -27,7 +29,7 @@ def wiretap():
     logger.debug('identified devices: %s', devices)
     if len(devices) <= 0:
       logger.critical('no available devices (are you in a jail?), exiting')
-      sys.exit("ERROR: No available devices, if in a jail allow raw socket access.")
+      sys.exit("ERROR: No available devices, try running tcpdump manually to debug.")
     default_interface = devices[0]
 
     if config.has_section('Listen'):
@@ -46,16 +48,32 @@ def wiretap():
     logger.info('configured to listen on interface %s', interface)
     local_net, local_mask = pcap.lookupnet(interface)
 
+    pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+
+    # now that we've established a pcap, we no longer need our root permissions
+    os.setgroups([])
+    os.setgid(gid)
+    os.setuid(uid)
+
+    assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
+    logger.info('wiretap process running as user %s',  whoami())
+
+    pc.setfilter('arp')
+
+    while True:
+      pc.loop(1, received_arp, child_conn)
+
+def received_arp(hdr, data, child_conn):
+    import dpkt
+    logger.debug('arp packet sniffed')
+    child_conn.send(dpkt.ethernet.Ethernet(data))
+    exit
+
 def whoami():
     whoami = pwd.getpwuid(os.getuid())
     return whoami[0]
 
 if __name__ == '__main__':
-    multiprocessing.log_to_stderr()
-    logger = multiprocessing.get_logger()
-    # @TODO make configurable
-    logger.setLevel(logging.WARN)
-
     if os.getuid() != 0:
         logger.critical("netgrasp must be run as root, exiting")
         sys.exit('ERROR: Netgrasp must be run as root.')
@@ -63,6 +81,9 @@ if __name__ == '__main__':
     default_uid = 1 # typically daemon user
     default_gid = 1 # typically daemon group
     default_loglevel = logging.WARN
+
+    multiprocessing.log_to_stderr()
+    logger = multiprocessing.get_logger()
 
     config = ConfigParser.ConfigParser()
     found = config.read(['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf'])
@@ -94,7 +115,8 @@ if __name__ == '__main__':
         uid = default_uid;
     logger.debug('Security: setting uid to %d, gid to %d', uid, gid)
 
-    wiretap = multiprocessing.Process(name='wiretap', target=wiretap)
+    parent_conn, child_conn = multiprocessing.Pipe()
+    wiretap = multiprocessing.Process(name='wiretap', target=wiretap, args=[child_conn])
     wiretap.daemon = True
     wiretap.start()
 
@@ -106,5 +128,18 @@ if __name__ == '__main__':
 
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
     logger.info('main process running as user %s',  whoami())
+
+    myIP = socket.gethostbyname(socket.gethostname())
+
+    import dpkt
+
+    while True:
+      packet = parent_conn.recv()
+      mac_src = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
+      mac_dst = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
+      if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
+          logger.info('ARP request from %s (%s) to %s (%s)', socket.inet_ntoa(packet.data.spa), mac_src, socket.inet_ntoa(packet.data.tpa), mac_dst)
+      elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+          logger.info('ARP reply from %s (%s) to %s (%s)', socket.inet_ntoa(packet.data.spa), mac_src, socket.inet_ntoa(packet.data.tpa), mac_dst)
 
     wiretap.join()
