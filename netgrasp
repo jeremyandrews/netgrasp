@@ -10,6 +10,7 @@ import pwd
 import struct
 import socket
 import sqlite3
+import datetime
 
 def wiretap(child_conn):
     import sys
@@ -81,12 +82,69 @@ def whoami():
     return whoami[0]
 
 def create_database():
-    print 'Create Database...'
+    # mac:             Hardware address, aka 'ff:ff:ff:ff:ff:ff'
+    # ip:              IP address, aka '10.0.0.2013'
+    # interface:       name of interface, aka 'en0'
+    # network:         full address, aka '10.0.0.0/24'
+    # firstSeen:       timestamp when IP first seen ever
+    # firstSeenRecent: timestamp when IP first seen recently (during current active period)
+    # lastSeen:        timestamp when IP last seen
+    # lastRequested:   last time MAC was requested
+    # active:          flag indicating whether mac is currently active
+    # self:            flag indicating whether this is our mac/ip
+    db_cursor.execute("""
+      CREATE TABLE IF NOT EXISTS seen(
+        mac TEXT,
+        ip TEXT,
+        interface TEXT,
+        network TEXT,
+        firstSeen NUMERIC,
+        firstSeenRecent NUMERIC,
+        lastSeen NUMERIC,
+        lastRequested TEXT,
+        active NUMERIC,
+        self NUMERIC,
+        PRIMARY KEY (mac, ip, network, interface)
+      )
+    """)
+    db_conn.commit()
 
 def clean_shutdown(signal, frame):
     # Log the reason we have exited
     logger.critical("SIGINT received, exiting")
     sys.exit(0)
+
+def ip_is_mine(ip):
+    return (ip == socket.gethostbyname(socket.gethostname()))
+
+def log_arp_packet(ip, mac):
+    now = datetime.datetime.now()
+    exists = False
+
+    logger.debug("SELECT * FROM seen WHERE ip = '%s' AND mac = '%s'", ip, mac)
+    db_cursor.execute('SELECT * FROM seen WHERE ip=? AND mac=?', (ip, mac))
+    if (db_cursor.fetchone()):
+        exists = True
+    else:
+        if (mac != 'ff:ff:ff:ff:ff:ff'):
+            logger.debug("SELECT * FROM seen WHERE ip = '%s' AND mac = '%s'", ip, 'ff:ff:ff:ff:ff:ff')
+            db_cursor.execute('SELECT * FROM seen WHERE ip=? AND mac=?', (ip, 'ff:ff:ff:ff:ff:ff'))
+            if (db_cursor.fetchone()):
+                exists = True
+
+    # @TODO detect inactive IP becoming active again
+
+    if exists:
+        # update
+        logger.debug("UPDATE seen set mac='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, ip)
+        db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, active=? WHERE ip=?', (mac, now, 1, ip))
+        logger.info('%s (%s) is active', ip, mac)
+    else:
+        # First time we've seen this IP
+        logger.debug("INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES('%s', '%s', %s, %s, %s, %d, %d)", mac, ip, now, now, now, 1, ip_is_mine(ip))
+        db_cursor.execute('INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES(?, ?, ?, ?, ?, ?, ?)', (mac, ip, now, now, now, 1, ip_is_mine(ip)))
+        logger.info('%s (%s) is active, first time seeing', ip, mac)
+        db_conn.commit()
 
 if __name__ == '__main__':
     if os.getuid() != 0:
@@ -162,19 +220,22 @@ if __name__ == '__main__':
         parent_conn.send('ABORT')
         sys.exit("ERROR: Failed to open or create database file.")
     logger.info('opened %s as user %s', db_filename, whoami());
+    # create database if necessary
+    db_cursor = db_conn.cursor()
     create_database()
-
-    myIP = socket.gethostbyname(socket.gethostname())
 
     import dpkt
 
     while True:
       packet = parent_conn.recv()
-      mac_src = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
-      mac_dst = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
+      src_ip = socket.inet_ntoa(packet.data.spa)
+      src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
+      dst_ip = socket.inet_ntoa(packet.data.tpa)
+      dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
       if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-          logger.info('ARP request from %s (%s) to %s (%s)', socket.inet_ntoa(packet.data.spa), mac_src, socket.inet_ntoa(packet.data.tpa), mac_dst)
+          logger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+          log_arp_packet(src_ip, src_mac)
       elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-          logger.info('ARP reply from %s (%s) to %s (%s)', socket.inet_ntoa(packet.data.spa), mac_src, socket.inet_ntoa(packet.data.tpa), mac_dst)
+          logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
 
     wiretap.join()
