@@ -137,24 +137,57 @@ def ip_seen(ip, mac):
                 active = rows[0][0]
 
     if exists:
-        # update
+        # Update:
         if active:
             logger.debug("UPDATE seen set mac='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, ip)
             db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, active=? WHERE ip=?', (mac, now, 1, ip))
             logger.info('%s (%s) is active', ip, mac)
         else:
-            # first time we've seen since it was stale
+            # First time we've seen IP since it was stale.
             logger.debug("UPDATE seen set mac='%s', firstSeenRecent='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, now, ip)
             db_cursor.execute('UPDATE seen set mac=?, firstSeenRecent=?, lastSeen=?, active=? WHERE ip=?', (mac, now, now, 1, ip))
             logger.info('%s (%s) is active again', ip, mac)
-            db_conn.commit()
+        db_conn.commit()
     else:
-        # First time we've seen this IP
+        # First time we've seen this IP.
         logger.debug("INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES('%s', '%s', '%s', '%s', '%s', %d, %d)", mac, ip, now, now, now, 1, ip_is_mine(ip))
         db_cursor.execute('INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES(?, ?, ?, ?, ?, ?, ?)', (mac, ip, now, now, now, 1, ip_is_mine(ip)))
         logger.info('%s (%s) is active, first time seeing', ip, mac)
         db_conn.commit()
 
+def ip_request(ip, mac):
+    now = datetime.datetime.now()
+    exists = False
+
+    logger.debug("SELECT active FROM seen WHERE ip = '%s' AND mac = '%s'", ip, mac)
+    db_cursor.execute('SELECT active FROM seen WHERE ip=? AND mac=?', (ip, mac))
+    rows = db_cursor.fetchall()
+    if len(rows):
+        exists = True
+    else:
+        if (mac == 'ff:ff:ff:Ff:ff:ff'):
+            # Maybe we already have this ARP address
+            logger.debug("SELECT mac FROM seen WHERE ip = '%s'", ip)
+            db_cursor.execute('SELECT mac FROM seen WHERE ip=?', (ip,))
+            rows = db_cursor.fetchall()
+            if len(rows):
+              exists = True
+              mac = rows[0][0]
+
+    if exists:
+        # Update:
+        logger.debug("UPDATE seen set lastRequested='%s' WHERE ip='%s' AND mac='%s'", now, ip, mac)
+        db_cursor.execute('UPDATE seen set lastRequested=? WHERE ip=? AND mac=?', (now, ip, mac))
+        logger.info('%s (%s) requested', ip, mac)
+        db_conn.commit()
+    else:
+        # First time we've seen a request for this IP.
+        logger.debug("INSERT INTO seen (mac, ip, lastRequested, active, self) VALUES('%s', '%s', '%s', 0, %d)", mac, ip, now, ip_is_mine(ip))
+        db_cursor.execute("INSERT INTO seen (mac, ip, lastRequested, active, self) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, ip_is_mine(ip)))
+        logger.info('%s (%s) requested, first time seeing', ip, mac)
+        db_conn.commit()
+
+# Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >15 minutes.
 def detect_stale_ips():
     stale = datetime.datetime.now() - datetime.timedelta(minutes=15)
     logger.debug("SELECT mac, ip FROM seen WHERE active = 1 AND lastSeen < '%s'", stale)
@@ -260,5 +293,6 @@ if __name__ == '__main__':
       if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
           logger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
           ip_seen(src_ip, src_mac)
+          ip_request(dst_ip, dst_mac)
       elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
           logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
