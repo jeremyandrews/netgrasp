@@ -96,6 +96,7 @@ def create_database():
     # self:            flag indicating whether this is our mac/ip
     db_cursor.execute("""
       CREATE TABLE IF NOT EXISTS seen(
+        sid INTEGER PRIMARY KEY,
         mac TEXT,
         ip TEXT,
         interface TEXT,
@@ -105,8 +106,29 @@ def create_database():
         lastSeen TIMESTAMP,
         lastRequested TIMESTAMP,
         active NUMERIC,
-        self NUMERIC,
-        PRIMARY KEY (mac, ip, network, interface)
+        self NUMERIC
+      )
+    """)
+    db_cursor.execute("""
+      CREATE TABLE IF NOT EXISTS arplog(
+        aid INTEGER PRIMARY KEY,
+        mac TEXT,
+        ip TEXT,
+        interface TEXT,
+        network TEXT,
+        timestamp TIMESTAMP
+      )
+    """)
+    db_cursor.execute("""
+      CREATE TABLE IF NOT EXISTS notifications(
+        nid INTEGER PRIMARY KEY,
+        mac TEXT,
+        ip TEXT,
+        interface TEXT,
+        network TEXT,
+        timestamp TIMESTAMP,
+        processed NUMERIC,
+        event NUMERIC
       )
     """)
     db_conn.commit()
@@ -121,8 +143,12 @@ def ip_is_mine(ip):
 
 def ip_seen(ip, mac):
     now = datetime.datetime.now()
-    exists = False
 
+    if arplog:
+      logger.debug("INSERT INTO arplog (mac, ip, timestamp) VALUES('%s', '%s', '%s')", mac, ip, now)
+      db_cursor.execute('INSERT INTO arplog (mac, ip, timestamp) VALUES(?, ?, ?)', (mac, ip, now))
+
+    exists = False
     logger.debug("SELECT active, lastSeen FROM seen WHERE ip = '%s' AND mac = '%s'", ip, mac)
     db_cursor.execute('SELECT active, lastSeen FROM seen WHERE ip=? AND mac=?', (ip, mac))
     rows = db_cursor.fetchall()
@@ -199,12 +225,6 @@ def ip_request(ip, mac):
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips():
-    if config.has_section('Listen') and config.has_option('Listen', 'active_timeout'):
-        active_timeout = config.getint('Listen', 'active_timeout')
-        logger.debug('Listen: setting active_timeout to %d', active_timeout)
-    else:
-        active_timeout = 60 * 20 # default to 20 minutes
-        logger.debug('Listen: defaulting active_timeout to %d', active_timeout)
     stale = datetime.datetime.now() - datetime.timedelta(seconds=active_timeout)
     logger.debug("SELECT mac, ip, firstSeenRecent, lastSeen FROM seen WHERE active = 1 AND lastSeen < '%s'", stale)
     db_cursor.execute('SELECT mac, ip, firstSeenRecent, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
@@ -300,6 +320,22 @@ if __name__ == '__main__':
     db_cursor = db_conn.cursor()
     create_database()
 
+    arplog = False
+    if config.has_section('Logging') and config.has_option('Logging', 'arplog'):
+        if config.getboolean('Logging', 'arplog') == True:
+            arplog = True
+    if arplog:
+        logger.debug('Logging: arplog enabled')
+    else:
+        logger.debug('Logging: arplog disabled')
+
+    if config.has_section('Listen') and config.has_option('Listen', 'active_timeout'):
+        active_timeout = config.getint('Listen', 'active_timeout')
+        logger.debug('Listen: setting active_timeout to %d', active_timeout)
+    else:
+        active_timeout = 60 * 20 # default to 20 minutes
+        logger.debug('Listen: defaulting active_timeout to %d', active_timeout)
+
     import dpkt
 
     # loop forever, listening for ARP packets ...
@@ -330,4 +366,11 @@ if __name__ == '__main__':
 ### # Validate IP addresses:
 ###     https://en.wikipedia.org/wiki/Reserved_IP_addresses
 ###
+### # Report on anomolies
+###      - MAC showing up multiple times, etc
 ###
+### # Support listening on multiple interfaces
+###
+### # Add cross-platform UI for monitoring network, configuring, and alerting
+###      - https://kivy.org
+###      - https://wiki.python.org/moin/GuiProgramming
