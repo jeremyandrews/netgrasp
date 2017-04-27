@@ -12,6 +12,8 @@ import socket
 import sqlite3
 import datetime
 
+BROADCAST = 'ff:ff:ff:ff:ff:ff'
+
 def wiretap(child_conn):
     import sys
     name = multiprocessing.current_process().name
@@ -98,10 +100,10 @@ def create_database():
         ip TEXT,
         interface TEXT,
         network TEXT,
-        firstSeen NUMERIC,
-        firstSeenRecent NUMERIC,
-        lastSeen NUMERIC,
-        lastRequested TEXT,
+        firstSeen TIMESTAMP,
+        firstSeenRecent TIMESTAMP,
+        lastSeen TIMESTAMP,
+        lastRequested TIMESTAMP,
         active NUMERIC,
         self NUMERIC,
         PRIMARY KEY (mac, ip, network, interface)
@@ -121,32 +123,38 @@ def ip_seen(ip, mac):
     now = datetime.datetime.now()
     exists = False
 
-    logger.debug("SELECT active FROM seen WHERE ip = '%s' AND mac = '%s'", ip, mac)
-    db_cursor.execute('SELECT active FROM seen WHERE ip=? AND mac=?', (ip, mac))
+    logger.debug("SELECT active, lastSeen FROM seen WHERE ip = '%s' AND mac = '%s'", ip, mac)
+    db_cursor.execute('SELECT active, lastSeen FROM seen WHERE ip=? AND mac=?', (ip, mac))
     rows = db_cursor.fetchall()
     if len(rows):
         exists = True
         active = rows[0][0]
+        lastSeen = rows[0][1]
     else:
-        if (mac != 'ff:ff:ff:ff:ff:ff'):
-            logger.debug("SELECT active FROM seen WHERE ip = '%s' AND mac = '%s'", ip, 'ff:ff:ff:ff:ff:ff')
-            db_cursor.execute('SELECT active FROM seen WHERE ip=? AND mac=?', (ip, 'ff:ff:ff:ff:ff:ff'))
+        if (mac != BROADCAST):
+            logger.debug("SELECT active, lastSeen FROM seen WHERE ip = '%s' AND mac = '%s'", ip, BROADCAST)
+            db_cursor.execute('SELECT active, lastSeen FROM seen WHERE ip=? AND mac=?', (ip, BROADCAST))
             rows = db_cursor.fetchall()
             if len(rows):
                 exists = True
                 active = rows[0][0]
+                lastSeen = rows[0][1]
 
     if exists:
         # Update:
-        if active:
+        if active or not lastSeen:
             logger.debug("UPDATE seen set mac='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, ip)
             db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, active=? WHERE ip=?', (mac, now, 1, ip))
-            logger.info('%s (%s) is active', ip, mac)
+            if lastSeen:
+                logger.debug('%s (%s) is active', ip, mac)
+            else:
+                logger.info('%s (%s) is active, first time seeing', ip, mac)
         else:
+            timeSince = datetime.datetime.now() - lastSeen
             # First time we've seen IP since it was stale.
             logger.debug("UPDATE seen set mac='%s', firstSeenRecent='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, now, ip)
             db_cursor.execute('UPDATE seen set mac=?, firstSeenRecent=?, lastSeen=?, active=? WHERE ip=?', (mac, now, now, 1, ip))
-            logger.info('%s (%s) is active again', ip, mac)
+            logger.info('%s (%s) is active again (after %s)', ip, mac, timeSince)
         db_conn.commit()
     else:
         # First time we've seen this IP.
@@ -165,7 +173,7 @@ def ip_request(ip, mac):
     if len(rows):
         exists = True
     else:
-        if (mac == 'ff:ff:ff:Ff:ff:ff'):
+        if (mac == BROADCAST):
             # Maybe we already have this ARP address
             logger.debug("SELECT mac FROM seen WHERE ip = '%s'", ip)
             db_cursor.execute('SELECT mac FROM seen WHERE ip=?', (ip,))
@@ -178,7 +186,7 @@ def ip_request(ip, mac):
         # Update:
         logger.debug("UPDATE seen set lastRequested='%s' WHERE ip='%s' AND mac='%s'", now, ip, mac)
         db_cursor.execute('UPDATE seen set lastRequested=? WHERE ip=? AND mac=?', (now, ip, mac))
-        logger.info('%s (%s) requested', ip, mac)
+        logger.debug('%s (%s) requested', ip, mac)
         db_conn.commit()
     else:
         # First time we've seen a request for this IP.
@@ -187,9 +195,15 @@ def ip_request(ip, mac):
         logger.info('%s (%s) requested, first time seeing', ip, mac)
         db_conn.commit()
 
-# Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >15 minutes.
+# Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips():
-    stale = datetime.datetime.now() - datetime.timedelta(minutes=15)
+    if config.has_section('Listen') and config.has_option('Listen', 'active_timeout'):
+        active_timeout = config.getint('Listen', 'active_timeout')
+        logger.debug('Listen: setting active_timeout to %d', active_timeout)
+    else:
+        active_timeout = 60 * 20 # default to 20 minutes
+        logger.debug('Listen: defaulting active_timeout to %d', active_timeout)
+    stale = datetime.datetime.now() - datetime.timedelta(seconds=active_timeout)
     logger.debug("SELECT mac, ip FROM seen WHERE active = 1 AND lastSeen < '%s'", stale)
     db_cursor.execute('SELECT mac, ip FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
     rows = db_cursor.fetchall()
@@ -270,7 +284,7 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, clean_shutdown)
 
     try:
-        db_conn = sqlite3.connect(db_filename)
+        db_conn = sqlite3.connect(db_filename, detect_types=sqlite3.PARSE_DECLTYPES)
     except:
         logger.critical("failed to open or create %s (as user %s), exiting", db_filename, whoami())
         parent_conn.send('ABORT')
@@ -295,4 +309,6 @@ if __name__ == '__main__':
           ip_seen(src_ip, src_mac)
           ip_request(dst_ip, dst_mac)
       elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+          ip_seen(src_ip, src_mac)
+          ip_seen(dst_ip, dst_mac)
           logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
