@@ -143,12 +143,14 @@ def ip_seen(ip, mac):
     if exists:
         # Update:
         if active or not lastSeen:
-            logger.debug("UPDATE seen set mac='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, ip)
-            db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, active=? WHERE ip=?', (mac, now, 1, ip))
             if lastSeen:
                 logger.debug('%s (%s) is active', ip, mac)
+                logger.debug("UPDATE seen set mac='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, ip)
+                db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, active=? WHERE ip=?', (mac, now, 1, ip))
             else:
                 logger.info('%s (%s) is active, first time seeing', ip, mac)
+                logger.debug("UPDATE seen set mac='%s', firstSeen='%s', firstSeenRecent='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, now, now, ip)
+                db_cursor.execute('UPDATE seen set mac=?, firstSeen=?, firstSeenRecent=?, lastSeen=?, active=? WHERE ip=?', (mac, now, now, now, 1, ip))
         else:
             timeSince = datetime.datetime.now() - lastSeen
             # First time we've seen IP since it was stale.
@@ -204,12 +206,16 @@ def detect_stale_ips():
         active_timeout = 60 * 20 # default to 20 minutes
         logger.debug('Listen: defaulting active_timeout to %d', active_timeout)
     stale = datetime.datetime.now() - datetime.timedelta(seconds=active_timeout)
-    logger.debug("SELECT mac, ip FROM seen WHERE active = 1 AND lastSeen < '%s'", stale)
-    db_cursor.execute('SELECT mac, ip FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
+    logger.debug("SELECT mac, ip, firstSeenRecent, lastSeen FROM seen WHERE active = 1 AND lastSeen < '%s'", stale)
+    db_cursor.execute('SELECT mac, ip, firstSeenRecent, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
     rows = db_cursor.fetchall()
     commit = 0
     for row in rows:
-        logger.info("%s [%s] is no longer active", row[1], row[0])
+        if (row[2] and row[3]):
+            timeActive = row[3] - row[2]
+        else:
+            timeActive = 'unknown'
+        logger.info("%s [%s] is no longer active (was active for %s)", row[1], row[0], timeActive)
         logger.debug("UPDATE seen SET active = 0 WHERE mac = '%s' AND ip = '%s'", row[0], row[1])
         db_cursor.execute('UPDATE seen SET active = 0 WHERE mac=? AND ip=?', (row[0], row[1]))
         commit = 1
@@ -312,3 +318,16 @@ if __name__ == '__main__':
           ip_seen(src_ip, src_mac)
           ip_seen(dst_ip, dst_mac)
           logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+
+###
+###
+### @TODO
+###
+### # MAC lookups:
+###     https://regauth.standards.ieee.org/standards-ra-web/pub/view.html#registries
+###     https://macvendors.com
+###
+### # Validate IP addresses:
+###     https://en.wikipedia.org/wiki/Reserved_IP_addresses
+###
+###
