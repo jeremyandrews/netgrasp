@@ -11,8 +11,16 @@ import struct
 import socket
 import sqlite3
 import datetime
+from email.utils import parseaddr
 
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
+
+EVENT_REQUESTED_FIRST   = 10
+EVENT_REQUESTED         = 11
+EVENT_SEEN_FIRST        = 15
+EVENT_SEEN_FIRST_RECENT = 16
+EVENT_SEEN              = 17
+EVENT_STALE             = 20
 
 def wiretap(child_conn):
     import sys
@@ -120,7 +128,7 @@ def create_database():
       )
     """)
     db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS notifications(
+      CREATE TABLE IF NOT EXISTS event(
         nid INTEGER PRIMARY KEY,
         mac TEXT,
         ip TEXT,
@@ -170,14 +178,17 @@ def ip_seen(ip, mac):
         # Update:
         if active or not lastSeen:
             if lastSeen:
+                log_event(ip, mac, EVENT_SEEN)
                 logger.debug('%s (%s) is active', ip, mac)
                 logger.debug("UPDATE seen set mac='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, ip)
                 db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, active=? WHERE ip=?', (mac, now, 1, ip))
             else:
+                log_event(ip, mac, EVENT_SEEN_FIRST)
                 logger.info('%s (%s) is active, first time seeing', ip, mac)
                 logger.debug("UPDATE seen set mac='%s', firstSeen='%s', firstSeenRecent='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, now, now, ip)
                 db_cursor.execute('UPDATE seen set mac=?, firstSeen=?, firstSeenRecent=?, lastSeen=?, active=? WHERE ip=?', (mac, now, now, now, 1, ip))
         else:
+            log_event(ip, mac, EVENT_SEEN_FIRST_RECENT)
             timeSince = datetime.datetime.now() - lastSeen
             # First time we've seen IP since it was stale.
             logger.debug("UPDATE seen set mac='%s', firstSeenRecent='%s', lastSeen='%s', active=1 WHERE ip='%s'", mac, now, now, ip)
@@ -186,6 +197,7 @@ def ip_seen(ip, mac):
         db_conn.commit()
     else:
         # First time we've seen this IP.
+        log_event(ip, mac, EVENT_SEEN_FIRST)
         logger.debug("INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES('%s', '%s', '%s', '%s', '%s', %d, %d)", mac, ip, now, now, now, 1, ip_is_mine(ip))
         db_cursor.execute('INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES(?, ?, ?, ?, ?, ?, ?)', (mac, ip, now, now, now, 1, ip_is_mine(ip)))
         logger.info('%s (%s) is active, first time seeing', ip, mac)
@@ -207,21 +219,28 @@ def ip_request(ip, mac):
             db_cursor.execute('SELECT mac FROM seen WHERE ip=?', (ip,))
             rows = db_cursor.fetchall()
             if len(rows):
-              exists = True
-              mac = rows[0][0]
+                exists = True
+                mac = rows[0][0]
 
     if exists:
         # Update:
+        log_event(ip, mac, EVENT_REQUESTED)
         logger.debug("UPDATE seen set lastRequested='%s' WHERE ip='%s' AND mac='%s'", now, ip, mac)
         db_cursor.execute('UPDATE seen set lastRequested=? WHERE ip=? AND mac=?', (now, ip, mac))
         logger.debug('%s (%s) requested', ip, mac)
         db_conn.commit()
     else:
         # First time we've seen a request for this IP.
+        log_event(ip, mac, EVENT_REQUESTED_FIRST)
         logger.debug("INSERT INTO seen (mac, ip, lastRequested, active, self) VALUES('%s', '%s', '%s', 0, %d)", mac, ip, now, ip_is_mine(ip))
         db_cursor.execute("INSERT INTO seen (mac, ip, lastRequested, active, self) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, ip_is_mine(ip)))
         logger.info('%s (%s) requested, first time seeing', ip, mac)
         db_conn.commit()
+
+def log_event(ip, mac, event):
+    now = datetime.datetime.now()
+    logger.debug("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES('%s', '%s', '%s', '%s', %d)", mac, ip, now, 0, event)
+    db_cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)', (mac, ip, now, 0, event))
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips():
@@ -235,6 +254,7 @@ def detect_stale_ips():
             timeActive = row[3] - row[2]
         else:
             timeActive = 'unknown'
+        log_event(row[1], row[0], EVENT_STALE)
         logger.info("%s [%s] is no longer active (was active for %s)", row[1], row[0], timeActive)
         logger.debug("UPDATE seen SET active = 0 WHERE mac = '%s' AND ip = '%s'", row[0], row[1])
         db_cursor.execute('UPDATE seen SET active = 0 WHERE mac=? AND ip=?', (row[0], row[1]))
@@ -336,6 +356,43 @@ if __name__ == '__main__':
         active_timeout = 60 * 20 # default to 20 minutes
         logger.debug('Listen: defaulting active_timeout to %d', active_timeout)
 
+    if config.has_section('Email'):
+        if config.has_option('Email', 'to'):
+            # @TODO: Cleanup spaces after commas
+            email_to = config.get('Email', 'to').split(',')
+            valid = True
+            for email in email_to:
+                # Very simplistic email address validation.
+                if not '@' in parseaddr(email)[1]:
+                    valid = False
+                    logger.warn('Email: invalid email to address (%s), email disabled', email)
+            if not valid:
+                email_to = False
+
+        if config.has_option('Email', 'from'):
+            email_from = config.get('Email', 'from')
+            # Very simplistic email address validation.
+            if not '@' in parseaddr(email_from)[1]:
+                logger.info('Email: invalid email from address (%s), emails disabled', email_from)
+                email_from = False
+        if config.has_option('Email', 'smtp_hostname'):
+            email_hostname = config.get('Email', 'smtp_hostname')
+        if config.has_option('Email', 'smtp_username'):
+            email_username = config.get('Email', 'smtp_username')
+        if config.has_option('Email', 'smtp_password'):
+            email_password = config.get('Email', 'smtp_password')
+        # @TODO validate coonfigured alerts and digests
+        if config.has_option('Email', 'alerts'):
+            alerts = config.get('Email', 'alerts').split(',')
+        if config.has_option('Email', 'digests'):
+            digests = config.get('Email', 'digests').split(',')
+
+    if email_to and email_from and email_hostname and email_username and email_password:
+        if alerts:
+            logger.info('Sending alerts %s to %s from %s', alerts, email_to, email_from)
+        if digests:
+            logger.info('Sending digests %s to %s from %s', digests, email_to, email_from)
+
     import dpkt
 
     # loop forever, listening for ARP packets ...
@@ -367,7 +424,8 @@ if __name__ == '__main__':
 ###     https://en.wikipedia.org/wiki/Reserved_IP_addresses
 ###
 ### # Report on anomolies
-###      - MAC showing up multiple times, etc
+###      - MAC showing up multiple times
+###      - destination/source IP of 0.0.0.0
 ###
 ### # Support listening on multiple interfaces
 ###
