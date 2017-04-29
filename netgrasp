@@ -294,7 +294,7 @@ def send_email_alerts():
             db_cursor.execute('SELECT DISTINCT(dst_ip), dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
             results = db_cursor.fetchall()
             if results:
-                body += """\nIn the last day, talked to:"""
+                body += """\nIn the last day, this device talked to:"""
             for peer in results:
                 body += """\n - %s""" % (peer[0])
             message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
