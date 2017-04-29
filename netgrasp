@@ -9,7 +9,6 @@ import logging
 import pwd
 import struct
 import socket
-import sqlite3
 import datetime
 from email.utils import parseaddr
 
@@ -357,6 +356,12 @@ if __name__ == '__main__':
     if os.getuid() != 0:
         logger.critical("netgrasp must be run as root, exiting")
         sys.exit('ERROR: Netgrasp must be run as root.')
+
+    try:
+        import sqlite3
+    except:
+        logger.critical("failed to import sqlite3, try: 'pip install sqlite3', exiting")
+        sys.exit("ERROR: Failed to import sqlite3, try: 'pip install sqlite3'")
 
     default_uid = 1 # typically daemon user
     default_gid = 1 # typically daemon group
