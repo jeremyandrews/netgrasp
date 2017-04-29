@@ -134,6 +134,15 @@ def create_database():
         event TEXT
       )
     """)
+    db_cursor.execute("""
+      CREATE TABLE IF NOT EXISTS info(
+        iid INTEGER PRIMARY KEY,
+        mac TEXT,
+        vendor TEXT,
+        hostname TEXT,
+        customname TEXT
+      )
+    """)
     db_conn.commit()
 
 def clean_shutdown(signal, frame):
@@ -264,6 +273,7 @@ def detect_stale_ips():
 
 def send_email_alerts():
     import smtplib
+    day = datetime.datetime.now() - datetime.timedelta(days=1)
     logger.debug('SELECT eid, mac, ip, timestamp, event FROM event WHERE NOT (processed & %d)', PROCESSED_ALERT);
     # @TODO, use variable: 1 == PROCESSED_ALERT
     db_cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)');
@@ -275,12 +285,18 @@ def send_email_alerts():
         db_cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (row[5] + 1, row[0]))
         # only send emails for configured events
         if row[4] in alerts:
-            logger.info('event %s [%d] in %s', row[4], row[0], alerts)
+            logger.info('event %s [%d] in %s, generating notification email', row[4], row[0], alerts)
             # get more information about this entry ...
-            db_cursor.execute('SELECT firstSeen, firstSeenRecent, lastSeen, lastRequested, active, self FROM seen WHERE mac=?', (row[1],))
+            db_cursor.execute('SELECT s.firstSeen, s.firstSeenRecent, s.lastSeen, s.lastRequested, s.active, s.self, i.vendor, i.hostname, i.customname FROM seen s LEFT JOIN info i ON s.mac = i.mac WHERE s.mac=?', (row[1],))
             info = db_cursor.fetchone()
             subject = """Netgrasp alert: %s""" % (row[4])
-            body = """IP %s [%s]\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[0], info[1], info[2], info[3], info[4], info[5])
+            body = """IP %s [%s]\n  Vendor: %s\n  Hostname: %s\n  Custom name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[0], info[1], info[2], info[3], info[4], info[5])
+            db_cursor.execute('SELECT DISTINCT(dst_ip), dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
+            results = db_cursor.fetchall()
+            if results:
+                body += """\nIn the last day, talked to:"""
+            for peer in results:
+                body += """\n - %s""" % (peer[0])
             message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
             try:
                 if email_ssl:
@@ -300,6 +316,39 @@ def send_email_alerts():
             logger.debug('event %s [%d] NOT in %s', row[4], row[0], alerts)
     if commit:
         db_conn.commit()
+
+def identify_macs():
+    import re
+    import httplib
+    db_cursor.execute('SELECT s.mac FROM seen s LEFT JOIN info i ON s.mac = i.mac WHERE s.active = 1 AND i.mac IS NULL')
+    rows = db_cursor.fetchall()
+    commit = 0
+    for row in rows:
+        commit = 1
+        raw_mac = row[0]
+        if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", raw_mac.lower()):
+            mac = raw_mac
+        else:
+            # @TODO support - instead of : in mac
+            mac = []
+            pieces = raw_mac.split(':')
+            for piece in pieces:
+                if len(piece) == 1:
+                    piece = '0'+piece
+                mac.append(piece)
+            mac = ":".join(mac)
+        logger.debug('Looking up vendor for [%s]', raw_mac)
+        http = httplib.HTTPConnection('api.macvendors.com', 80)
+        url = """/%s""" % mac
+        http.request("GET", url)
+        response = http.getresponse()
+        if response.status == 200 and response.reason == 'OK':
+            vendor = response.read()
+            logger.info('Identified [%s] as %s', raw_mac, vendor)
+            db_cursor.execute('INSERT INTO info (mac, vendor) VALUES (?, ?)', (raw_mac, vendor))
+        else:
+            logger.info('Failed identify vendor for [%s]', raw_mac)
+            db_cursor.execute("INSERT INTO info (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
 
 def send_email_digests():
     print 'digests'
@@ -447,6 +496,7 @@ if __name__ == '__main__':
 
     # loop forever, listening for ARP packets ...
     while True:
+      identify_macs()
       detect_stale_ips()
       send_email_alerts()
       packet = parent_conn.recv()
