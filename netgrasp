@@ -151,6 +151,11 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac):
       logger.debug("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES('%s', '%s', '%s', '%s', '%s')", src_mac, src_ip, dst_mac, dst_ip, now)
       db_cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, now))
 
+    # @TODO research and see if we should be treating this another way
+    if (src_ip == '0.0.0.0'):
+        logger.info('Ignoring IP source of 0.0.0.0');
+        return False
+
     exists = False
     logger.debug("SELECT active, lastSeen FROM seen WHERE ip = '%s' AND mac = '%s'", src_ip, src_mac)
     db_cursor.execute('SELECT active, lastSeen FROM seen WHERE ip=? AND mac=?', (src_ip, src_mac))
