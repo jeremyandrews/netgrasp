@@ -266,10 +266,14 @@ def send_email_alerts():
         commit = 1
         logger.debug('processing event %d for %s [%s] at %s', row[0], row[2], row[1], row[3])
         db_cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (row[5] + 1, row[0]))
+        # only send emails for configured events
         if row[4] in alerts:
             logger.info('event %s [%d] in %s', row[4], row[0], alerts)
-            subject = """Netgrasp alert: ip %s""" % (row[4])
-            body = """IP %s [%s]""" % (row[2], row[1])
+            # get more information about this entry ...
+            db_cursor.execute('SELECT firstSeen, firstSeenRecent, lastSeen, lastRequested, active, self FROM seen WHERE mac=?', (row[1],))
+            info = db_cursor.fetchone()
+            subject = """Netgrasp alert: %s""" % (row[4])
+            body = """IP %s [%s]\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[0], info[1], info[2], info[3], info[4], info[5])
             message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
             try:
                 if email_ssl:
@@ -452,8 +456,6 @@ if __name__ == '__main__':
           ip_seen(dst_ip, dst_mac)
           logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
 
-###
-###
 ### @TODO
 ###
 ### # MAC lookups:
