@@ -134,11 +134,18 @@ def create_database():
       )
     """)
     db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS info(
-        iid INTEGER PRIMARY KEY,
+      CREATE TABLE IF NOT EXISTS vendor(
+        vid INTEGER PRIMARY KEY,
+        mac TEXT,
+        vendor TEXT,
+        customname TEXT
+      )
+    """)
+    db_cursor.execute("""
+      CREATE TABLE IF NOT EXISTS host(
+        hid INTEGER PRIMARY KEY,
         mac TEXT,
         ip TEXT,
-        vendor TEXT,
         hostname TEXT,
         customname TEXT
       )
@@ -287,10 +294,10 @@ def send_email_alerts():
         if row[4] in alerts:
             logger.info('event %s [%d] in %s, generating notification email', row[4], row[0], alerts)
             # get more information about this entry ...
-            db_cursor.execute('SELECT s.firstSeen, s.firstSeenRecent, s.lastSeen, s.lastRequested, s.active, s.self, i.vendor, i.hostname, i.customname FROM seen s LEFT JOIN info i ON s.mac = i.mac WHERE s.mac=?', (row[1],))
+            db_cursor.execute('SELECT s.firstSeen, s.firstSeenRecent, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=?', (row[1], row[2]))
             info = db_cursor.fetchone()
             subject = """Netgrasp alert: %s""" % (row[4])
-            body = """IP %s [%s]\n  Vendor: %s\n  Hostname: %s\n  Custom name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[0], info[1], info[2], info[3], info[4], info[5])
+            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], info[0], info[1], info[2], info[3], info[4], info[5])
             db_cursor.execute('SELECT DISTINCT(dst_ip), dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
             results = db_cursor.fetchall()
             if results:
@@ -320,7 +327,7 @@ def send_email_alerts():
 def identify_macs():
     import re
     import httplib
-    db_cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN info i ON s.mac = i.mac WHERE s.active = 1 AND i.mac IS NULL')
+    db_cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL')
     rows = db_cursor.fetchall()
     commit = 0
     for row in rows:
@@ -345,11 +352,11 @@ def identify_macs():
         if response.status == 200 and response.reason == 'OK':
             vendor = response.read()
             logger.info('Identified %s [%s] as %s', row[1], raw_mac, vendor)
-            db_cursor.execute('INSERT INTO info (mac, ip, vendor) VALUES (?, ?, ?)', (raw_mac, row[1], vendor))
+            db_cursor.execute('INSERT INTO vendor (mac, vendor) VALUES (?, ?)', (raw_mac, vendor))
         else:
             logger.info('Failed identify vendor for [%s]', raw_mac)
-            db_cursor.execute("INSERT INTO info (mac, ip, vendor) VALUES (?, ?, 'unknown')", (raw_mac, row[1]))
-    db_cursor.execute('SELECT mac, ip FROM info WHERE hostname IS NULL')
+            db_cursor.execute("INSERT INTO info (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
+    db_cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL')
     rows = db_cursor.fetchall()
     for row in rows:
         commit = 1
@@ -359,7 +366,7 @@ def identify_macs():
         except:
             hostname = ['unknown']
         logger.debug('hostname: %s', hostname)
-        db_cursor.execute('UPDATE info SET hostname=? WHERE mac=? AND ip=?', (hostname[0], row[0], row[1]))
+        db_cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (row[0], row[1], hostname[0]))
 
     if commit:
         db_conn.commit()
