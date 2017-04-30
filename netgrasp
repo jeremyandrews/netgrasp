@@ -359,7 +359,7 @@ def identify_macs():
         except:
             hostname = 'unknown'
         logger.info('hostname: %s', hostname)
-        db_cursor.execute('UPDATE info SET hostname=? WHERE mac=?', (hostname, row[0],))
+        db_cursor.execute('UPDATE info SET hostname=? WHERE mac=?', (hostname, row[0]))
 
     if commit:
         db_conn.commit()
