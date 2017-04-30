@@ -336,9 +336,10 @@ def identify_macs():
         if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", raw_mac.lower()):
             mac = raw_mac
         else:
-            # @TODO support - instead of : in mac
             mac = []
             pieces = raw_mac.split(':')
+            if not pieces:
+                pieces = row_mac.split('-')
             for piece in pieces:
                 if len(piece) == 1:
                     piece = '0'+piece
