@@ -348,6 +348,21 @@ def identify_macs():
         else:
             logger.info('Failed identify vendor for [%s]', raw_mac)
             db_cursor.execute("INSERT INTO info (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
+    # @TODO Handle mac's associated with multiple ips -- for now we just assume the first seen ip
+    db_cursor.execute('SELECT i.mac, s.ip FROM info i LEFT JOIN seen s ON i.mac = s.mac WHERE i.hostname IS NULL')
+    rows = db_cursor.fetchall()
+    for row in rows:
+        commit = 1
+        logger.info('requesting gethostbyaddr for %s [%s]', row[1], row[0])
+        try:
+            hostname = socket.gethostbyaddr(row[1])
+        except:
+            hostname = 'unknown'
+        logger.info('hostname: %s', hostname)
+        db_cursor.execute('UPDATE info SET hostname=? WHERE mac=?', (hostname, row[0],))
+
+    if commit:
+        db_conn.commit()
 
 def send_email_digests():
     print 'digests'
