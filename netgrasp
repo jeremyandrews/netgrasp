@@ -137,6 +137,7 @@ def create_database():
       CREATE TABLE IF NOT EXISTS info(
         iid INTEGER PRIMARY KEY,
         mac TEXT,
+        ip TEXT,
         vendor TEXT,
         hostname TEXT,
         customname TEXT
@@ -319,7 +320,7 @@ def send_email_alerts():
 def identify_macs():
     import re
     import httplib
-    db_cursor.execute('SELECT s.mac FROM seen s LEFT JOIN info i ON s.mac = i.mac WHERE s.active = 1 AND i.mac IS NULL')
+    db_cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN info i ON s.mac = i.mac WHERE s.active = 1 AND i.mac IS NULL')
     rows = db_cursor.fetchall()
     commit = 0
     for row in rows:
@@ -336,30 +337,29 @@ def identify_macs():
                     piece = '0'+piece
                 mac.append(piece)
             mac = ":".join(mac)
-        logger.debug('Looking up vendor for [%s]', raw_mac)
+        logger.debug('Looking up vendor for %s [%s]', row[1], raw_mac)
         http = httplib.HTTPConnection('api.macvendors.com', 80)
         url = """/%s""" % mac
         http.request("GET", url)
         response = http.getresponse()
         if response.status == 200 and response.reason == 'OK':
             vendor = response.read()
-            logger.info('Identified [%s] as %s', raw_mac, vendor)
-            db_cursor.execute('INSERT INTO info (mac, vendor) VALUES (?, ?)', (raw_mac, vendor))
+            logger.info('Identified %s [%s] as %s', row[1], raw_mac, vendor)
+            db_cursor.execute('INSERT INTO info (mac, ip, vendor) VALUES (?, ?, ?)', (raw_mac, row[1], vendor))
         else:
             logger.info('Failed identify vendor for [%s]', raw_mac)
-            db_cursor.execute("INSERT INTO info (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
-    # @TODO Handle mac's associated with multiple ips -- for now we just assume the first seen ip
-    db_cursor.execute('SELECT i.mac, s.ip FROM info i LEFT JOIN seen s ON i.mac = s.mac WHERE i.hostname IS NULL')
+            db_cursor.execute("INSERT INTO info (mac, ip, vendor) VALUES (?, ?, 'unknown')", (raw_mac, row[1]))
+    db_cursor.execute('SELECT mac, ip FROM info WHERE hostname IS NULL')
     rows = db_cursor.fetchall()
     for row in rows:
         commit = 1
-        logger.info('requesting gethostbyaddr for %s [%s]', row[1], row[0])
+        logger.debug('requesting gethostbyaddr for %s [%s]', row[1], row[0])
         try:
             hostname = socket.gethostbyaddr(row[1])
         except:
-            hostname = 'unknown'
-        logger.info('hostname: %s', hostname)
-        db_cursor.execute('UPDATE info SET hostname=? WHERE mac=?', (hostname[0], row[0]))
+            hostname = ['unknown']
+        logger.debug('hostname: %s', hostname)
+        db_cursor.execute('UPDATE info SET hostname=? WHERE mac=? AND ip=?', (hostname[0], row[0], row[1]))
 
     if commit:
         db_conn.commit()
