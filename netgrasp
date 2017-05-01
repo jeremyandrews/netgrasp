@@ -21,8 +21,9 @@ EVENT_SEEN_FIRST_RECENT = 'first_seen_recently'
 EVENT_SEEN              = 'seen'
 EVENT_STALE             = 'stale'
 
-PROCESSED_ALERT  = 1
-PROCESSED_DIGEST = 3
+PROCESSED_ALERT         = 1
+PROCESSED_DAILY_DIGEST  = 2
+PROCESSED_WEEKLY_DIGEST = 4
 
 def wiretap(child_conn):
     import sys
@@ -93,7 +94,26 @@ def whoami():
     whoami = pwd.getpwuid(os.getuid())
     return whoami[0]
 
+def set_state(key, value):
+    logger.debug('Set key[%s] to value[%s]', key, value)
+    db_cursor.execute('INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)', (key, value));
+
+def get_state(key, default_value):
+    db_cursor.execute('SELECT value FROM state WHERE key=?', (key,));
+    value = db_cursor.fetchone();
+    if value:
+        return value[0]
+    else:
+        return default_value
+
 def create_database():
+    db_cursor.execute("""
+      CREATE TABLE IF NOT EXISTS state(
+        id INTEGER PRIMARY KEY,
+        key VARCHAR UNIQUE,
+        value TEXT
+      )
+    """)
     db_cursor.execute("""
       CREATE TABLE IF NOT EXISTS seen(
         sid INTEGER PRIMARY KEY,
@@ -116,6 +136,7 @@ def create_database():
         src_ip TEXT,
         dst_mac TEXT,
         dst_ip TEXT,
+        request NUMERIC,
         interface TEXT,
         network TEXT,
         timestamp TIMESTAMP
@@ -160,12 +181,12 @@ def clean_shutdown(signal, frame):
 def ip_is_mine(ip):
     return (ip == socket.gethostbyname(socket.gethostname()))
 
-def ip_seen(src_ip, src_mac, dst_ip, dst_mac):
+def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     now = datetime.datetime.now()
 
     if arplog:
-      logger.debug("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES('%s', '%s', '%s', '%s', '%s')", src_mac, src_ip, dst_mac, dst_ip, now)
-      db_cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, now))
+      logger.debug("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES('%s', '%s', '%s', '%s', '%d', '%s')", src_mac, src_ip, dst_mac, dst_ip, request, now)
+      db_cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, request, now))
 
     # @TODO research and see if we should be treating this another way
     if (src_ip == '0.0.0.0'):
@@ -298,7 +319,7 @@ def send_email_alerts():
             info = db_cursor.fetchone()
             subject = """Netgrasp alert: %s""" % (row[4])
             body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], info[0], info[1], info[2], info[3], info[4], info[5])
-            db_cursor.execute('SELECT DISTINCT(dst_ip), dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
+            db_cursor.execute('SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
             results = db_cursor.fetchall()
             if results:
                 body += """\nIn the last day, this device talked to:"""
@@ -373,7 +394,67 @@ def identify_macs():
         db_conn.commit()
 
 def send_email_digests():
-    print 'digests'
+    import smtplib
+    if 'daily' in digests:
+        now = datetime.datetime.now()
+        day = now - datetime.timedelta(days=1)
+        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (day, now))
+        requested = db_cursor.fetchall()
+        db_cursor.execute("SELECT DISTINCT e.mac, e.ip, v.vendor, v.customname, h.hostname, h.customname FROM event e LEFT JOIN vendor v ON e.mac = v.mac LEFT JOIN host h ON e.mac = h.mac AND e.ip = h.ip WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (day, now))
+        seen = db_cursor.fetchall()
+
+        subject = "Netgrasp daily digest"
+        body = """In the past 24 hours, %d IPs were active:""" % (len(seen))
+        noisy = []
+        for ip in seen:
+            db_cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?', (ip[1], day, now))
+            requests = db_cursor.fetchone()
+            if (requests[0] > 10):
+                noisy.append((ip[0], ip[1], requests[0], ip[2], ip[3], ip[4], ip[5]))
+            if ip[5]:
+                body += """\n - %s (%s)""" % (ip[1], ip[5])
+            elif ip[4] and (ip[4] != 'unknown'):
+                body += """\n - %s (%s)""" % (ip[1], ip[4])
+            elif ip[3]:
+                body += """\n - %s (%s)""" % (ip[1], ip[3])
+            elif ip[2]:
+                body += """\n - %s (%s)""" % (ip[1], ip[2])
+            else:
+                body += """\n - %s [%s]""" % (ip[1], ip[0])
+
+        body += """\n\n%d unique IPs requested.""" % (len(requested),)
+
+        if noisy:
+            body += """\n\nThe following devices requested 10 or more IPs on the network:"""
+            for noise in noisy:
+                body += """\n - %s requested %d IP addresses""" % (noise[1], noise[2])
+                if (noise[2] > 50):
+                    body += " (network scan?)"
+
+        db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=?', (day, now))
+        rows = db_cursor.fetchall()
+        for row in rows:
+            db_cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + 2, row[0]))
+
+        message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
+        try:
+            if email_ssl:
+                server = smtplib.SMTP(email_hostname, email_port)
+                server.ehlo()
+                server.starttls()
+            else:
+                server = smtplib.SMTP_SSL(email_hostname, email_port)
+                server.ehlo()
+            server.login(email_username, email_password)
+            server.sendmail(email_from, email_to, message)
+            server.close()
+
+        except:
+            logger.warning('Failed to send email.')
+
+    if 'weekly' in alerts:
+        week = datetime.datetime.now() - datetime.timedelta(weeks=1)
+        db_cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 4) AND timestamp>=?', (week,));
 
 if __name__ == '__main__':
     if os.getuid() != 0:
@@ -524,21 +605,31 @@ if __name__ == '__main__':
 
     # loop forever, listening for ARP packets ...
     while True:
-      identify_macs()
-      detect_stale_ips()
-      send_email_alerts()
-      packet = parent_conn.recv()
-      src_ip = socket.inet_ntoa(packet.data.spa)
-      src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
-      dst_ip = socket.inet_ntoa(packet.data.tpa)
-      dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
-      if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-          logger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
-          ip_seen(src_ip, src_mac, dst_ip, dst_mac)
-          ip_request(dst_ip, dst_mac)
-      elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-          ip_seen(src_ip, src_mac, dst_ip, dst_mac)
-          logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+        identify_macs()
+        detect_stale_ips()
+        send_email_alerts()
+        daily_digest_timestamp = get_state('daily_digest_timestamp', '')
+        if daily_digest_timestamp:
+            daily_digest_timestamp = datetime.datetime.strptime(daily_digest_timestamp, "%Y-%m-%d %H:%M:%S.%f")
+        else:
+            daily_digest_timestamp = datetime.datetime.now() + datetime.timedelta(days=1)
+            set_state('daily_digest_timestamp', daily_digest_timestamp)
+        if datetime.datetime.now() >= daily_digest_timestamp:
+            daily_digest_timestamp = datetime.datetime.now() + datetime.timedelta(days=1)
+            set_state('daily_digest_timestamp', daily_digest_timestamp)
+            send_email_digests()
+        packet = parent_conn.recv()
+        src_ip = socket.inet_ntoa(packet.data.spa)
+        src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
+        dst_ip = socket.inet_ntoa(packet.data.tpa)
+        dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
+        if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
+            logger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+            ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
+            ip_request(dst_ip, dst_mac)
+        elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+            ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
+            logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
 
 ### @TODO
 ###
