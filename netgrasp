@@ -324,7 +324,7 @@ def send_email_alerts():
             if results:
                 body += """\nIn the last day, this device talked to:"""
             for peer in results:
-                body += """\n - %s""" % (peer[0])
+                body += """\n - %s (%s)""" % (peer[0], name_ip(row[1], row[2]))
             message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
             try:
                 if email_ssl:
@@ -393,6 +393,23 @@ def identify_macs():
     if commit:
         db_conn.commit()
 
+def name_ip(mac, ip):
+    logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s' AND h.mac='%s'", ip,mac)
+    db_cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip,mac))
+    detail = db_cursor.fetchone()
+    if not detail:
+        return detail
+    if detail[2]:
+        return detail[2]
+    elif detail[3] and (detail[3] != 'unknown'):
+        return detail[3]
+    elif detail[4]:
+        return detail[4]
+    elif detail[5]:
+        return """Unidentified device by %s""" % (detail[5])
+    else:
+        return detail[0]
+
 def send_email_digests():
     import smtplib
     if 'daily' in digests:
@@ -400,7 +417,7 @@ def send_email_digests():
         day = now - datetime.timedelta(days=1)
         db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (day, now))
         requested = db_cursor.fetchall()
-        db_cursor.execute("SELECT DISTINCT e.mac, e.ip, v.vendor, v.customname, h.hostname, h.customname FROM event e LEFT JOIN vendor v ON e.mac = v.mac LEFT JOIN host h ON e.mac = h.mac AND e.ip = h.ip WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (day, now))
+        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (day, now))
         seen = db_cursor.fetchall()
 
         subject = "Netgrasp daily digest"
@@ -410,24 +427,15 @@ def send_email_digests():
             db_cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?', (ip[1], day, now))
             requests = db_cursor.fetchone()
             if (requests[0] > 10):
-                noisy.append((ip[0], ip[1], requests[0], ip[2], ip[3], ip[4], ip[5]))
-            if ip[5]:
-                body += """\n - %s (%s)""" % (ip[1], ip[5])
-            elif ip[4] and (ip[4] != 'unknown'):
-                body += """\n - %s (%s)""" % (ip[1], ip[4])
-            elif ip[3]:
-                body += """\n - %s (%s)""" % (ip[1], ip[3])
-            elif ip[2]:
-                body += """\n - %s (%s)""" % (ip[1], ip[2])
-            else:
-                body += """\n - %s [%s]""" % (ip[1], ip[0])
+                noisy.append((ip[0], ip[1], requests[0], name_ip(ip[0], ip[1])))
+            body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
 
         body += """\n\n%d unique IPs requested.""" % (len(requested),)
 
         if noisy:
             body += """\n\nThe following devices requested 10 or more IPs on the network:"""
             for noise in noisy:
-                body += """\n - %s requested %d IP addresses""" % (noise[1], noise[2])
+                body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], name_ip(noise[0], noise[1]), noise[2])
                 if (noise[2] > 50):
                     body += " (network scan?)"
 
