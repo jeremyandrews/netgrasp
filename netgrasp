@@ -405,7 +405,7 @@ def send_email_alerts():
             if results:
                 body += """\nIn the last day, this device talked to:"""
             for peer in results:
-                body += """\n - %s (%s)""" % (peer[0], name_ip(row[1], row[2]))
+                body += """\n - %s (%s)""" % (peer[0], name_ip(peer[1], peer[0]))
             message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
             try:
                 if email_ssl:
@@ -477,8 +477,12 @@ def identify_macs():
         db_conn.commit()
 
 def name_ip(mac, ip):
-    logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s' AND h.mac='%s'", ip,mac)
-    db_cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip,mac))
+    if ('mac' == BROADCAST):
+        logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s'", ip)
+        db_cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip))
+    else:
+        logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s' AND h.mac='%s'", ip, mac)
+        db_cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
     detail = db_cursor.fetchone()
     if not detail:
         return detail
@@ -518,7 +522,7 @@ def send_email_digests():
         if noisy:
             body += """\n\nThe following devices requested 10 or more IPs on the network:"""
             for noise in noisy:
-                body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], name_ip(noise[0], noise[1]), noise[2])
+                body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], name_ip(seen[0], seen[1]), noise[2])
                 if (noise[2] > 50):
                     body += " (network scan?)"
 
