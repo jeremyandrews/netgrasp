@@ -547,12 +547,6 @@ def send_email_digests():
         if some_new:
             body+= "\n* = not active in the previous 24 hours"
 
-        if gone:
-            body += "\n\nThe following IPs were active the previous 24 hours:"
-            for ip in gone:
-                body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
-
-
         body += """\n\n%d unique IPs requested.""" % (len(requested),)
 
         if noisy:
@@ -561,6 +555,11 @@ def send_email_digests():
                 body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], noise[3], noise[2])
                 if (noise[2] > 50):
                     body += " (network scan?)"
+
+        if gone:
+            body += "\n\nThe following IPs were active the previous 24 hours:"
+            for ip in gone:
+                body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
 
         db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (day, now))
         rows = db_cursor.fetchall()
