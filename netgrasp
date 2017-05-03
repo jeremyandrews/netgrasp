@@ -106,6 +106,40 @@ def get_state(key, default_value):
     else:
         return default_value
 
+def pretty_date(time):
+    if not time:
+        return False
+    now = datetime.datetime.now()
+    diff = now - time
+    second_diff = diff.seconds
+    day_diff = diff.days
+
+    if day_diff < 0:
+        return ''
+
+    if day_diff == 0:
+        if second_diff < 10:
+            return "just now"
+        if second_diff < 60:
+            return str(second_diff) + " seconds ago"
+        if second_diff < 120:
+            return "a minute ago"
+        if second_diff < 3600:
+            return str(second_diff / 60) + " minutes ago"
+        if second_diff < 7200:
+            return "an hour ago"
+        if second_diff < 86400:
+            return str(second_diff / 3600) + " hours ago"
+    if day_diff == 1:
+        return "Yesterday"
+    if day_diff < 7:
+        return str(day_diff) + " days ago"
+    if day_diff < 31:
+        return str(day_diff / 7) + " weeks ago"
+    if day_diff < 365:
+        return str(day_diff / 30) + " months ago"
+    return str(day_diff / 365) + " years ago"
+
 def create_database():
     db_cursor.execute("""
       CREATE TABLE IF NOT EXISTS state(
@@ -122,9 +156,10 @@ def create_database():
         interface TEXT,
         network TEXT,
         firstSeen TIMESTAMP,
-        firstSeenRecent TIMESTAMP,
+        firstRequested TIMESTAMP,
         lastSeen TIMESTAMP,
         lastRequested TIMESTAMP,
+        counter NUMERIC,
         active NUMERIC,
         self NUMERIC
       )
@@ -181,6 +216,24 @@ def clean_shutdown(signal, frame):
 def ip_is_mine(ip):
     return (ip == socket.gethostbyname(socket.gethostname()))
 
+def first_seen(ip, mac):
+    logger.debug("SELECT firstSeen FROM seen WHERE ip = '%s' AND mac = '%s' ORDER BY firstSeen ASC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT firstSeen FROM seen WHERE ip=? AND mac=? ORDER BY firstSeen ASC LIMIT 1', (ip, mac))
+    active = db_cursor.fetchone()
+    if active:
+        return active[0]
+    else:
+        return False
+
+def first_requested(ip, mac):
+    logger.debug("SELECT firstRequested FROM seen WHERE ip = '%s' AND mac = '%s' ORDER BY firstRequested ASC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT firstRequested FROM seen WHERE ip=? AND mac=? ORDER BY firstRequested ASC LIMIT 1', (ip, mac))
+    active = db_cursor.fetchone()
+    if active:
+        return active[0]
+    else:
+        return False
+
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     now = datetime.datetime.now()
 
@@ -193,75 +246,78 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         logger.info('Ignoring IP source of 0.0.0.0');
         return False
 
-    exists = False
-    logger.debug("SELECT active, lastSeen FROM seen WHERE ip = '%s' AND mac = '%s'", src_ip, src_mac)
-    db_cursor.execute('SELECT active, lastSeen FROM seen WHERE ip=? AND mac=?', (src_ip, src_mac))
-    rows = db_cursor.fetchall()
-    if len(rows):
-        exists = True
-        active = rows[0][0]
-        lastSeen = rows[0][1]
+    lastSeen = False
+    lastRequested = False
+    counter = 0
+    logger.debug("SELECT lastSeen, lastRequested, counter FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", src_ip, src_mac)
+    db_cursor.execute('SELECT lastSeen, lastRequested, counter FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, src_mac))
+    active = db_cursor.fetchone()
+    if active:
+        lastSeen = active[0]
+        lastRequested = active[1]
+        counter = active[2]
     else:
         if (src_mac != BROADCAST):
-            logger.debug("SELECT active, lastSeen FROM seen WHERE ip = '%s' AND mac = '%s'", src_ip, BROADCAST)
-            db_cursor.execute('SELECT active, lastSeen FROM seen WHERE ip=? AND mac=?', (src_ip, BROADCAST))
-            rows = db_cursor.fetchall()
-            if len(rows):
-                exists = True
-                active = rows[0][0]
-                lastSeen = rows[0][1]
+            logger.debug("SELECT lastSeen, lastRequested, counter FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", src_ip, BROADCAST)
+            db_cursor.execute('SELECT lastSeen, lastRequested, counter FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, BROADCAST))
+            active = db_cursor.fetchone()
+            if active:
+                lastSeen = active[0]
+                lastRequested = active[1]
+                counter = active[2]
 
-    if exists:
-        # Update:
-        if active or not lastSeen:
-            if lastSeen:
-                log_event(src_ip, src_mac, EVENT_SEEN)
-                logger.debug('%s (%s) is active', src_ip, src_mac)
-                logger.debug("UPDATE seen set mac='%s', lastSeen='%s', active=1 WHERE ip='%s'", src_mac, now, src_ip)
-                db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, active=? WHERE ip=?', (src_mac, now, 1, src_ip))
-            else:
-                log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
-                logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
-                logger.debug("UPDATE seen set mac='%s', firstSeen='%s', firstSeenRecent='%s', lastSeen='%s', active=1 WHERE ip='%s'", src_mac, now, now, now, src_ip)
-                db_cursor.execute('UPDATE seen set mac=?, firstSeen=?, firstSeenRecent=?, lastSeen=?, active=? WHERE ip=?', (src_mac, now, now, now, 1, src_ip))
+    log_event(src_ip, src_mac, EVENT_SEEN)
+    if lastSeen or lastRequested:
+        if lastSeen:
+            # has been active recently
+            logger.debug('%s (%s) is active', src_ip, src_mac)
+            logger.debug("UPDATE seen set mac='%s', lastSeen='%s', counter=?, active=1 WHERE ip='%s'", src_mac, now, src_ip)
+            db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, counter=?, active=1 WHERE ip=?', (src_mac, now, counter + 1, src_ip))
         else:
-            log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-            timeSince = datetime.datetime.now() - lastSeen
-            # First time we've seen IP since it was stale.
-            logger.debug("UPDATE seen set mac='%s', firstSeenRecent='%s', lastSeen='%s', active=1 WHERE ip='%s'", src_mac, now, now, src_ip)
-            db_cursor.execute('UPDATE seen set mac=?, firstSeenRecent=?, lastSeen=?, active=? WHERE ip=?', (src_mac, now, now, 1, src_ip))
-            logger.info('%s (%s) is active again (after %s)', src_ip, src_mac, timeSince)
+            # has not been active recently, but was requested recently
+            if first_seen(src_ip, src_mac):
+                # First time we've seen IP since it was stale.
+                log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
+                timeSince = datetime.datetime.now() - lastSeen
+                logger.info('%s (%s) is active again (after %s)', src_ip, src_mac, timeSince)
+            else:
+                # First time we've actively seen this IP.
+                log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
+                logger.info('%s (%s) is active', src_ip, src_mac)
+
+            # @TODO properly handle multiple active occurences of the same IP
+            logger.debug("UPDATE seen set mac='%s', firstSeen='%s', lastSeen='%s', counter=%d, active=1, WHERE ip='%s'", src_mac, now, now, counter + 1, src_ip)
+            db_cursor.execute('UPDATE seen set mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE ip=?', (src_mac, now, now, counter + 1, src_ip))
         db_conn.commit()
     else:
         # First time we've seen this IP.
         log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
-        logger.debug("INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES('%s', '%s', '%s', '%s', '%s', %d, %d)", src_mac, src_ip, now, now, now, 1, ip_is_mine(src_ip))
-        db_cursor.execute('INSERT INTO seen (mac, ip, firstSeen, firstSeenRecent, lastSeen, active, self) VALUES(?, ?, ?, ?, ?, ?, ?)', (src_mac, src_ip, now, now, now, 1, ip_is_mine(src_ip)))
+        logger.debug("INSERT INTO seen (mac, ip, firstSeen, lastSeen, counter, active, self) VALUES('%s', '%s', '%s', '%s', 1, 1, %d)", src_mac, src_ip, now, now, ip_is_mine(src_ip))
+        db_cursor.execute('INSERT INTO seen (mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)', (src_mac, src_ip, now, now, ip_is_mine(src_ip)))
         logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
         db_conn.commit()
 
 def ip_request(ip, mac):
     now = datetime.datetime.now()
-    exists = False
 
-    logger.debug("SELECT active FROM seen WHERE ip = '%s' AND mac = '%s'", ip, mac)
-    db_cursor.execute('SELECT active FROM seen WHERE ip=? AND mac=?', (ip, mac))
-    rows = db_cursor.fetchall()
-    if len(rows):
-        exists = True
+    lastRequested = False
+    logger.debug("SELECT lastRequested FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", ip, mac)
+    db_cursor.execute('SELECT lastRequested FROM seen WHERE ip=? AND mac=? AND active=1', (ip, mac))
+    requested = db_cursor.fetchone()
+    if requested:
+        lastRequested = requested[0]
     else:
         if (mac == BROADCAST):
-            # Maybe we already have this ARP address
-            logger.debug("SELECT mac FROM seen WHERE ip = '%s'", ip)
-            db_cursor.execute('SELECT mac FROM seen WHERE ip=?', (ip,))
-            rows = db_cursor.fetchall()
-            if len(rows):
-                exists = True
-                mac = rows[0][0]
+            # Maybe we already have seen a request for this address
+            logger.debug("SELECT lastRequested FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", ip, BROADCAST)
+            db_cursor.execute('SELECT lastRequested FROM seen WHERE ip=? AND mac=? AND active=1', (ip, BROADCAST))
+            requested = db_cursor.fetchone()
+            if requested:
+                lastRequested = requested[0]
 
-    if exists:
+    log_event(ip, mac, EVENT_REQUESTED)
+    if lastRequested:
         # Update:
-        log_event(ip, mac, EVENT_REQUESTED)
         logger.debug("UPDATE seen set lastRequested='%s' WHERE ip='%s' AND mac='%s'", now, ip, mac)
         db_cursor.execute('UPDATE seen set lastRequested=? WHERE ip=? AND mac=?', (now, ip, mac))
         logger.debug('%s (%s) requested', ip, mac)
@@ -269,8 +325,8 @@ def ip_request(ip, mac):
     else:
         # First time we've seen a request for this IP.
         log_event(ip, mac, EVENT_REQUESTED_FIRST)
-        logger.debug("INSERT INTO seen (mac, ip, lastRequested, active, self) VALUES('%s', '%s', '%s', 0, %d)", mac, ip, now, ip_is_mine(ip))
-        db_cursor.execute("INSERT INTO seen (mac, ip, lastRequested, active, self) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, ip_is_mine(ip)))
+        logger.debug("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES('%s', '%s', '%s', '%s', 0, 1, %d)", mac, ip, now, now, ip_is_mine(ip))
+        db_cursor.execute("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)", (mac, ip, now, now, ip_is_mine(ip)))
         logger.info('%s (%s) requested, first time seeing', ip, mac)
         db_conn.commit()
 
@@ -282,8 +338,8 @@ def log_event(ip, mac, event):
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips():
     stale = datetime.datetime.now() - datetime.timedelta(seconds=active_timeout)
-    logger.debug("SELECT mac, ip, firstSeenRecent, lastSeen FROM seen WHERE active = 1 AND lastSeen < '%s'", stale)
-    db_cursor.execute('SELECT mac, ip, firstSeenRecent, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
+    logger.debug("SELECT mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < '%s'", stale)
+    db_cursor.execute('SELECT mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
     rows = db_cursor.fetchall()
     commit = 0
     for row in rows:
@@ -315,10 +371,12 @@ def send_email_alerts():
         if row[4] in alerts:
             logger.info('event %s [%d] in %s, generating notification email', row[4], row[0], alerts)
             # get more information about this entry ...
-            db_cursor.execute('SELECT s.firstSeen, s.firstSeenRecent, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=?', (row[1], row[2]))
+            db_cursor.execute('SELECT s.firstSeen, s.firstRequested, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=?', (row[1], row[2]))
             info = db_cursor.fetchone()
+            firstSeen = first_seen(row[2], row[1])
+            firstRequested = first_requested(row[2], row[1])
             subject = """Netgrasp alert: %s""" % (row[4])
-            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], info[0], info[1], info[2], info[3], info[4], info[5])
+            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  First requested: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(info[0]), pretty_date(info[2]), pretty_date(info[3]), pretty_date(firstRequested), info[4], info[5])
             db_cursor.execute('SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
             results = db_cursor.fetchall()
             if results:
@@ -348,9 +406,10 @@ def send_email_alerts():
 def identify_macs():
     import re
     import httplib
+    commit = 0
+
     db_cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL')
     rows = db_cursor.fetchall()
-    commit = 0
     for row in rows:
         commit = 1
         raw_mac = row[0]
@@ -377,7 +436,8 @@ def identify_macs():
             db_cursor.execute('INSERT INTO vendor (mac, vendor) VALUES (?, ?)', (raw_mac, vendor))
         else:
             logger.info('Failed identify vendor for [%s]', raw_mac)
-            db_cursor.execute("INSERT INTO info (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
+            db_cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
+
     db_cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL')
     rows = db_cursor.fetchall()
     for row in rows:
@@ -640,10 +700,6 @@ if __name__ == '__main__':
             logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
 
 ### @TODO
-###
-### # MAC lookups:
-###     https://regauth.standards.ieee.org/standards-ra-web/pub/view.html#registries
-###     https://macvendors.com
 ###
 ### # Validate IP addresses:
 ###     https://en.wikipedia.org/wiki/Reserved_IP_addresses
