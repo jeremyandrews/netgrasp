@@ -394,8 +394,12 @@ def send_email_alerts():
         if row[4] in alerts:
             logger.info('event %s [%d] in %s, generating notification email', row[4], row[0], alerts)
             # get more information about this entry ...
+            logger.debug("SELECT s.firstSeen, s.firstRequested, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac='%s' AND s.ip='%s'", row[1], row[2])
             db_cursor.execute('SELECT s.firstSeen, s.firstRequested, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=?', (row[1], row[2]))
             info = db_cursor.fetchone()
+            if not info:
+                logger.warning("Event for ip %s [%s] that we haven't seen", row[2], row[1])
+                return
             firstSeen = first_seen(row[2], row[1])
             firstRequested = first_requested(row[2], row[1])
             subject = """Netgrasp alert: %s""" % (row[4])
@@ -477,9 +481,9 @@ def identify_macs():
         db_conn.commit()
 
 def name_ip(mac, ip):
-    if ('mac' == BROADCAST):
+    if (mac == BROADCAST):
         logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s'", ip)
-        db_cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip))
+        db_cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
     else:
         logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s' AND h.mac='%s'", ip, mac)
         db_cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
