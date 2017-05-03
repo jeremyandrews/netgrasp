@@ -108,7 +108,7 @@ def get_state(key, default_value):
 
 def pretty_date(time):
     if not time:
-        return False
+        return ''
     now = datetime.datetime.now()
     diff = now - time
     second_diff = diff.seconds
@@ -225,6 +225,15 @@ def first_seen(ip, mac):
     else:
         return False
 
+def last_seen(ip, mac):
+    logger.debug("SELECT lastSeen FROM seen WHERE ip = '%s' AND mac = '%s' ORDER BY lastSeen DESC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT lastSeen FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (ip, mac))
+    active = db_cursor.fetchone()
+    if active:
+        return active[0]
+    else:
+        return False
+
 def first_requested(ip, mac):
     logger.debug("SELECT firstRequested FROM seen WHERE ip = '%s' AND mac = '%s' ORDER BY firstRequested ASC LIMIT 1", ip, mac)
     db_cursor.execute('SELECT firstRequested FROM seen WHERE ip=? AND mac=? ORDER BY firstRequested ASC LIMIT 1', (ip, mac))
@@ -290,8 +299,12 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
             if first_seen(src_ip, src_mac):
                 # First time we've seen IP since it was stale.
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-                timeSince = datetime.datetime.now() - lastSeen
-                logger.info('%s (%s) is active again (after %s)', src_ip, src_mac, timeSince)
+                lastSeen = last_seen(src_ip, src_mac)
+                if lastSeen:
+                    timeSince = datetime.datetime.now() - lastSeen
+                    logger.info('%s (%s) is active again (after %s)', src_ip, src_mac, timeSince)
+                else:
+                    logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", src_ip, src_mac, first_seen(src_ip, src_mac))
             else:
                 # First time we've actively seen this IP.
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
@@ -506,27 +519,46 @@ def send_email_digests():
     if 'daily' in digests:
         now = datetime.datetime.now()
         day = now - datetime.timedelta(days=1)
+        twodays = now - datetime.timedelta(days=2)
         db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (day, now))
         requested = db_cursor.fetchall()
         db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (day, now))
         seen = db_cursor.fetchall()
+        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (twodays, day))
+        yesterday = db_cursor.fetchall()
+
+        new = set(seen) - set(yesterday)
+        gone = set(yesterday) - set(seen)
 
         subject = "Netgrasp daily digest"
         body = """In the past 24 hours, %d IPs were active:""" % (len(seen))
         noisy = []
+        some_new = False
         for ip in seen:
             db_cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?', (ip[1], day, now))
             requests = db_cursor.fetchone()
             if (requests[0] > 10):
                 noisy.append((ip[0], ip[1], requests[0], name_ip(ip[0], ip[1])))
-            body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
+            if ip in new:
+                body += """\n - %s* (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
+                some_new = True
+            else:
+                body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
+        if some_new:
+            body+= "\n* = not active in the previous 24 hours"
+
+        if gone:
+            body += "\n\nThe following IPs were active the previous 24 hours:"
+            for ip in gone:
+                body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
+
 
         body += """\n\n%d unique IPs requested.""" % (len(requested),)
 
         if noisy:
             body += """\n\nThe following devices requested 10 or more IPs on the network:"""
             for noise in noisy:
-                body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], name_ip(seen[0], seen[1]), noise[2])
+                body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], noise[3], noise[2])
                 if (noise[2] > 50):
                     body += " (network scan?)"
 
