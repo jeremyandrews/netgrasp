@@ -524,7 +524,7 @@ def send_email_digests():
         requested = db_cursor.fetchall()
         db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (day, now))
         seen = db_cursor.fetchall()
-        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (twodays, day))
+        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (twodays, day))
         yesterday = db_cursor.fetchall()
 
         new = set(seen) - set(yesterday)
@@ -562,7 +562,7 @@ def send_email_digests():
                 if (noise[2] > 50):
                     body += " (network scan?)"
 
-        db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=?', (day, now))
+        db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (day, now))
         rows = db_cursor.fetchall()
         for row in rows:
             db_cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + 2, row[0]))
