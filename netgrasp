@@ -259,41 +259,45 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     lastSeen = False
     lastRequested = False
     counter = 0
-    logger.debug("SELECT active, lastSeen, lastRequested, counter FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", src_ip, src_mac)
-    db_cursor.execute('SELECT active, lastSeen, lastRequested, counter FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, src_mac))
+    sid = 0
+    logger.debug("SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", src_ip, src_mac)
+    db_cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, src_mac))
     result = db_cursor.fetchone()
     if result:
         active = result[0]
         lastSeen = result[1]
         lastRequested = result[2]
         counter = result[3]
+        sid = result[4]
     else:
         if (src_mac != BROADCAST):
-            logger.debug("SELECT active, lastSeen, lastRequested, counter FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", src_ip, BROADCAST)
-            db_cursor.execute('SELECT active, lastSeen, lastRequested, counter FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, BROADCAST))
+            logger.debug("SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", src_ip, BROADCAST)
+            db_cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, BROADCAST))
             result = db_cursor.fetchone()
             if result:
                 active = result[0]
                 lastSeen = result[1]
                 lastRequested = result[2]
                 counter = result[3]
+                sid = result[4]
         else:
-            logger.debug("SELECT active, lastSeen, lastRequested, counter FROM seen WHERE ip = '%s' AND active=1", src_ip)
-            db_cursor.execute('SELECT active, lastSeen, lastRequested, counter FROM seen WHERE ip=? AND active=1', (src_ip,))
+            logger.debug("SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip = '%s' AND active=1", src_ip)
+            db_cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND active=1', (src_ip,))
             result = db_cursor.fetchone()
             if result:
                 active = result[0]
                 lastSeen = result[1]
                 lastRequested = result[2]
                 counter = result[3]
+                sid = result[4]
 
     log_event(src_ip, src_mac, EVENT_SEEN)
     if active:
         if lastSeen:
             # has been active recently
             logger.debug('%s (%s) is active', src_ip, src_mac)
-            logger.debug("UPDATE seen set mac='%s', lastSeen='%s', counter=?, active=1 WHERE ip='%s'", src_mac, now, src_ip)
-            db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, counter=?, active=1 WHERE ip=?', (src_mac, now, counter + 1, src_ip))
+            logger.debug("UPDATE seen set mac='%s', lastSeen='%s', counter=?, active=1 WHERE ip=%d", src_mac, now, sid)
+            db_cursor.execute('UPDATE seen set mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_mac, now, counter + 1, sid))
         else:
             # has not been active recently, but was requested recently
             if first_seen(src_ip, src_mac):
@@ -311,8 +315,8 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 logger.info('%s (%s) is active', src_ip, src_mac)
 
             # @TODO properly handle multiple active occurences of the same IP
-            logger.debug("UPDATE seen set mac='%s', firstSeen='%s', lastSeen='%s', counter=%d, active=1, WHERE ip='%s'", src_mac, now, now, counter + 1, src_ip)
-            db_cursor.execute('UPDATE seen set mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE ip=?', (src_mac, now, now, counter + 1, src_ip))
+            logger.debug("UPDATE seen set mac='%s', firstSeen='%s', lastSeen='%s', counter=%d, active=1, WHERE sid=%d", src_mac, now, now, counter + 1, sid)
+            db_cursor.execute('UPDATE seen set mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_mac, now, now, counter + 1, sid))
         db_conn.commit()
     else:
         # First time we've seen this IP.
@@ -327,35 +331,38 @@ def ip_request(ip, mac):
 
     active = False
     lastRequested = False
-    logger.debug("SELECT active, lastRequested FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", ip, mac)
-    db_cursor.execute('SELECT active, lastRequested FROM seen WHERE ip=? AND mac=? AND active=1', (ip, mac))
+    logger.debug("SELECT active, lastRequested, sid FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", ip, mac)
+    db_cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, mac))
     requested = db_cursor.fetchone()
     if requested:
         active = requested[0]
         lastRequested = requested[1]
+        sid = requested[2]
     else:
         if (mac == BROADCAST):
             # Maybe we already have seen a request for this address
-            logger.debug("SELECT active, lastRequested FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", ip, BROADCAST)
-            db_cursor.execute('SELECT active, lastRequested FROM seen WHERE ip=? AND mac=? AND active=1', (ip, BROADCAST))
+            logger.debug("SELECT active, lastRequested, sid FROM seen WHERE ip = '%s' AND mac = '%s' AND active=1", ip, BROADCAST)
+            db_cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, BROADCAST))
             requested = db_cursor.fetchone()
             if requested:
                 active = requested[0]
                 lastRequested = requested[1]
+                sid = requested[2]
             else:
                 # Maybe the IP has been seen already
-                logger.debug("SELECT active, lastRequested FROM seen WHERE ip = '%s' AND active=1", ip)
-                db_cursor.execute('SELECT active, lastRequested FROM seen WHERE ip=? AND active=1', (ip,))
+                logger.debug("SELECT active, lastRequested, sid FROM seen WHERE ip = '%s' AND active=1", ip)
+                db_cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND active=1', (ip,))
                 requested = db_cursor.fetchone()
                 if requested:
                     active = requested[0]
                     lastRequested = requested[1]
+                    sid = requested[2]
 
     log_event(ip, mac, EVENT_REQUESTED)
     if active:
         # Update:
-        logger.debug("UPDATE seen set lastRequested='%s' WHERE ip='%s' AND mac='%s'", now, ip, mac)
-        db_cursor.execute('UPDATE seen set lastRequested=? WHERE ip=? AND mac=?', (now, ip, mac))
+        logger.debug("UPDATE seen set lastRequested='%s' WHERE sid = %d", now, sid)
+        db_cursor.execute('UPDATE seen set lastRequested=? WHERE sid=?', (now, sid))
         logger.debug('%s (%s) requested', ip, mac)
         db_conn.commit()
     else:
