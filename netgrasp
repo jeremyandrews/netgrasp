@@ -314,6 +314,13 @@ def ip_request(ip, mac):
             requested = db_cursor.fetchone()
             if requested:
                 lastRequested = requested[0]
+            else:
+                # Maybe the IP has been seen already
+                logger.debug("SELECT lastRequested FROM seen WHERE ip = '%s' AND active=1", ip)
+                db_cursor.execute('SELECT lastRequested FROM seen WHERE ip=? AND active=1', (ip,))
+                requested = db_cursor.fetchone()
+                if requested:
+                    lastRequested = requested[0]
 
     log_event(ip, mac, EVENT_REQUESTED)
     if lastRequested:
