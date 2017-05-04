@@ -99,3 +99,20 @@ For example:
 The following digest types are supported:
  - daily: a daily summary of network activity
  - weekly: not yet implemented, will be a weekly summary of network activity
+
+ROADMAP
+-------
+ - Add weekly digests
+ - Deliver alerts via Growl
+    o https://pythonhosted.org/gntp/
+    o https://pypi.python.org/pypi/Growl
+ - Alert on anomalies
+    o multiple IP's associated with a single MAC address
+    o multiple MAC addresses associated with a single IP address
+    o destination/source IP of 0.0.0.0, or other invalid IPs
+    o https://en.wikipedia.org/wiki/Reserved_IP_addresses)
+ - Support listening on multiple interfaces
+ - Add cross-platform UI for configuration, alerting, and ongoing network
+   monitoring
+    o https://kivy.org
+    o https://wiki.python.org/moin/GuiProgramming

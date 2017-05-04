@@ -790,18 +790,3 @@ if __name__ == '__main__':
         elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
             logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
-
-### @TODO
-###
-### # Validate IP addresses:
-###     https://en.wikipedia.org/wiki/Reserved_IP_addresses
-###
-### # Report on anomolies
-###      - MAC showing up multiple times
-###      - destination/source IP of 0.0.0.0
-###
-### # Support listening on multiple interfaces
-###
-### # Add cross-platform UI for monitoring network, configuring, and alerting
-###      - https://kivy.org
-###      - https://wiki.python.org/moin/GuiProgramming
