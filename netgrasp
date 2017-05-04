@@ -20,6 +20,7 @@ EVENT_SEEN_FIRST        = 'first_seen'
 EVENT_SEEN_FIRST_RECENT = 'first_seen_recently'
 EVENT_SEEN              = 'seen'
 EVENT_STALE             = 'stale'
+EVENT_SCAN              = 'network_scan'
 
 PROCESSED_ALERT         = 1
 PROCESSED_DAILY_DIGEST  = 2
@@ -398,6 +399,25 @@ def detect_stale_ips():
     if commit:
         db_conn.commit()
 
+def detect_netscans():
+    now = datetime.datetime.now()
+    three_minutes_ago = now - datetime.timedelta(minutes=3)
+    logger.debug("SELECT COUNT(DISTINCT(dst_ip)) as count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>='%s' AND count > 50 GROUP BY src_ip ORDER BY count", three_minutes_ago)
+    db_cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) as count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip ORDER BY count', (three_minutes_ago,))
+    scans = db_cursor.fetchall()
+    for scan in scans:
+        # @TODO we should be able to filter <50 with the SQL query
+        if scan[0] > 50:
+            logger.debug("SELECT eid FROM event WHERE mac='%s' AND ip='%s' AND event='%s' AND timestamp>'%s'", scan[1], scan[2], EVENT_SCAN, three_minutes_ago)
+            db_cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (scan[1], scan[2], EVENT_SCAN, three_minutes_ago))
+            already_detected = db_cursor.fetchone()
+            if not already_detected:
+                logger.debug("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES('%s', '%s', '%s', 0, '%s')", (scan[1], scan[2], now, EVENT_SCAN))
+                db_cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (scan[1], scan[2], now, EVENT_SCAN))
+                logger.info('Detected network scan by %s [%s]', scan[2], scan[1])
+        else:
+            logger.debug('Not a scan: %s', scan)
+
 def send_email_alerts():
     import smtplib
     day = datetime.datetime.now() - datetime.timedelta(days=1)
@@ -744,6 +764,7 @@ if __name__ == '__main__':
     while True:
         identify_macs()
         detect_stale_ips()
+        detect_netscans()
         send_email_alerts()
         daily_digest_timestamp = get_state('daily_digest_timestamp', '')
         if daily_digest_timestamp:
