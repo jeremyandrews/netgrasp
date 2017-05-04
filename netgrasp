@@ -236,8 +236,8 @@ def last_seen(ip, mac):
         return False
 
 def first_requested(ip, mac):
-    logger.debug("SELECT firstRequested FROM seen WHERE ip = '%s' AND mac = '%s' ORDER BY firstRequested ASC LIMIT 1", ip, mac)
-    db_cursor.execute('SELECT firstRequested FROM seen WHERE ip=? AND mac=? ORDER BY firstRequested ASC LIMIT 1', (ip, mac))
+    logger.debug("SELECT firstRequested FROM seen WHERE ip = '%s' AND mac = '%s' AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT firstRequested FROM seen WHERE ip=? AND mac=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (ip, mac))
     active = db_cursor.fetchone()
     if active:
         return active[0]
@@ -434,8 +434,8 @@ def send_email_alerts():
         if row[4] in alerts:
             logger.info('event %s [%d] in %s, generating notification email', row[4], row[0], alerts)
             # get more information about this entry ...
-            logger.debug("SELECT s.firstSeen, s.firstRequested, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac='%s' AND s.ip='%s'", row[1], row[2])
-            db_cursor.execute('SELECT s.firstSeen, s.firstRequested, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=?', (row[1], row[2]))
+            logger.debug("SELECT s.firstSeen, s.firstRequested, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac='%s' AND s.ip='%s' ORDER BY lastseen DESC", row[1], row[2])
+            db_cursor.execute('SELECT s.firstSeen, s.firstRequested, s.lastSeen, s.lastRequested, s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC', (row[1], row[2]))
             info = db_cursor.fetchone()
             if not info:
                 logger.warning("Event for ip %s [%s] that we haven't seen", row[2], row[1])
@@ -443,7 +443,7 @@ def send_email_alerts():
             firstSeen = first_seen(row[2], row[1])
             firstRequested = first_requested(row[2], row[1])
             subject = """Netgrasp alert: %s""" % (row[4])
-            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  First requested: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(info[0]), pretty_date(info[2]), pretty_date(info[3]), pretty_date(firstRequested), info[4], info[5])
+            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Last seen: %s\n  First requested: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(info[0]), pretty_date(info[2]), pretty_date(firstRequested), pretty_date(info[3]), info[4], info[5])
             db_cursor.execute('SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
             results = db_cursor.fetchall()
             if results:
