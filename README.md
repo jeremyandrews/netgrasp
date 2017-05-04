@@ -106,6 +106,11 @@ ROADMAP
  - Deliver alerts via Growl
     o https://pythonhosted.org/gntp/
     o https://pypi.python.org/pypi/Growl
+ - CLI netgraspcli command for performing real time tasks:
+    o list active devices, with optional filters
+    o list recent events, with optional filters
+    o add customname to vendor and host
+    o start/stop/restart netgrasp daemon
  - Alert on anomalies
     o multiple IP's associated with a single MAC address
     o multiple MAC addresses associated with a single IP address
