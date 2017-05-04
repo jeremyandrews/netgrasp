@@ -454,9 +454,7 @@ def send_email_alerts():
             firstSeen = first_seen(row[2], row[1])
             firstRequested = first_requested(row[2], row[1])
             firstSeenRecently = info[0]
-            previouslySeen = info[2]
-            if previouslySeen == firstSeenRecently:
-                previouslySeen = previously_seen(row[2], row[1])
+            previouslySeen = previously_seen(row[2], row[1])
             subject = """Netgrasp alert: %s""" % (row[4])
             body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Previously seen: %s\n  First requested: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(firstSeenRecently), pretty_date(previouslySeen), pretty_date(firstRequested), pretty_date(info[3]), info[4], info[5])
             db_cursor.execute('SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
