@@ -313,6 +313,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
             else:
                 # First time we've actively seen this IP.
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
+                log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                 logger.info('%s (%s) is active', src_ip, src_mac)
 
             # @TODO properly handle multiple active occurences of the same IP
@@ -322,6 +323,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     else:
         # First time we've seen this IP.
         log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
+        log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
         logger.debug("INSERT INTO seen (mac, ip, firstSeen, lastSeen, counter, active, self) VALUES('%s', '%s', '%s', '%s', 1, 1, %d)", src_mac, src_ip, now, now, ip_is_mine(src_ip))
         db_cursor.execute('INSERT INTO seen (mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)', (src_mac, src_ip, now, now, ip_is_mine(src_ip)))
         logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
