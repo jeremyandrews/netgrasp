@@ -1,4 +1,4 @@
-**_Python passive network observation tool._**
+**_Passive network observation tool._**
 
 # Overview
 
@@ -6,7 +6,7 @@ Must be started as root. Will spawn another process and initiate pcap to listen
 for MAC request and reply packets on the network. Root privilieges are dropped
 as soon as possible during startup.
 ```
-  sudo ./netgrasp
+  sudo python2 ./netgrasp
 ```
 
 Netgrasp tracks IP and MAC address pairs seen on the network while it runs,
@@ -23,8 +23,7 @@ provide daily summary digests detailing devices on your network.
 
 Netgrasp will look for its configuration file at the following paths:
 ```
-  /etc/netgrasp.cfg, /usr/local/etc/netgrasp.cfg, ~/.netgrasp.cfg, \
-  ./netgrasp.cfg
+  /etc/netgrasp.cfg, /usr/local/etc/netgrasp.cfg, ~/.netgrasp.cfg, ./netgrasp.cfg
 ```
 
 ## [Listen]
