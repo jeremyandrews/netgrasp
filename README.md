@@ -116,6 +116,13 @@ ROADMAP
     o multiple MAC addresses associated with a single IP address
     o destination/source IP of 0.0.0.0, or other invalid IPs
     o https://en.wikipedia.org/wiki/Reserved_IP_addresses)
+ - Add semi-active and active modes
+    o semi-active pro-actively pings devices that haven't been seen a while,
+      to determine if they've really gone offline (and to more quickly identify
+      a device that's no longer on the network)
+    o active pro-actively pings the entire network semi-regularly to quickly
+      identify devices that we may not otherwise see via passive scanning
+      devices
  - Support listening on multiple interfaces
  - Add cross-platform UI for configuration, alerting, and ongoing network
    monitoring
