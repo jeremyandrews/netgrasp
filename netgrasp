@@ -218,8 +218,8 @@ def ip_is_mine(ip):
     return (ip == socket.gethostbyname(socket.gethostname()))
 
 def first_seen(ip, mac):
-    logger.debug("SELECT firstSeen FROM seen WHERE ip = '%s' AND mac = '%s' ORDER BY firstSeen ASC LIMIT 1", ip, mac)
-    db_cursor.execute('SELECT firstSeen FROM seen WHERE ip=? AND mac=? ORDER BY firstSeen ASC LIMIT 1', (ip, mac))
+    logger.debug("SELECT firstSeen FROM seen WHERE ip = '%s' AND mac = '%s' AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT firstSeen FROM seen WHERE ip=? AND mac=? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1', (ip, mac))
     active = db_cursor.fetchone()
     if active:
         return active[0]
@@ -227,8 +227,8 @@ def first_seen(ip, mac):
         return False
 
 def last_seen(ip, mac):
-    logger.debug("SELECT lastSeen FROM seen WHERE ip = '%s' AND mac = '%s' ORDER BY lastSeen DESC LIMIT 1", ip, mac)
-    db_cursor.execute('SELECT lastSeen FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (ip, mac))
+    logger.debug("SELECT lastSeen FROM seen WHERE ip = '%s' AND mac = '%s' AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT lastSeen FROM seen WHERE ip=? AND mac=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (ip, mac))
     active = db_cursor.fetchone()
     if active:
         return active[0]

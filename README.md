@@ -102,6 +102,8 @@ The following digest types are supported:
 
 ROADMAP
 -------
+ - Improve digest
+    o add time-based activity (# of devices seen per hour, per day)
  - Add weekly digests
  - Deliver alerts via Growl
     o https://pythonhosted.org/gntp/
