@@ -226,6 +226,15 @@ def first_seen(ip, mac):
     else:
         return False
 
+def first_seen_recently(ip, mac):
+    logger.debug("SELECT firstSeen FROM seen WHERE ip = '%s' AND mac = '%s' AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT firstSeen FROM seen WHERE ip=? AND mac=? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (ip, mac))
+    recent = db_cursor.fetchone()
+    if recent:
+        return recent[0]
+    else:
+        return False
+
 def last_seen(ip, mac):
     logger.debug("SELECT lastSeen FROM seen WHERE ip = '%s' AND mac = '%s' AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1", ip, mac)
     db_cursor.execute('SELECT lastSeen FROM seen WHERE ip=? AND mac=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (ip, mac))
@@ -250,6 +259,15 @@ def first_requested(ip, mac):
     active = db_cursor.fetchone()
     if active:
         return active[0]
+    else:
+        return False
+
+def last_requested(ip, mac):
+    logger.debug("SELECT lastRequested FROM seen WHERE ip = '%s' AND mac = '%s' AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1", ip, mac)
+    db_cursor.execute('SELECT lastRequested FROM seen WHERE ip=? AND mac=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (ip, mac))
+    last = db_cursor.fetchone()
+    if last:
+        return last[0]
     else:
         return False
 
@@ -453,10 +471,11 @@ def send_email_alerts():
                 return
             firstSeen = first_seen(row[2], row[1])
             firstRequested = first_requested(row[2], row[1])
-            firstSeenRecently = info[0]
+            firstSeenRecently = first_seen_recently(row[2], row[1])
             previouslySeen = previously_seen(row[2], row[1])
+            lastRequested = last_requested(row[2], row[1])
             subject = """Netgrasp alert: %s""" % (row[4])
-            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  First seen recently: %s\n  Previously seen: %s\n  First requested: %s\n  Last requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(firstSeenRecently), pretty_date(previouslySeen), pretty_date(firstRequested), pretty_date(info[3]), info[4], info[5])
+            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(firstSeenRecently), pretty_date(previouslySeen), pretty_date(firstRequested), pretty_date(lastRequested), info[4], info[5])
             db_cursor.execute('SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
             results = db_cursor.fetchall()
             if results:
