@@ -116,6 +116,7 @@ The following digest types are supported:
 * weekly: not yet implemented, will be a weekly summary of network activity
 
 # Roadmap
+* Log to configurable file, daemonize
 * Improve digest
    * add time-based activity (# of devices seen per hour, per day)
 * Add weekly digests
