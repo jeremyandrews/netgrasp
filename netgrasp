@@ -837,6 +837,8 @@ if __name__ == '__main__':
         except:
             logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications, exiting", whoami())
             sys.exit("""ERROR: Failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications""" % (whoami()))
+    else:
+        notification_alerts = []
 
     import dpkt
 
