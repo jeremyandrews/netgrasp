@@ -521,8 +521,7 @@ def send_email_alerts():
                 server.sendmail(email_from, email_to, message)
                 server.close()
 
-            except:
-                e = sys.exc_info()[0]
+            except Exception as e:
                 logger.warning('Failed to send email: %s', e)
                 processed = False
         else:
@@ -668,8 +667,8 @@ def send_email_digests():
             server.sendmail(email_from, email_to, message)
             server.close()
 
-        except:
-            logger.warning('Failed to send email.')
+        except Exception as e:
+            logger.warning('Failed to send email: %s', e)
 
     if 'weekly' in alerts:
         week = datetime.datetime.now() - datetime.timedelta(weeks=1)
