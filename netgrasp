@@ -462,10 +462,10 @@ def send_notifications():
             if row[4] in alerts:
                 logger.info('event %s [%d] in %s, generating notification alert', row[4], row[0], alerts)
                 firstSeen = first_seen(row[2], row[1])
-                firstSeenRecently = first_seen_recently(row[2], row[1])
+                lastSeen = first_seen_recently(row[2], row[1])
                 previouslySeen = previously_seen(row[2], row[1])
                 title = """Netgrasp alert: %s""" % (row[4])
-                body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(row[1], row[2]), row[2], row[1], pretty_date(firstSeenRecently), pretty_date(previouslySeen), pretty_date(firstSeen))
+                body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(row[1], row[2]), row[2], row[1], pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstSeen))
                 ntfy.notify(body, title)
                 db_cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (row[5] + 8, row[0]))
             else:
@@ -497,11 +497,11 @@ def send_email_alerts():
                 return
             firstSeen = first_seen(row[2], row[1])
             firstRequested = first_requested(row[2], row[1])
-            firstSeenRecently = first_seen_recently(row[2], row[1])
+            lastSeen = last_seen(row[2], row[1])
             previouslySeen = previously_seen(row[2], row[1])
             lastRequested = last_requested(row[2], row[1])
             subject = """Netgrasp alert: %s""" % (row[4])
-            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(firstSeenRecently), pretty_date(previouslySeen), pretty_date(firstRequested), pretty_date(lastRequested), info[4], info[5])
+            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (row[2], row[1], info[6], info[7], info[8], info[9], pretty_date(firstSeen), pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstRequested), pretty_date(lastRequested), info[4], info[5])
             db_cursor.execute('SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (row[1], day))
             results = db_cursor.fetchall()
             if results:
