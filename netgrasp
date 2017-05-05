@@ -522,7 +522,8 @@ def send_email_alerts():
                 server.close()
 
             except:
-                logger.warning('Failed to send email.')
+                e = sys.exc_info()[0]
+                logger.warning('Failed to send email: %s', e)
                 processed = False
         else:
             logger.debug('event %s [%d] NOT in %s', row[4], row[0], alerts)
