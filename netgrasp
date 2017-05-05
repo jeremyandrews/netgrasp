@@ -511,13 +511,15 @@ def send_email_alerts():
             message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
             try:
                 if email_ssl:
-                    server = smtplib.SMTP(email_hostname, email_port)
-                    server.ehlo()
-                    server.starttls()
-                else:
                     server = smtplib.SMTP_SSL(email_hostname, email_port)
                     server.ehlo()
-                server.login(email_username, email_password)
+                    server.starttls()
+                    server.ehlo()
+                else:
+                    server = smtplib.SMTP(email_hostname, email_port)
+                    server.ehlo()
+                if email_username and email_password:
+                    server.login(email_username, email_password)
                 server.sendmail(email_from, email_to, message)
                 server.close()
 
@@ -657,13 +659,14 @@ def send_email_digests():
         message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
         try:
             if email_ssl:
-                server = smtplib.SMTP(email_hostname, email_port)
+                server = smtplib.SMTP_SSL(email_hostname, email_port)
                 server.ehlo()
                 server.starttls()
             else:
-                server = smtplib.SMTP_SSL(email_hostname, email_port)
+                server = smtplib.SMTP(email_hostname, email_port)
                 server.ehlo()
-            server.login(email_username, email_password)
+            if email_username and email_password:
+                server.login(email_username, email_password)
             server.sendmail(email_from, email_to, message)
             server.close()
 
