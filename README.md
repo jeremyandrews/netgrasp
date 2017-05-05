@@ -120,9 +120,9 @@ The following digest types are supported:
 * Improve digest
    * add time-based activity (# of devices seen per hour, per day)
 * Add weekly digests
-* Deliver alerts via Growl
-   * [gntp](https://pythonhosted.org/gntp/)
-   * [Growl](https://pypi.python.org/pypi/Growl)
+* Deliver alerts
+   * [ntfy](http://ntfy.readthedocs.io/en/latest/)
+   * [ntfy code](https://github.com/dschep/ntfy)
 * CLI netgraspcli command for performing real time tasks:
    * list active devices, with optional filters
    * list recent events, with optional filters
