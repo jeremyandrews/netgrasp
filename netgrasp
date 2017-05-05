@@ -25,6 +25,7 @@ EVENT_SCAN              = 'network_scan'
 PROCESSED_ALERT         = 1
 PROCESSED_DAILY_DIGEST  = 2
 PROCESSED_WEEKLY_DIGEST = 4
+PROCESSED_NOTIFICATION  = 8
 
 def wiretap(child_conn):
     import sys
@@ -447,6 +448,31 @@ def detect_netscans():
         else:
             logger.debug('Not a scan: %s', scan)
 
+def send_notifications():
+    if notification_alerts:
+        day = datetime.datetime.now() - datetime.timedelta(days=1)
+        logger.debug('SELECT eid, mac, ip, timestamp, event FROM event WHERE NOT (processed & %d)', PROCESSED_NOTIFICATION);
+        db_cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8)');
+        rows = db_cursor.fetchall()
+        commit = 0
+        for row in rows:
+            commit = 1
+            logger.debug('processing event %d for %s [%s] at %s', row[0], row[2], row[1], row[3])
+            # only send notifications for configured events
+            if row[4] in alerts:
+                logger.info('event %s [%d] in %s, generating notification alert', row[4], row[0], alerts)
+                firstSeen = first_seen(row[2], row[1])
+                firstSeenRecently = first_seen_recently(row[2], row[1])
+                previouslySeen = previously_seen(row[2], row[1])
+                title = """Netgrasp alert: %s""" % (row[4])
+                body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(row[1], row[2]), row[2], row[1], pretty_date(firstSeenRecently), pretty_date(previouslySeen), pretty_date(firstSeen))
+                ntfy.notify(body, title)
+                db_cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (row[5] + 8, row[0]))
+            else:
+                logger.debug('event %s [%d] NOT in %s', row[4], row[0], alerts)
+        if commit:
+            db_conn.commit()
+
 def send_email_alerts():
     import smtplib
     day = datetime.datetime.now() - datetime.timedelta(days=1)
@@ -793,6 +819,15 @@ if __name__ == '__main__':
     else:
         logger.warning('Email is not properly configured, no notifications will be sent.')
 
+    if config.has_section('Notifications') and config.has_option('Notifications', 'alerts'):
+        notification_alerts = config.get('Notifications', 'alerts')
+        logger.info('Notifications: setting alerts to %s', notification_alerts)
+        try:
+            import ntfy
+        except:
+            logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications, exiting", whoami())
+            sys.exit("""ERROR: Failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications""" % (whoami()))
+
     import dpkt
 
     # loop forever, listening for ARP packets ...
@@ -800,6 +835,7 @@ if __name__ == '__main__':
         identify_macs()
         detect_stale_ips()
         detect_netscans()
+        send_notifications()
         send_email_alerts()
         daily_digest_timestamp = get_state('daily_digest_timestamp', '')
         if daily_digest_timestamp:

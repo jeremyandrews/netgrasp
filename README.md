@@ -17,6 +17,7 @@ provide daily summary digests detailing devices on your network.
  * [dpkt](https://github.com/kbandla/dpkt) (`pip install dpkt`)
  * [pcap](https://github.com/dugsong/pypcap) (`pip install pypcap`)
  * sqlite3
+ * (_OPTIONAL_)[ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
 
 
 # Configuration
@@ -115,14 +116,27 @@ The following digest types are supported:
 * daily: a daily summary of network activity
 * weekly: not yet implemented, will be a weekly summary of network activity
 
+## [Notifications]
+Netgrasp can also provide real-time notifiations on your desktop, using ntfy.
+These are disabled by default as ntfy can be more difficult to install
+correctly than other dependencies. Once installed, ntfy must be available to
+the user that netgrasp runs under, as configured above in the Security section.
+Netgrasp will refuse to start if you enable Notifications but don't make
+ntfy available to it.
+
+The same alert types that were available to email alerts are also available to
+notifications.
+
+For example:
+```
+  alerts = first_seen_recently,first_seen,network_scan
+```
+
 # Roadmap
 * Log to configurable file, daemonize
 * Improve digest
    * add time-based activity (# of devices seen per hour, per day)
 * Add weekly digests
-* Deliver alerts
-   * [ntfy](http://ntfy.readthedocs.io/en/latest/)
-   * [ntfy code](https://github.com/dschep/ntfy)
 * CLI netgraspcli command for performing real time tasks:
    * list active devices, with optional filters
    * list recent events, with optional filters
