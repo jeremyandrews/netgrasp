@@ -511,9 +511,13 @@ def send_email_alerts():
             message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
             try:
                 if email_ssl:
-                    server = smtplib.SMTP_SSL(email_hostname, email_port)
-                    server.ehlo()
-                    server.starttls()
+                    try:
+                        server = smtplib.SMTP_SSL(email_hostname, email_port)
+                        server.ehlo()
+                    except:
+                        server = smtplib.SMTP(email_hostname, email_port)
+                        server.ehlo()
+                        server.starttls()
                 else:
                     server = smtplib.SMTP(email_hostname, email_port)
                     server.ehlo()
@@ -658,9 +662,13 @@ def send_email_digests():
         message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
         try:
             if email_ssl:
-                server = smtplib.SMTP_SSL(email_hostname, email_port)
-                server.ehlo()
-                server.starttls()
+                try:
+                    server = smtplib.SMTP_SSL(email_hostname, email_port)
+                    server.ehlo()
+                except:
+                    server = smtplib.SMTP(email_hostname, email_port)
+                    server.ehlo()
+                    server.starttls()
             else:
                 server = smtplib.SMTP(email_hostname, email_port)
                 server.ehlo()
@@ -812,17 +820,6 @@ if __name__ == '__main__':
             alerts = config.get('Email', 'alerts').split(',')
         if config.has_option('Email', 'digests'):
             digests = config.get('Email', 'digests').split(',')
-
-    if email_ssl:
-        try:
-            self.smtp.ehlo()
-            self.smtp.starttls()
-            self.smtp.ehlo
-        except:
-            logger.warning('Configured for SSL, but TLS is not available, no notifications will be sent.')
-            email_to = False
-            email_alerts = []
-            email_digests = []
 
     if email_to and email_from and email_hostname and email_port and email_username and email_password:
         if alerts:
