@@ -512,7 +512,6 @@ def send_email_alerts():
             try:
                 if email_ssl:
                     server = smtplib.SMTP_SSL(email_hostname, email_port)
-                    server = smtplib.SMTP(email_hostname, email_port)
                     server.ehlo()
                     server.starttls()
                 else:
