@@ -700,7 +700,7 @@ def send_email_digests():
                 distinct = db_cursor.fetchall()
                 body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
         elif (digest == 'weekly'):
-            body += "\n\nActive devices per hour during the past week:"
+            body += "\n\nActive devices per day during the past week:"
             range = 7
             while (range > 0):
                 lower = now - datetime.timedelta(days=range)
@@ -884,7 +884,7 @@ if __name__ == '__main__':
         if config.has_option('Email', 'digests'):
             digests = config.get('Email', 'digests').split(',')
 
-    if email_to and email_from and email_hostname and email_port and email_username and email_password:
+    if email_to and email_from and email_hostname and email_port:
         if alerts:
             logger.info('Sending alerts %s to %s from %s', alerts, email_to, email_from)
         if digests:
