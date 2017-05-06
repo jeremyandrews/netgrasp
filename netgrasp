@@ -113,7 +113,7 @@ def get_state(key, default_value):
 
 def pretty_date(time):
     if not time:
-        return ''
+        return "never"
     now = datetime.datetime.now()
     diff = now - time
     second_diff = diff.seconds
@@ -136,7 +136,7 @@ def pretty_date(time):
         if second_diff < 86400:
             return str(second_diff / 3600) + " hours ago"
     if day_diff == 1:
-        return "Yesterday"
+        return "yesterday"
     if day_diff < 7:
         return str(day_diff) + " days ago"
     if day_diff < 31:
@@ -345,7 +345,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 # First time we've actively seen this IP.
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-                logger.info('%s (%s) is active', src_ip, src_mac)
+                logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
 
             # @TODO properly handle multiple active occurences of the same IP
             logger.debug("UPDATE seen set mac='%s', firstSeen='%s', lastSeen='%s', counter=%d, active=1, WHERE sid=%d", src_mac, now, now, counter + 1, sid)
