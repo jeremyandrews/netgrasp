@@ -34,12 +34,14 @@ def wiretap(child_conn):
     logger.info('wiretap process running as user %s',  whoami())
     try:
         import dpkt
-    except:
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
         logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
         sys.exit("ERROR: Failed to import dpkt, try: 'pip install dpkt'")
     try:
         import pcap
-    except:
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
         logger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
         sys.exit("ERROR: Failed to import pcap, try: 'pip install pypcap'")
 
@@ -578,7 +580,8 @@ def identify_macs():
         logger.debug('requesting gethostbyaddr for %s [%s]', row[1], row[0])
         try:
             hostname = socket.gethostbyaddr(row[1])
-        except:
+        except Exception as e:
+            logger.debug('gethostbyaddr failed: %s', e)
             hostname = ['unknown']
         logger.debug('hostname: %s', hostname)
         db_cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (row[0], row[1], hostname[0]))
@@ -717,7 +720,8 @@ if __name__ == '__main__':
 
     try:
         import sqlite3
-    except:
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
         logger.critical("failed to import sqlite3, try: 'pip install sqlite3', exiting")
         sys.exit("ERROR: Failed to import sqlite3, try: 'pip install sqlite3'")
 
@@ -785,7 +789,8 @@ if __name__ == '__main__':
 
     try:
         db_conn = sqlite3.connect(db_filename, detect_types=sqlite3.PARSE_DECLTYPES)
-    except:
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
         logger.critical("failed to open or create %s (as user %s), exiting", db_filename, whoami())
         parent_conn.send('ABORT')
         sys.exit("ERROR: Failed to open or create database file.")
@@ -860,7 +865,8 @@ if __name__ == '__main__':
         logger.info('Notifications: setting alerts to %s', notification_alerts)
         try:
             import ntfy
-        except:
+        except Exception as e:
+            logger.critical("fatal exception: %s", e)
             logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications, exiting", whoami())
             sys.exit("""ERROR: Failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications""" % (whoami()))
     else:
