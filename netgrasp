@@ -692,9 +692,9 @@ def send_email_digests():
             body += "\n\nActive devices per hour during the past day:"
             range = 24
             while (range > 0):
-                upper = now - datetime.timedelta(hours=range)
-                range = range - 1
                 lower = now - datetime.timedelta(hours=range)
+                range = range - 1
+                upper = now - datetime.timedelta(hours=range)
                 logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
                 db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
                 distinct = db_cursor.fetchall()
@@ -703,9 +703,9 @@ def send_email_digests():
             body += "\n\nActive devices per day during the past week:"
             range = 7
             while (range > 0):
-                upper = now - datetime.timedelta(days=range)
-                range = range - 1
                 lower = now - datetime.timedelta(days=range)
+                range = range - 1
+                upper = now - datetime.timedelta(days=range)
                 logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
                 db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
                 distinct = db_cursor.fetchall()
