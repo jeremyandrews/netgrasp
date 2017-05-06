@@ -14,6 +14,7 @@ optionally notifying you when a new device joins your network. It can also
 provide daily summary digests detailing devices on your network.
 
 ## Dependencies
+ * Python 2
  * [dpkt](https://github.com/kbandla/dpkt) (`pip install dpkt`)
  * [pcap](https://github.com/dugsong/pypcap) (`pip install pypcap`)
  * sqlite3
