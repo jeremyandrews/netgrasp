@@ -18,7 +18,7 @@ provide daily summary digests detailing devices on your network.
  * [dpkt](https://github.com/kbandla/dpkt) (`pip install dpkt`)
  * [pcap](https://github.com/dugsong/pypcap) (`pip install pypcap`)
  * sqlite3
- * (_OPTIONAL_)[ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
+ * (_OPTIONAL_) [ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
 
 
 # Configuration
@@ -92,7 +92,7 @@ comma separated list. For example
   to = user1@example.com,user2@example.com,user3@example.com
   from = netgrasp@example.com
   smtp_hostname = example.com
-  smtp_port = 465
+  smtp_port = 587
   smtp_ssl = yes
   smtp_username = username
   smtp_password = password
