@@ -709,7 +709,7 @@ def send_email_digests():
                 logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
                 db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
                 distinct = db_cursor.fetchall()
-                body += """\n - %s: %d""" % (lower.strftime("%x"), len(distinct))
+                body += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
 
         if (digest == 'daily'):
             logger.debug("SELECT eid, processed FROM event WHERE timestamp>='%s' AND timestamp<='%s' AND NOT (processed & 2)", time_period, now)
