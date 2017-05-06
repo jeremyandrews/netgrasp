@@ -135,9 +135,6 @@ For example:
 
 # Roadmap
 * Log to configurable file, daemonize
-* Improve digest
-   * add time-based activity (# of devices seen per hour, per day)
-* Add weekly digests
 * CLI netgraspcli command for performing real time tasks:
    * list active devices, with optional filters
    * list recent events, with optional filters

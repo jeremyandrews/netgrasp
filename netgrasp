@@ -101,6 +101,7 @@ def whoami():
 def set_state(key, value):
     logger.debug('Set key[%s] to value[%s]', key, value)
     db_cursor.execute('INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)', (key, value));
+    db_conn.commit()
 
 def get_state(key, default_value):
     db_cursor.execute('SELECT value FROM state WHERE key=?', (key,));
@@ -611,40 +612,57 @@ def name_ip(mac, ip):
         return detail[0]
 
 def send_email_digests():
-    now = datetime.datetime.now()
-    daily_digest_timestamp = get_state('daily_digest_timestamp', '')
-    if daily_digest_timestamp:
-        daily_digest_timestamp = datetime.datetime.strptime(daily_digest_timestamp, "%Y-%m-%d %H:%M:%S.%f")
-    else:
-        # First time here, schedule a daily digest for 1 day in the future
-        daily_digest_timestamp = now + datetime.timedelta(days=1)
-        set_state('daily_digest_timestamp', daily_digest_timestamp)
-    if now < daily_digest_timestamp:
-        return
-
     import smtplib
-    daily_digest_timestamp = now + datetime.timedelta(days=1)
-    set_state('daily_digest_timestamp', daily_digest_timestamp)
-    logger.info('Sending daily digest')
-    if 'daily' in digests:
-        day = now - datetime.timedelta(days=1)
-        twodays = now - datetime.timedelta(days=2)
-        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (day, now))
+
+    now = datetime.datetime.now()
+
+    digests = ['daily', 'weekly']
+    for digest in digests:
+        if (digest == 'daily'):
+            timestamp_string = 'daily_digest_timestamp'
+            future_digest_timestamp = now + datetime.timedelta(days=1)
+            time_period = now - datetime.timedelta(days=1)
+            time_period_description = '24 hours'
+            previous_time_period = now - datetime.timedelta(days=2)
+        elif (digest == 'weekly'):
+            timestamp_string = 'weekly_digest_timestamp'
+            future_digest_timestamp = now + datetime.timedelta(weeks=1)
+            time_period = now - datetime.timedelta(weeks=1)
+            time_period_description = '7 days'
+            previous_time_period = now - datetime.timedelta(weeks=2)
+
+        next_digest_timestamp = get_state(timestamp_string, '')
+        if next_digest_timestamp:
+            # convert string to python datetime.
+            next_digest_timestamp = datetime.datetime.strptime(next_digest_timestamp, "%Y-%m-%d %H:%M:%S.%f")
+        else:
+            # first time here, schedule a digest for appropriate time in future
+            set_state(timestamp_string, future_digest_timestamp)
+            next_digest_timestamp = future_digest_timestamp
+
+        if now < next_digest_timestamp:
+            continue
+
+        # time to send a digest
+        logger.info('Sending %s digest', digest)
+        set_state(timestamp_string, future_digest_timestamp)
+
+        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
         requested = db_cursor.fetchall()
-        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (day, now))
+        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
         seen = db_cursor.fetchall()
-        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (twodays, day))
-        yesterday = db_cursor.fetchall()
+        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
+        seen_previous = db_cursor.fetchall()
 
-        new = set(seen) - set(yesterday)
-        gone = set(yesterday) - set(seen)
+        new = set(seen) - set(seen_previous)
+        gone = set(seen_previous) - set(seen)
 
-        subject = "Netgrasp daily digest"
-        body = """In the past 24 hours, %d IPs were active:""" % (len(seen))
+        subject = """Netgrasp %s digest""" % (digest)
+        body = """In the past %s, %d IPs were active:""" % (time_period_description, len(seen))
         noisy = []
         some_new = False
         for ip in seen:
-            db_cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?', (ip[1], day, now))
+            db_cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?', (ip[1], time_period, now))
             requests = db_cursor.fetchone()
             if (requests[0] > 10):
                 noisy.append((ip[0], ip[1], requests[0], name_ip(ip[0], ip[1])))
@@ -654,7 +672,7 @@ def send_email_digests():
             else:
                 body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
         if some_new:
-            body+= "\n* = not active in the previous 24 hours"
+            body+= """\n* = not active in the previous %s""" % (time_period_description)
 
         body += """\n\n%d unique IPs requested.""" % (len(requested),)
 
@@ -666,27 +684,45 @@ def send_email_digests():
                     body += " (network scan?)"
 
         if gone:
-            body += "\n\nThe following IPs were not active, but were active the previous 24 hours:"
+            body += """\n\nThe following IPs were not active, but were active the previous %s:""" % (time_period_description)
             for ip in gone:
                 body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
 
-        body += "\n\nActive devices per hour during the past day:"
-        range = 24
-        while (range > 0):
-            lower = now - datetime.timedelta(hours=range)
-            range = range - 1
-            upper = now - datetime.timedelta(hours=range)
-            logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
-            db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
-            distinct = db_cursor.fetchall()
-            body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
+        if (digest == 'daily'):
+            body += "\n\nActive devices per hour during the past day:"
+            range = 24
+            while (range > 0):
+                lower = now - datetime.timedelta(hours=range)
+                range = range - 1
+                upper = now - datetime.timedelta(hours=range)
+                logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
+                db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                distinct = db_cursor.fetchall()
+                body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
+        elif (digest == 'weekly'):
+            body += "\n\nActive devices per hour during the past week:"
+            range = 7
+            while (range > 0):
+                lower = now - datetime.timedelta(days=range)
+                range = range - 1
+                upper = now - datetime.timedelta(days=range)
+                logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
+                db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                distinct = db_cursor.fetchall()
+                body += """\n - %s: %d""" % (lower.strftime("%x"), len(distinct))
 
-        logger.debug("SELECT eid, processed FROM event WHERE timestamp>='%s' AND timestamp<='%s' AND NOT (processed & 2)", day, now)
-        db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (day, now))
+        if (digest == 'daily'):
+            logger.debug("SELECT eid, processed FROM event WHERE timestamp>='%s' AND timestamp<='%s' AND NOT (processed & 2)", time_period, now)
+            db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (time_period, now))
+            processed = PROCESSED_DAILY_DIGEST
+        elif (digest == 'weekly'):
+            logger.debug("SELECT eid, processed FROM event WHERE timestamp>='%s' AND timestamp<='%s' AND NOT (processed & 4)", time_period, now)
+            db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)', (time_period, now))
+            processed = PROCESSED_WEEKLY_DIGEST
         rows = db_cursor.fetchall()
         for row in rows:
-            logger.debug('UPDATE event SET processed=%d WHERE eid=%d', row[1] + 2, row[0])
-            db_cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + 2, row[0]))
+            logger.debug('UPDATE event SET processed=%d WHERE eid=%d', row[1] + processed, row[0])
+            db_cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + processed, row[0]))
 
         message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
         try:
@@ -708,10 +744,6 @@ def send_email_digests():
 
         except Exception as e:
             logger.warning('Failed to send email: %s', e)
-
-    if 'weekly' in alerts:
-        week = datetime.datetime.now() - datetime.timedelta(weeks=1)
-        db_cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 4) AND timestamp>=?', (week,));
 
 if __name__ == '__main__':
     if os.getuid() != 0:
