@@ -608,9 +608,22 @@ def name_ip(mac, ip):
         return detail[0]
 
 def send_email_digests():
+    now = datetime.datetime.now()
+    daily_digest_timestamp = get_state('daily_digest_timestamp', '')
+    if daily_digest_timestamp:
+        daily_digest_timestamp = datetime.datetime.strptime(daily_digest_timestamp, "%Y-%m-%d %H:%M:%S.%f")
+    else:
+        # First time here, schedule a daily digest for 1 day in the future
+        daily_digest_timestamp = now + datetime.timedelta(days=1)
+        set_state('daily_digest_timestamp', daily_digest_timestamp)
+    if now < daily_digest_timestamp:
+        return
+
     import smtplib
+    daily_digest_timestamp = now + datetime.timedelta(days=1)
+    set_state('daily_digest_timestamp', daily_digest_timestamp)
+    logger.info('Sending daily digest')
     if 'daily' in digests:
-        now = datetime.datetime.now()
         day = now - datetime.timedelta(days=1)
         twodays = now - datetime.timedelta(days=2)
         db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (day, now))
@@ -654,9 +667,22 @@ def send_email_digests():
             for ip in gone:
                 body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
 
+        body += "\n\nActive devices per hour during the past day:"
+        range = 24
+        while (range > 0):
+            lower = now - datetime.timedelta(hours=range)
+            range = range - 1
+            upper = now - datetime.timedelta(hours=range)
+            logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
+            db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+            distinct = db_cursor.fetchall()
+            body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
+
+        logger.debug("SELECT eid, processed FROM event WHERE timestamp>='%s' AND timestamp<='%s' AND NOT (processed & 2)", day, now)
         db_cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (day, now))
         rows = db_cursor.fetchall()
         for row in rows:
+            logger.debug('UPDATE event SET processed=%d WHERE eid=%d', row[1] + 2, row[0])
             db_cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + 2, row[0]))
 
         message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (email_from, ", ".join(email_to), subject, body)
@@ -849,16 +875,7 @@ if __name__ == '__main__':
         detect_netscans()
         send_notifications()
         send_email_alerts()
-        daily_digest_timestamp = get_state('daily_digest_timestamp', '')
-        if daily_digest_timestamp:
-            daily_digest_timestamp = datetime.datetime.strptime(daily_digest_timestamp, "%Y-%m-%d %H:%M:%S.%f")
-        else:
-            daily_digest_timestamp = datetime.datetime.now() + datetime.timedelta(days=1)
-            set_state('daily_digest_timestamp', daily_digest_timestamp)
-        if datetime.datetime.now() >= daily_digest_timestamp:
-            daily_digest_timestamp = datetime.datetime.now() + datetime.timedelta(days=1)
-            set_state('daily_digest_timestamp', daily_digest_timestamp)
-            send_email_digests()
+        send_email_digests()
         packet = parent_conn.recv()
         src_ip = socket.inet_ntoa(packet.data.spa)
         src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
