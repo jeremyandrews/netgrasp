@@ -6,6 +6,7 @@ import multiprocessing
 import ConfigParser
 import io
 import logging
+import logging.handlers
 import pwd
 import struct
 import socket
@@ -26,6 +27,18 @@ PROCESSED_ALERT         = 1
 PROCESSED_DAILY_DIGEST  = 2
 PROCESSED_WEEKLY_DIGEST = 4
 PROCESSED_NOTIFICATION  = 8
+
+class NetgraspCore:
+    def __init(self):
+        print "Created new Core instance"
+        self.db_cursor = ''
+        self.db_conn = ''
+
+    def set_db_conn(cls, db_conn):
+        self.db_conn = db_conn
+
+    def set_db_cursor(cls, db_cursor):
+        self.db_cursor = db_cursor
 
 def wiretap(child_conn):
     import sys
@@ -101,7 +114,7 @@ def whoami():
 def set_state(key, value):
     logger.debug('Set key[%s] to value[%s]', key, value)
     db_cursor.execute('INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)', (key, value));
-    db_conn.commit()
+    nbcore.db_conn.commit()
 
 def get_state(key, default_value):
     db_cursor.execute('SELECT value FROM state WHERE key=?', (key,));
@@ -211,7 +224,7 @@ def create_database():
         customname TEXT
       )
     """)
-    db_conn.commit()
+    nbcore.db_conn.commit()
 
 def clean_shutdown(signal, frame):
     # Log the reason we have exited
@@ -278,9 +291,8 @@ def last_requested(ip, mac):
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     now = datetime.datetime.now()
 
-    if arplog:
-      logger.debug("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES('%s', '%s', '%s', '%s', '%d', '%s')", src_mac, src_ip, dst_mac, dst_ip, request, now)
-      db_cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, request, now))
+    logger.debug("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES('%s', '%s', '%s', '%s', '%d', '%s')", src_mac, src_ip, dst_mac, dst_ip, request, now)
+    db_cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, request, now))
 
     # @TODO research and see if we should be treating this another way
     if (src_ip == '0.0.0.0'):
@@ -350,7 +362,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
             # @TODO properly handle multiple active occurences of the same IP
             logger.debug("UPDATE seen set mac='%s', firstSeen='%s', lastSeen='%s', counter=%d, active=1, WHERE sid=%d", src_mac, now, now, counter + 1, sid)
             db_cursor.execute('UPDATE seen set mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_mac, now, now, counter + 1, sid))
-        db_conn.commit()
+        nbcore.db_conn.commit()
     else:
         # First time we've seen this IP.
         log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
@@ -358,7 +370,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         logger.debug("INSERT INTO seen (mac, ip, firstSeen, lastSeen, counter, active, self) VALUES('%s', '%s', '%s', '%s', 1, 1, %d)", src_mac, src_ip, now, now, ip_is_mine(src_ip))
         db_cursor.execute('INSERT INTO seen (mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)', (src_mac, src_ip, now, now, ip_is_mine(src_ip)))
         logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
-        db_conn.commit()
+        nbcore.db_conn.commit()
 
 def ip_request(ip, mac):
     now = datetime.datetime.now()
@@ -398,14 +410,14 @@ def ip_request(ip, mac):
         logger.debug("UPDATE seen set lastRequested='%s' WHERE sid = %d", now, sid)
         db_cursor.execute('UPDATE seen set lastRequested=? WHERE sid=?', (now, sid))
         logger.debug('%s (%s) requested', ip, mac)
-        db_conn.commit()
+        nbcore.db_conn.commit()
     else:
         # First time we've seen a request for this IP.
         log_event(ip, mac, EVENT_REQUESTED_FIRST)
         logger.debug("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES('%s', '%s', '%s', '%s', 0, 1, %d)", mac, ip, now, now, ip_is_mine(ip))
         db_cursor.execute("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)", (mac, ip, now, now, ip_is_mine(ip)))
         logger.info('%s (%s) requested, first time seeing', ip, mac)
-        db_conn.commit()
+        nbcore.db_conn.commit()
 
 def log_event(ip, mac, event):
     now = datetime.datetime.now()
@@ -430,7 +442,7 @@ def detect_stale_ips():
         db_cursor.execute('UPDATE seen SET active = 0 WHERE mac=? AND ip=?', (row[0], row[1]))
         commit = 1
     if commit:
-        db_conn.commit()
+        nbcore.db_conn.commit()
 
 def detect_netscans():
     now = datetime.datetime.now()
@@ -474,7 +486,7 @@ def send_notifications():
             else:
                 logger.debug('event %s [%d] NOT in %s', row[4], row[0], alerts)
         if commit:
-            db_conn.commit()
+            nbcore.db_conn.commit()
 
 def send_email_alerts():
     import smtplib
@@ -537,7 +549,7 @@ def send_email_alerts():
         if processed:
             db_cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (row[5] + 1, row[0]))
     if commit:
-        db_conn.commit()
+        nbcore.db_conn.commit()
 
 def identify_macs():
     import re
@@ -588,7 +600,7 @@ def identify_macs():
         db_cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (row[0], row[1], hostname[0]))
 
     if commit:
-        db_conn.commit()
+        nbcore.db_conn.commit()
 
 def name_ip(mac, ip):
     if (mac == BROADCAST):
@@ -641,16 +653,26 @@ def send_email_digests():
             next_digest_timestamp = future_digest_timestamp
 
         if now < next_digest_timestamp:
+            # it's not yet time to send this digest
             continue
 
         # time to send a digest
         logger.info('Sending %s digest', digest)
         set_state(timestamp_string, future_digest_timestamp)
 
-        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
-        requested = db_cursor.fetchall()
-        db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
-        seen = db_cursor.fetchall()
+        if (digest == 'daily'):
+            # PROCESSED_DAILY_DIGEST  = 2
+            db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+            requested = db_cursor.fetchall()
+            db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+            seen = db_cursor.fetchall()
+        elif (digest == 'weekly'):
+            # PROCESSED_WEEKLY_DIGEST = 4
+            db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+            requested = db_cursor.fetchall()
+            db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+            seen = db_cursor.fetchall()
+
         db_cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
         seen_previous = db_cursor.fetchall()
 
@@ -745,70 +767,7 @@ def send_email_digests():
         except Exception as e:
             logger.warning('Failed to send email: %s', e)
 
-if __name__ == '__main__':
-    if os.getuid() != 0:
-        logger.critical("netgrasp must be run as root, exiting")
-        sys.exit('ERROR: Netgrasp must be run as root.')
-
-    try:
-        import sqlite3
-    except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import sqlite3, try: 'pip install sqlite3', exiting")
-        sys.exit("ERROR: Failed to import sqlite3, try: 'pip install sqlite3'")
-
-    default_uid = 1 # typically daemon user
-    default_gid = 1 # typically daemon group
-    default_loglevel = logging.WARN
-
-    multiprocessing.log_to_stderr()
-    logger = multiprocessing.get_logger()
-
-    config = ConfigParser.ConfigParser()
-    found = config.read(['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf'])
-
-    if config.has_section('Logging'):
-        if config.has_option('Logging', 'level'):
-            loglevel = config.get('Logging', 'level')
-            logger.setLevel(loglevel)
-            logger.debug('Logging: setting loglevel to %s', loglevel)
-        else:
-            logger.setLevel(default_loglevel)
-    else:
-        logger.setLevel(default_loglevel)
-
-    logger.debug('configuration files: %s', found)
-
-    if config.has_section('Security'):
-        if config.has_option('Security', 'gid'):
-            gid = config.getint('Security', 'gid');
-        else:
-            gid = default_gid
-        if config.has_option('Security', 'uid'):
-            uid = config.getint('Security', 'uid');
-        else:
-            uid = default_gid
-    else:
-        # Default to uid/gid 1, typically the daemon user
-        gid = default_gid;
-        uid = default_uid;
-    logger.debug('Security: setting uid to %d, gid to %d', uid, gid)
-
-    if config.has_section('Database'):
-        if config.has_option('Database', 'filename'):
-            db_filename = config.get('Database', 'filename');
-        else:
-            logger.critical("No database defined in configuration file, exiting.")
-            sys.exit("No database filename defined in configuration file, exiting.")
-    else:
-        logger.critical("No database defined in configuration file, exiting.")
-        sys.exit("No database filename defined in configuration file, exiting.")
-
-    parent_conn, child_conn = multiprocessing.Pipe()
-    wiretap = multiprocessing.Process(name='wiretap', target=wiretap, args=[child_conn])
-    wiretap.daemon = True
-    wiretap.start()
-
+def main_process():
     # drop all root privileges, we no longer need them
     os.setgroups([])
     os.setgid(gid)
@@ -820,7 +779,7 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, clean_shutdown)
 
     try:
-        db_conn = sqlite3.connect(db_filename, detect_types=sqlite3.PARSE_DECLTYPES)
+        ngcore.set_db_conn(sqlite3.connect(db_filename, detect_types=sqlite3.PARSE_DECLTYPES))
     except Exception as e:
         logger.critical("fatal exception: %s", e)
         logger.critical("failed to open or create %s (as user %s), exiting", db_filename, whoami())
@@ -828,17 +787,8 @@ if __name__ == '__main__':
         sys.exit("ERROR: Failed to open or create database file.")
     logger.info('opened %s as user %s', db_filename, whoami());
     # create database if necessary
-    db_cursor = db_conn.cursor()
+    ngcore.set_db_cursor(db_conn.cursor())
     create_database()
-
-    arplog = False
-    if config.has_section('Logging') and config.has_option('Logging', 'arplog'):
-        if config.getboolean('Logging', 'arplog') == True:
-            arplog = True
-    if arplog:
-        logger.debug('Logging: arplog enabled')
-    else:
-        logger.debug('Logging: arplog disabled')
 
     if config.has_section('Listen') and config.has_option('Listen', 'active_timeout'):
         active_timeout = config.getint('Listen', 'active_timeout')
@@ -926,3 +876,98 @@ if __name__ == '__main__':
         elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
             logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+
+if __name__ == '__main__':
+    ngcore = NetgraspCore()
+
+    default_uid = 1 # typically daemon user
+    default_gid = 1 # typically daemon group
+    default_loglevel = logging.WARN
+    default_logfile = "netgrasp.log"
+    default_logformat = "%(asctime)s [%(levelname)s] [%(processName)s] %(message)s"
+
+    config = ConfigParser.ConfigParser()
+    found = config.read(['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf'])
+
+    if config.has_section('Logging'):
+        if config.has_option('Logging', 'filename'):
+            logfile = config.get('Logging', 'filename')
+        else:
+            logfile = default_logfile
+        if config.has_option('Logging', 'level'):
+            loglevel = config.get('Logging', 'level')
+        else:
+            loglevel = default_loglevel
+    else:
+        loglevel = default_loglevel
+        logfile = default_logfile
+
+    logformat = default_logformat
+
+    logger = logging.getLogger(__name__)
+    logger.setLevel(loglevel)
+    handler = logging.handlers.TimedRotatingFileHandler(logfile, when="midnight", backupCount=3)
+    formatter = logging.Formatter(logformat)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    keep_fds=[handler.stream.fileno()]
+
+    logger.info('loaded configuration file: %s', found)
+    logger.info('Logging: writing to file %s', logfile)
+    logger.info('Logging: setting loglevel to %s', loglevel)
+
+    if os.getuid() != 0:
+        logger.critical("netgrasp must be run as root, exiting")
+        sys.exit('ERROR: Netgrasp must be run as root.')
+
+    try:
+        import sqlite3
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
+        logger.critical("failed to import sqlite3, try: 'pip install sqlite3', exiting")
+        sys.exit("ERROR: Failed to import sqlite3, try: 'pip install sqlite3'")
+
+    try:
+        from daemonize import Daemonize
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
+        logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting")
+        sys.exit("ERROR: Failed to import daemonize, try: 'pip install daemonize'")
+
+    logger.info('main process running as user %s',  whoami())
+    if config.has_section('Security'):
+        if config.has_option('Security', 'gid'):
+            gid = config.getint('Security', 'gid');
+        else:
+            gid = default_gid
+        if config.has_option('Security', 'uid'):
+            uid = config.getint('Security', 'uid');
+        else:
+            uid = default_gid
+    else:
+        # Default to uid/gid 1, typically the daemon user
+        gid = default_gid;
+        uid = default_uid;
+    logger.debug('Security: setting uid to %d, gid to %d', uid, gid)
+
+    if config.has_section('Database'):
+        if config.has_option('Database', 'filename'):
+            db_filename = config.get('Database', 'filename');
+        else:
+            logger.critical("No database defined in configuration file, exiting.")
+            sys.exit("No database filename defined in configuration file, exiting.")
+    else:
+        logger.critical("No database defined in configuration file, exiting.")
+        sys.exit("No database filename defined in configuration file, exiting.")
+
+    logger.debug('Database filename: %s', db_filename)
+
+    parent_conn, child_conn = multiprocessing.Pipe()
+    wiretap = multiprocessing.Process(name='wiretap', target=wiretap, args=[child_conn])
+    wiretap.daemon = True
+    wiretap.start()
+
+    pid = '/var/run/daemon.pid'
+
+    daemon = Daemonize(app="netgrasp", pid=pid, action=main_process, keep_fds=keep_fds, logger=logger, verbose=True)
+    daemon.start()
