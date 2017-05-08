@@ -12,6 +12,7 @@ import struct
 import socket
 import datetime
 from email.utils import parseaddr
+
 import time
 
 class Netgrasp:
@@ -34,50 +35,169 @@ class Netgrasp:
     DEFAULT_GID       = 1
     DEFAULT_LOGLEVEL  = logging.DEBUG
     DEFAULT_LOGFILE   = "netgrasp.log"
-    DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s] [%(processName)s] %(message)s"
+    DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
     DEFAULT_PIDFILE   = "netgrasp.pid"
+
+    config_instance = ''
+    database_instane = ''
 
     class Config:
         def __init__(self, parser):
             self.parser = parser
             self.found = self.parser.read(['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf'])
 
-        def getText(self, section, option, default):
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-                value = self.parser.get(section, option)
-                logger.info('%s: %s set to %s', section, option, value)
-            else:
-                value = default
-                if self.parser.has_section(section):
-                    logger.info('%s: %s set to default of %s', section, option, value)
+        def _GetValue(self, section, option, value, default, required, secret):
+            if value:
+                if secret:
+                    logger.info('%s: %s set', section, option)
                 else:
-                    logger.info('%s does not exist: %s set to default %s', section, option, value)
+                    logger.info('%s: %s set to %s', section, option, value)
+            else:
+                if default:
+                    value = default
+                    if not secret:
+                        if self.parser.has_section(section):
+                            logger.info('%s: %s set to default of %s', section, option, value)
+                        else:
+                            logger.info('%s does not exist: %s set to default %s', section, option, value)
+                    else:
+                        logger.info('%s: %s set to default', section, option)
+                elif required:
+                    logger.critical('Required [%s] %s not defined in configuration file, exiting.', section, option)
+                    sys.exit("""Required [%s] %s not defined in configuration file, exiting.""" % (section, option))
             return value
 
-    class Database:
-        def __init__(self, connection, cursor):
-            self.connection = connection
-            self.cursor = cursor
+        def GetText(self, section, option, default = None, required = True, secret = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.get(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
 
+        def GetInt(self, section, option, default = None, required = True, secret = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.getint(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+
+        def GetBoolean(self, section, option, default = None, required = True, secret = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.getboolean(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+
+    class Database:
+        filename = ''
+
+        def __init__(self):
+            self.connection = sqlite3.connect(ng.database_filename, detect_types=sqlite3.PARSE_DECLTYPES)
+
+    # Determine who we are, for pretty logging.
     def whoami(self):
         whoami = pwd.getpwuid(os.getuid())
         return whoami[0]
+
+    # Drop root permissions when no longer needed.
+    def drop_root(self):
+        os.setgroups([])
+        os.setgid(self.config_instance.GetInt('Security', 'gid', ng.DEFAULT_GID))
+        os.setuid(self.config_instance.GetInt('Security', 'uid', ng.DEFAULT_UID))
+        logger.info('running as user %s',  self.whoami())
 
 def main():
     logger.info('main process running as user %s',  ng.whoami())
 
     parent_conn, child_conn = multiprocessing.Pipe()
-    child = multiprocessing.Process(name='wiretap', target=wiretap, args=[child_conn])
+    database_lock = multiprocessing.Lock()
+    child = multiprocessing.Process(name='wiretap', target=wiretap, args=[database_lock, child_conn])
     child.daemon = True
     child.start()
 
-    time.sleep(5)
+    ng.drop_root()
+    assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
-def wiretap(child_conn):
+    try:
+        ng.database_instance = ng.Database()
+    except Exception as e:
+        logger.critical("%s", e)
+        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, whoami())
+        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, whoami()))
+    logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
+    ng.database_instance.cursor = ng.database_instance.connection.cursor()
+
+    database_lock.acquire()
+    create_database()
+    # @TODO: Add indexes
+    database_lock.release()
+
+    active_timeout = ng.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2)
+    delay = ng.config_instance.GetInt('Listen', 'delay', 30)
+
+    run = True
+    while run:
+        logger.debug('top of master while loop')
+        time.sleep(delay)
+        run = False
+        #identify_macs()
+        #detect_stale_ips()
+        #detect_netscans()
+        #send_notifications()
+        #send_email_alerts()
+        #send_email_digests()
+        #packet = parent_conn.recv()
+        #src_ip = socket.inet_ntoa(packet.data.spa)
+        #src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
+        #dst_ip = socket.inet_ntoa(packet.data.tpa)
+        #dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
+        #if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
+        #    logger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+        #    ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
+        #    ip_request(dst_ip, dst_mac)
+        #elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+        #    ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
+        #    logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+
+    send_email()
+
+# Perform simplistic email address validation.
+def valid_email_address(address):
+    if not '@' in parseaddr(address)[1]:
+        return False
+    else:
+        return True
+
+def send_email():
+    send = True
+    email_to = ng.config_instance.GetText('Email', 'to', None, True).split(',')
+    valid = True
+    for email in email_to:
+        if not valid_email_address(email):
+            valid = False
+            logger.warn('unable to send email, invalid to address (%s)', email)
+    if not valid:
+        send = False
+
+    email_from = ng.config_instance.GetText('Email', 'from', None, True)
+    if not valid_email_address(email_from):
+        logger.warn('unable to send email, invalid from address (%s)', email)
+        send = False
+
+    email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname', None, True)
+    email_port = ng.config_instance.GetText('Email', 'smtp_port')
+    email_ssl = ng.config_instance.GetBoolean('Email', 'smtp_ssl', True)
+    email_username = ng.config_instance.GetText('Email', 'smtp_username', None, False)
+    email_password = ng.config_instance.GetText('Email', 'smtp_password', None, False, True)
+
+    # @TODO validate configured alerts and digests
+    alerts = ng.config_instance.GetText('Email', 'alerts', True).split(',')
+    digest = ng.config_instance.GetText('Email', 'digests', True).split(',')
+
+def wiretap(database_lock, child_conn):
     import sys
     logger.info('wiretap process running as user %s',  ng.whoami())
 
-    name = multiprocessing.current_process().name
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
 
     try:
@@ -85,48 +205,43 @@ def wiretap(child_conn):
     except Exception as e:
         logger.critical("fatal exception: %s", e)
         logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
-        sys.exit("ERROR: Failed to import dpkt, try: 'pip install dpkt'")
+        sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
     try:
         import pcap
     except Exception as e:
         logger.critical("fatal exception: %s", e)
         logger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
-        sys.exit("ERROR: Failed to import pcap, try: 'pip install pypcap'")
+        sys.exit("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
 
     devices = pcap.findalldevs()
-    logger.debug('identified devices: %s', devices)
+    logger.info('identified devices: %s', devices)
     if len(devices) <= 0:
       logger.critical('no available devices (are you in a jail?), exiting')
-      sys.exit("ERROR: No available devices, try running tcpdump manually to debug.")
-    default_interface = devices[0]
+      sys.exit("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
 
-    if config.has_section('Listen'):
-      if config.has_option('Listen', 'interface'):
-        default_interface = config.get('Listen', 'interface');
-        if default_interface not in devices:
-          logger.critical('invalid interface %s configured, exiting.', default_interface)
-          sys.exit("ERROR: Invalid interface configured.")
-        logger.debug('Listen: setting interface to %s', default_interface)
-      else:
-        logger.info('no interface configured, attempt to use first available.')
-    else:
-      logger.info('no interface configured, attempt to use first available.')
-
-    interface = default_interface
-    logger.info('configured to listen on interface %s', interface)
+    interface = ng.config_instance.GetText('Listen', 'interface', devices[0])
     local_net, local_mask = pcap.lookupnet(interface)
+    logger.warning('listening for arp traffic on %s interface: %s/%s', interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
 
-    pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+    try:
+        pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+        pc.setfilter('arp')
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
+        logger.critical("failed to invoke pcap, exiting")
+        sys.exit("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
-    # drop all root privileges, we no longer need them
-    os.setgroups([])
-    os.setgid(gid)
-    os.setuid(uid)
-
+    ng.drop_root()
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
-    logger.info('wiretap process running as user %s',  whoami())
 
-    pc.setfilter('arp')
+    try:
+        ng.database_instance = ng.Database()
+    except Exception as e:
+        logger.critical("%s", e)
+        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, whoami())
+        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, whoami()))
+    logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
+    ng.database_instance.cursor = ng.database_instance.connection.cursor()
 
     while True:
         if child_conn.poll():
@@ -136,23 +251,97 @@ def wiretap(child_conn):
                 sys.exit(0)
         pc.loop(1, received_arp, child_conn)
 
+def create_database():
+    logger.debug('Creating database tables, if not already existing.')
+    ng.database_instance.cursor.execute("""
+      CREATE TABLE IF NOT EXISTS state(
+        id INTEGER PRIMARY KEY,
+        key VARCHAR UNIQUE,
+        value TEXT
+      )
+    """)
+    ng.database_instance.cursor.execute("""
+      CREATE TABLE IF NOT EXISTS seen(
+        sid INTEGER PRIMARY KEY,
+        mac TEXT,
+        ip TEXT,
+        interface TEXT,
+        network TEXT,
+        firstSeen TIMESTAMP,
+        firstRequested TIMESTAMP,
+        lastSeen TIMESTAMP,
+        lastRequested TIMESTAMP,
+        counter NUMERIC,
+        active NUMERIC,
+        self NUMERIC
+      )
+    """)
+    ng.database_instance.cursor.execute("""
+      CREATE TABLE IF NOT EXISTS arplog(
+        aid INTEGER PRIMARY KEY,
+        src_mac TEXT,
+        src_ip TEXT,
+        dst_mac TEXT,
+        dst_ip TEXT,
+        request NUMERIC,
+        interface TEXT,
+        network TEXT,
+        timestamp TIMESTAMP
+      )
+    """)
+    ng.database_instance.cursor.execute("""
+      CREATE TABLE IF NOT EXISTS event(
+        eid INTEGER PRIMARY KEY,
+        mac TEXT,
+        ip TEXT,
+        interface TEXT,
+        network TEXT,
+        timestamp TIMESTAMP,
+        processed NUMERIC,
+        event TEXT
+      )
+    """)
+    ng.database_instance.cursor.execute("""
+      CREATE TABLE IF NOT EXISTS vendor(
+        vid INTEGER PRIMARY KEY,
+        mac TEXT,
+        vendor TEXT,
+        customname TEXT
+      )
+    """)
+    ng.database_instance.cursor.execute("""
+      CREATE TABLE IF NOT EXISTS host(
+        hid INTEGER PRIMARY KEY,
+        mac TEXT,
+        ip TEXT,
+        hostname TEXT,
+        customname TEXT
+      )
+    """)
+    ng.database_instance.connection.commit()
+
+def received_arp(hdr, data, child_conn):
+    logger.debug('arp packet sniffed')
+    child_conn.send(dpkt.ethernet.Ethernet(data))
+    exit
+
 if __name__ == '__main__':
     ng = Netgrasp()
-    config = ng.Config(ConfigParser.ConfigParser())
+    ng.config_instance = ng.Config(ConfigParser.ConfigParser())
 
     # Start logger, reading relevant configuration.
     logger = logging.getLogger(__name__)
     formatter = logging.Formatter(ng.DEFAULT_LOGFORMAT)
     try:
-        handler = logging.handlers.TimedRotatingFileHandler(config.getText('Logging', 'filename', ng.DEFAULT_LOGFILE), when="midnight", backupCount=3)
+        handler = logging.handlers.TimedRotatingFileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE), when="midnight", backupCount=3)
     except Exception as e:
-        sys.exit("""Fatal exception: %s""" % e)
+        sys.exit("""Fatal exception setting up log handler: %s""" % e)
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.info('starting')
-    logger.info('loaded configuration file: %s', config.found)
-    logger.setLevel(config.getText('Logging', 'level', ng.DEFAULT_LOGLEVEL))
+    logger.info('loaded configuration file: %s', ng.config_instance.found)
+    logger.setLevel(ng.config_instance.GetText('Logging', 'level', ng.DEFAULT_LOGLEVEL))
 
     keep_fds=[handler.stream.fileno()]
 
@@ -164,29 +353,42 @@ if __name__ == '__main__':
         import sqlite3
     except Exception as e:
         logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import sqlite3, try: 'pip install sqlite3', exiting")
-        sys.exit("ERROR: Failed to import sqlite3, try: 'pip install sqlite3'")
+        logger.critical("failed to import sqlite3, try: 'pip install sqlite3', exiting.")
+        sys.exit("Fatal error: failed to import sqlite3, try: 'pip install sqlite3', exiting.")
+
+    try:
+        import dpkt
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
+        logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
+        sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
 
     try:
         from daemonize import Daemonize
     except Exception as e:
         logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting")
-        sys.exit("ERROR: Failed to import daemonize, try: 'pip install daemonize'")
+        logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting.")
+        sys.exit("Fatal error: failed to import daemonize, try: 'pip install daemonize', exiting.")
 
-    pidfile = config.getText('Logging', 'pidfile', ng.DEFAULT_PIDFILE)
+    notification_alerts = ng.config_instance.GetText('Notifications', 'alerts')
+    if notification_alerts:
+        try:
+            import ntfy
+        except Exception as e:
+            logger.critical("fatal exception: %s", e)
+            logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts, exiting.", whoami())
+            sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (whoami()))
+    else:
+        notification_alerts = []
+    ng.database_filename = ng.config_instance.GetText('Database', 'filename', False)
+
+    pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE)
 
     try:
         daemon = Daemonize(app="netgrasp", pid=pidfile, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
         daemon.start()
     except Exception as e:
         sys.exit("""Failed to daemonize: %s, exiting""" % e)
-
-def received_arp(hdr, data, child_conn):
-    import dpkt
-    logger.debug('arp packet sniffed')
-    child_conn.send(dpkt.ethernet.Ethernet(data))
-    exit
 
 def set_state(key, value):
     logger.debug('Set key[%s] to value[%s]', key, value)
@@ -234,74 +436,6 @@ def pretty_date(time):
     if day_diff < 365:
         return str(day_diff / 30) + " months ago"
     return str(day_diff / 365) + " years ago"
-
-def create_database():
-    db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS state(
-        id INTEGER PRIMARY KEY,
-        key VARCHAR UNIQUE,
-        value TEXT
-      )
-    """)
-    db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS seen(
-        sid INTEGER PRIMARY KEY,
-        mac TEXT,
-        ip TEXT,
-        interface TEXT,
-        network TEXT,
-        firstSeen TIMESTAMP,
-        firstRequested TIMESTAMP,
-        lastSeen TIMESTAMP,
-        lastRequested TIMESTAMP,
-        counter NUMERIC,
-        active NUMERIC,
-        self NUMERIC
-      )
-    """)
-    db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS arplog(
-        aid INTEGER PRIMARY KEY,
-        src_mac TEXT,
-        src_ip TEXT,
-        dst_mac TEXT,
-        dst_ip TEXT,
-        request NUMERIC,
-        interface TEXT,
-        network TEXT,
-        timestamp TIMESTAMP
-      )
-    """)
-    db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS event(
-        eid INTEGER PRIMARY KEY,
-        mac TEXT,
-        ip TEXT,
-        interface TEXT,
-        network TEXT,
-        timestamp TIMESTAMP,
-        processed NUMERIC,
-        event TEXT
-      )
-    """)
-    db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS vendor(
-        vid INTEGER PRIMARY KEY,
-        mac TEXT,
-        vendor TEXT,
-        customname TEXT
-      )
-    """)
-    db_cursor.execute("""
-      CREATE TABLE IF NOT EXISTS host(
-        hid INTEGER PRIMARY KEY,
-        mac TEXT,
-        ip TEXT,
-        hostname TEXT,
-        customname TEXT
-      )
-    """)
-    nbcore.db_conn.commit()
 
 def clean_shutdown(signal, frame):
     # Log the reason we have exited
@@ -843,143 +977,3 @@ def send_email_digests():
 
         except Exception as e:
             logger.warning('Failed to send email: %s', e)
-
-def main_process():
-    # drop all root privileges, we no longer need them
-    os.setgroups([])
-    os.setgid(gid)
-    os.setuid(uid)
-
-    assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
-    logger.info('main process running as user %s',  whoami())
-
-    signal.signal(signal.SIGINT, clean_shutdown)
-
-    try:
-        ngcore.set_db_conn(sqlite3.connect(db_filename, detect_types=sqlite3.PARSE_DECLTYPES))
-    except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to open or create %s (as user %s), exiting", db_filename, whoami())
-        parent_conn.send('ABORT')
-        sys.exit("ERROR: Failed to open or create database file.")
-    logger.info('opened %s as user %s', db_filename, whoami());
-    # create database if necessary
-    ngcore.set_db_cursor(db_conn.cursor())
-    create_database()
-
-    if config.has_section('Listen') and config.has_option('Listen', 'active_timeout'):
-        active_timeout = config.getint('Listen', 'active_timeout')
-        logger.debug('Listen: setting active_timeout to %d', active_timeout)
-    else:
-        active_timeout = 60 * 20 # default to 20 minutes
-        logger.debug('Listen: defaulting active_timeout to %d', active_timeout)
-
-    if config.has_section('Email'):
-        if config.has_option('Email', 'to'):
-            # @TODO: Cleanup spaces after commas
-            email_to = config.get('Email', 'to').split(',')
-            valid = True
-            for email in email_to:
-                # Very simplistic email address validation.
-                if not '@' in parseaddr(email)[1]:
-                    valid = False
-                    logger.warn('Email: invalid email to address (%s), email disabled', email)
-            if not valid:
-                email_to = False
-
-        if config.has_option('Email', 'from'):
-            email_from = config.get('Email', 'from')
-            # Very simplistic email address validation.
-            if not '@' in parseaddr(email_from)[1]:
-                logger.info('Email: invalid email from address (%s), emails disabled', email_from)
-                email_from = False
-        if config.has_option('Email', 'smtp_hostname'):
-            email_hostname = config.get('Email', 'smtp_hostname')
-        if config.has_option('Email', 'smtp_port'):
-            email_port = config.getint('Email', 'smtp_port')
-        if config.has_option('Email', 'smtp_ssl'):
-            email_ssl = config.getboolean('Email', 'smtp_ssl')
-        else:
-            email_ssl = False
-        if config.has_option('Email', 'smtp_username'):
-            email_username = config.get('Email', 'smtp_username')
-        if config.has_option('Email', 'smtp_password'):
-            email_password = config.get('Email', 'smtp_password')
-        # @TODO validate coonfigured alerts and digests
-        if config.has_option('Email', 'alerts'):
-            alerts = config.get('Email', 'alerts').split(',')
-        if config.has_option('Email', 'digests'):
-            digests = config.get('Email', 'digests').split(',')
-
-    if email_to and email_from and email_hostname and email_port:
-        if alerts:
-            logger.info('Sending alerts %s to %s from %s', alerts, email_to, email_from)
-        if digests:
-            logger.info('Sending digests %s to %s from %s', digests, email_to, email_from)
-    else:
-        logger.warning('Email is not properly configured, no notifications will be sent.')
-
-    if config.has_section('Notifications') and config.has_option('Notifications', 'alerts'):
-        notification_alerts = config.get('Notifications', 'alerts')
-        logger.info('Notifications: setting alerts to %s', notification_alerts)
-        try:
-            import ntfy
-        except Exception as e:
-            logger.critical("fatal exception: %s", e)
-            logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications, exiting", whoami())
-            sys.exit("""ERROR: Failed to import ntfy (as user %s), try: 'pip install ntfy' or disable notifications""" % (whoami()))
-    else:
-        notification_alerts = []
-
-    import dpkt
-
-    # loop forever, listening for ARP packets ...
-    while True:
-        identify_macs()
-        detect_stale_ips()
-        detect_netscans()
-        send_notifications()
-        send_email_alerts()
-        send_email_digests()
-        packet = parent_conn.recv()
-        src_ip = socket.inet_ntoa(packet.data.spa)
-        src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
-        dst_ip = socket.inet_ntoa(packet.data.tpa)
-        dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
-        if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-            logger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
-            ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
-            ip_request(dst_ip, dst_mac)
-        elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-            ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
-            logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
-
-if __name__ == '__main__':
-    if config.has_section('Security'):
-        if config.has_option('Security', 'gid'):
-            gid = config.getint('Security', 'gid');
-        else:
-            gid = default_gid
-        if config.has_option('Security', 'uid'):
-            uid = config.getint('Security', 'uid');
-        else:
-            uid = default_gid
-    else:
-        # Default to uid/gid 1, typically the daemon user
-        gid = default_gid;
-        uid = default_uid;
-    logger.debug('Security: setting uid to %d, gid to %d', uid, gid)
-
-    if config.has_section('Database'):
-        if config.has_option('Database', 'filename'):
-            db_filename = config.get('Database', 'filename');
-        else:
-            logger.critical("No database defined in configuration file, exiting.")
-            sys.exit("No database filename defined in configuration file, exiting.")
-    else:
-        logger.critical("No database defined in configuration file, exiting.")
-        sys.exit("No database filename defined in configuration file, exiting.")
-
-    logger.debug('Database filename: %s', db_filename)
-
-
