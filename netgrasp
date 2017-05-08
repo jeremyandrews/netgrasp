@@ -15,6 +15,8 @@ from email.utils import parseaddr
 
 import time
 
+HEARTBEAT = 'nghb'
+
 class Netgrasp:
     BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
@@ -49,22 +51,22 @@ class Netgrasp:
         def _GetValue(self, section, option, value, default, required, secret):
             if value:
                 if secret:
-                    logger.info('%s: %s set', section, option)
+                    logger.info("configuration [%s] '%s' set", section, option)
                 else:
-                    logger.info('%s: %s set to %s', section, option, value)
+                    logger.info("configuration [%s] '%s' set to '%s'", section, option, value)
             else:
                 if default:
                     value = default
                     if not secret:
                         if self.parser.has_section(section):
-                            logger.info('%s: %s set to default of %s', section, option, value)
+                            logger.info("configuration [%s] '%s' set to default of '%s'", section, option, value)
                         else:
-                            logger.info('%s does not exist: %s set to default %s', section, option, value)
+                            logger.info("configuration [%s] does not exist: '%s' set to default '%s'", section, option, value)
                     else:
-                        logger.info('%s: %s set to default', section, option)
+                        logger.info("configuration [%s] '%s' set to default", section, option)
                 elif required:
-                    logger.critical('Required [%s] %s not defined in configuration file, exiting.', section, option)
-                    sys.exit("""Required [%s] %s not defined in configuration file, exiting.""" % (section, option))
+                    logger.critical("Required [%s] '%s' not defined in configuration file, exiting.", section, option)
+                    sys.exit("""Required [%s] '%s' not defined in configuration file, exiting.""" % (section, option))
             return value
 
         def GetText(self, section, option, default = None, required = True, secret = False):
@@ -137,6 +139,7 @@ def main():
 
     run = True
     while run:
+        parent_conn.send(HEARTBEAT)
         logger.debug('top of master while loop')
         time.sleep(delay)
         run = False
@@ -168,6 +171,7 @@ def valid_email_address(address):
     else:
         return True
 
+# Send an email.
 def send_email():
     send = True
     email_to = ng.config_instance.GetText('Email', 'to', None, True).split(',')
@@ -194,6 +198,7 @@ def send_email():
     alerts = ng.config_instance.GetText('Email', 'alerts', True).split(',')
     digest = ng.config_instance.GetText('Email', 'digests', True).split(',')
 
+# Child process: wiretap, uses pcap to sniff arp packets.
 def wiretap(database_lock, child_conn):
     import sys
     logger.info('wiretap process running as user %s',  ng.whoami())
@@ -243,14 +248,21 @@ def wiretap(database_lock, child_conn):
     logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
     ng.database_instance.cursor = ng.database_instance.connection.cursor()
 
-    while True:
-        if child_conn.poll():
+    run = True
+    last_heartbeat = datetime.datetime.now()
+    while run:
+        while child_conn.poll():
             message = child_conn.recv()
-            if (message == 'ABORT'):
-                logger.critical('we have received ABORT message, exiting')
-                sys.exit(0)
+            if (message == HEARTBEAT):
+                logger.info('received heartbeat from main process')
+                last_heartbeat = datetime.datetime.now()
         pc.loop(1, received_arp, child_conn)
+        time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
+        if (datetime.datetime.now() >= time_to_exit):
+            run = False
+    logger.critical('No recent heartbeats from main processing, exiting.')
 
+# Database definitions.
 def create_database():
     logger.debug('Creating database tables, if not already existing.')
     ng.database_instance.cursor.execute("""
@@ -320,6 +332,7 @@ def create_database():
     """)
     ng.database_instance.connection.commit()
 
+# We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
     logger.debug('arp packet sniffed')
     child_conn.send(dpkt.ethernet.Ethernet(data))
@@ -436,11 +449,6 @@ def pretty_date(time):
     if day_diff < 365:
         return str(day_diff / 30) + " months ago"
     return str(day_diff / 365) + " years ago"
-
-def clean_shutdown(signal, frame):
-    # Log the reason we have exited
-    logger.critical("SIGINT received, exiting")
-    sys.exit(0)
 
 def ip_is_mine(ip):
     return (ip == socket.gethostbyname(socket.gethostname()))
