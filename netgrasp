@@ -74,7 +74,7 @@ class Netgrasp:
             if (self.parser.has_section(section) and self.parser.has_option(section, option)):
                 value = self.parser.get(section, option)
             else:
-                value = ''
+                value = None
             return self._GetValue(section, option, value, default, required, secret)
 
         def GetInt(self, section, option, default = None, required = True, secret = False):
@@ -638,7 +638,7 @@ def detect_netscans():
 
 def send_notifications():
     logger.debug('Entering send_notifications()')
-    if len(ng.notification_alerts):
+    if ng.notification_alerts:
         alerts = ','.join(ng.notification_alerts)
         day = datetime.datetime.now() - datetime.timedelta(days=1)
         ng.database_instance.cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ('+ ','.join('?'*len(ng.notification_alerts)) + ')', ng.notification_alerts)
@@ -1026,8 +1026,9 @@ if __name__ == '__main__':
             logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting.")
             sys.exit("Fatal error: failed to import daemonize, try: 'pip install daemonize', exiting.")
 
-    ng.notification_alerts = ng.config_instance.GetText('Notifications', 'alerts', None, False).split(',')
-    if len(ng.notification_alerts):
+    ng.notification_alerts = ng.config_instance.GetText('Notifications', 'alerts', None, False)
+    if ng.notification_alerts:
+        ng.notification_alerts = ng.notification_alerts.split(',')
         try:
             import ntfy
         except Exception as e:
