@@ -13,6 +13,11 @@ Netgrasp tracks IP and MAC address pairs seen on the network while it runs,
 optionally notifying you when a new device joins your network. It can also
 provide daily summary digests detailing devices on your network.
 
+Netgrasp can also be daemonized, running in the background:
+```
+  sudo python2 ./netgrasp -d
+```
+
 ## Dependencies
  * Python 2
  * [dpkt](https://github.com/kbandla/dpkt) (`pip install dpkt`)
@@ -31,7 +36,8 @@ Netgrasp will look for its configuration file at the following paths:
 ## [Listen]
 In the Listen section, you must specify the interface Netgrasp should monitor. For example:
 ```
-  interface = en0
+[Listen]
+interface = en0
 ```
 
 You can optionally specify a timeout period (in seconds) after which a device is
@@ -39,7 +45,16 @@ considered to no longer be active. Different devices request updated arp
 information at different intervals, but generally this should be over 1800
 seconds to avoid false positives. For example:
 ```
-  active_timeout = 7200
+[Listen]
+active_timeout = 7200
+```
+
+Alert emails and notifications are processed at regular intervals. You can tune
+how frequently this happens by modifying the delay setting, specifying a value
+in seconds. For example:
+```
+[Listen]
+delay = 5
 ```
 
 ## [Security]
@@ -49,8 +64,9 @@ privileges the moment it no longer needs them, instead becoming the user/group
 configured here. By default it will change to uid/gid 1, which is typically the
 Daemon user. For example:
 ```
-  uid = 1
-  gid = 1
+[Security]
+uid = 1
+gid = 1
 ```
 
 Netgrasp will refuse to run as the root user, even if you configure the uid with
@@ -62,7 +78,8 @@ Sqlite3 database file. In this section, you must specify where this database
 should be written.  The database must be readable and writeable by the user you
 specified in the Security section. For example:
 ```
-  filename = /var/db/netgrasp/netgrasp.db
+[Database]
+filename = /var/db/netgrasp/netgrasp.db
 ```
 
 ## [Logging]
@@ -72,12 +89,25 @@ Setting the logging level to INFO notifies you of interesting things (such as
 changes in state for devices on the network). Setting the logging level to DEBUG
 will flood you with information. For example:
 ```
-  level = INFO
+[Logging]
+level = INFO
 ```
 
-By default, Netgrasp logs ever single ARP packet it sees. This allows useful
-patterns to be identified, such as network scans. It is recommended you leave
-this enabled to allow Netgrasp to be as useful as possible.
+You can force Netgrasp to generate verbose logs by starting the program with the
+-v flag. This causes Netgrasp to ignore the [Logging] level setting, and instead
+to use DEBUG.
+```
+  sudo python2 ./netgrasp -v
+```
+
+If you choose to daemonize Netgrasp, the mast process pid gets written to a pid
+file and logs are written to a log file. The paths to these files are configured
+as follows:
+```
+[Logging]
+pidfile = /var/run/netgrasp.pid
+filename = /var/log/netgrasp.log
+```
 
 ## [Email]
 Netgrasp currently can send two different kinds of notification emails: alerts
@@ -89,13 +119,14 @@ In order for Netgrasp to send you notificaitons, you must properly configure an
 smtp server that it can use. Notifications can be sent to multiple people in a
 comma separated list. For example
 ```
-  to = user1@example.com,user2@example.com,user3@example.com
-  from = netgrasp@example.com
-  smtp_hostname = example.com
-  smtp_port = 587
-  smtp_ssl = yes
-  smtp_username = username
-  smtp_password = password
+[Email]
+to = user1@example.com,user2@example.com,user3@example.com
+from = netgrasp@example.com
+smtp_hostname = example.com
+smtp_port = 587
+smtp_ssl = yes
+smtp_username = username
+smtp_password = password
 ```
 
 The following alert types are supported:
@@ -110,7 +141,8 @@ The following alert types are supported:
 
 For example:
 ```
-  alerts = first_seen_recently,first_seen,network_scan
+[Email]
+alerts = first_seen_recently,first_seen,network_scan
 ```
 
 The following digest types are supported:
@@ -130,11 +162,11 @@ notifications.
 
 For example:
 ```
-  alerts = first_seen_recently,first_seen,network_scan
+[Notifications]
+alerts = first_seen_recently,network_scan
 ```
 
 # Roadmap
-* Log to configurable file, daemonize
 * CLI netgraspcli command for performing real time tasks:
    * list active devices, with optional filters
    * list recent events, with optional filters

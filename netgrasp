@@ -954,22 +954,49 @@ def send_email_digests():
             logger.warning('Failed to send email: %s', e)
 
 if __name__ == '__main__':
+    import getopt
+
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "vd")
+    except getopt.GetoptError as err:
+        print str(err)
+        sys.exit(2)
+
+    verbose = False
+    daemonize = False
+    for o, a in opts:
+        if o == '-v':
+            verbose = True
+        if o == '-d':
+            daemonize = True
+
     ng = Netgrasp()
     ng.config_instance = ng.Config(ConfigParser.ConfigParser())
 
     # Start logger, reading relevant configuration.
     logger = logging.getLogger(__name__)
     formatter = logging.Formatter(ng.DEFAULT_LOGFORMAT)
-    try:
-        handler = logging.handlers.TimedRotatingFileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE), when="midnight", backupCount=3)
-    except Exception as e:
-        sys.exit("""Fatal exception setting up log handler: %s""" % e)
+    if daemonize:
+        try:
+            handler = logging.handlers.TimedRotatingFileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE), when="midnight", backupCount=3)
+        except Exception as e:
+            sys.exit("""Fatal exception setting up log handler: %s""" % e)
+    else:
+        logger.warning("Output forced to stderr, started without -d flag.")
+        handler = logging.StreamHandler()
+
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
     logger.info('starting')
     logger.info('loaded configuration file: %s', ng.config_instance.found)
-    logger.setLevel(ng.config_instance.GetText('Logging', 'level', ng.DEFAULT_LOGLEVEL))
+    if verbose:
+        logger.warning("[Logging] level forced to DEBUG, started with -v flag.")
+    else:
+        logger.setLevel(ng.config_instance.GetText('Logging', 'level', ng.DEFAULT_LOGLEVEL))
 
     keep_fds=[handler.stream.fileno()]
 
@@ -991,12 +1018,13 @@ if __name__ == '__main__':
         logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
         sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
 
-    try:
-        from daemonize import Daemonize
-    except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting.")
-        sys.exit("Fatal error: failed to import daemonize, try: 'pip install daemonize', exiting.")
+    if daemonize:
+        try:
+            from daemonize import Daemonize
+        except Exception as e:
+            logger.critical("fatal exception: %s", e)
+            logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting.")
+            sys.exit("Fatal error: failed to import daemonize, try: 'pip install daemonize', exiting.")
 
     ng.notification_alerts = ng.config_instance.GetText('Notifications', 'alerts').split(',')
     if ng.notification_alerts:
@@ -1010,10 +1038,12 @@ if __name__ == '__main__':
         ng.notification_alerts = []
     ng.database_filename = ng.config_instance.GetText('Database', 'filename', False)
 
-    pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE)
-
-    try:
-        daemon = Daemonize(app="netgrasp", pid=pidfile, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
-        daemon.start()
-    except Exception as e:
-        sys.exit("""Failed to daemonize: %s, exiting""" % e)
+    if daemonize:
+        pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE)
+        try:
+            daemon = Daemonize(app="netgrasp", pid=pidfile, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
+            daemon.start()
+        except Exception as e:
+            sys.exit("""Failed to daemonize: %s, exiting""" % e)
+    else:
+        main()
