@@ -74,7 +74,7 @@ class Netgrasp:
             if (self.parser.has_section(section) and self.parser.has_option(section, option)):
                 value = self.parser.get(section, option)
             else:
-                value = None
+                value = ''
             return self._GetValue(section, option, value, default, required, secret)
 
         def GetInt(self, section, option, default = None, required = True, secret = False):
