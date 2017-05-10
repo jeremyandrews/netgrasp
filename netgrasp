@@ -641,20 +641,16 @@ def detect_netscans():
     now = datetime.datetime.now()
 
     three_minutes_ago = now - datetime.timedelta(minutes=3)
-    ng.database_instance.cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) as count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip ORDER BY count', (three_minutes_ago,))
+    ng.database_instance.cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50', (three_minutes_ago,))
     scans = ng.database_instance.cursor.fetchall()
     if scans:
         ng.database_lock.acquire()
     for scan in scans:
-        # @TODO we should be able to filter <50 with the SQL query
-        if scan[0] > 50:
-            ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (scan[1], scan[2], ng.EVENT_SCAN, three_minutes_ago))
-            already_detected = ng.database_instance.cursor.fetchone()
-            if not already_detected:
-                ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (scan[1], scan[2], now, ng.EVENT_SCAN))
-                logger.info('Detected network scan by %s [%s]', scan[2], scan[1])
-        else:
-            logger.debug('Not a scan: %s', scan)
+        ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (scan[1], scan[2], ng.EVENT_SCAN, three_minutes_ago))
+        already_detected = ng.database_instance.cursor.fetchone()
+        if not already_detected:
+            ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (scan[1], scan[2], now, ng.EVENT_SCAN))
+            logger.info('Detected network scan by %s [%s]', scan[2], scan[1])
     if scans:
         ng.database_instance.connection.commit()
         ng.database_lock.release()
