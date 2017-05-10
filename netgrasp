@@ -456,6 +456,7 @@ def create_database():
     ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstRequested ON seen (ip, mac, firstRequested)")
     ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastRequested ON seen (ip, mac, lastRequested)")
     ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_lastSeen ON seen (active, lastSeen)")
+    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_active ON seen (ip, mac, active)")
     # PRAGMA index_list(seen)
 
     # Create arplog table.
@@ -472,6 +473,7 @@ def create_database():
         timestamp TIMESTAMP
       )
     """)
+    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
 
     # Create event table.
     ng.database_instance.cursor.execute("""
@@ -486,9 +488,11 @@ def create_database():
         event TEXT
       )
     """)
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_processed ON event (event, processed)")
+    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_timestamp_processed ON event (event, timestamp, processed)")
+    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_processed ON event (timestamp, processed)")
     # PRAGMA index_list(event)
 
+    # Create vendor table.
     ng.database_instance.cursor.execute("""
       CREATE TABLE IF NOT EXISTS vendor(
         vid INTEGER PRIMARY KEY,
@@ -497,6 +501,9 @@ def create_database():
         customname TEXT
       )
     """)
+    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac ON vendor (mac)")
+
+    # Create host table.
     ng.database_instance.cursor.execute("""
       CREATE TABLE IF NOT EXISTS host(
         hid INTEGER PRIMARY KEY,
@@ -506,6 +513,7 @@ def create_database():
         customname TEXT
       )
     """)
+    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
     ng.database_instance.connection.commit()
 
 # We've sniffed an arp packet off the wire.
@@ -802,10 +810,8 @@ def identify_macs():
 def name_ip(mac, ip):
     logger.debug('Entering name_ip(%s, %s)', mac, ip)
     if (mac == ng.BROADCAST):
-        logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s'", ip)
         ng.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
     else:
-        logger.debug("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip='%s' AND h.mac='%s'", ip, mac)
         ng.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
     detail = ng.database_instance.cursor.fetchone()
     if not detail:
@@ -915,7 +921,6 @@ def send_email_digests():
                 lower = now - datetime.timedelta(hours=range)
                 range = range - 1
                 upper = now - datetime.timedelta(hours=range)
-                logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
                 ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
                 distinct = ng.database_instance.cursor.fetchall()
                 body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
@@ -932,11 +937,9 @@ def send_email_digests():
                 body += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
 
         if (digest == 'daily'):
-            logger.debug("SELECT eid, processed FROM event WHERE timestamp>='%s' AND timestamp<='%s' AND NOT (processed & 2)", time_period, now)
             ng.database_instance.cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (time_period, now))
             processed = ng.PROCESSED_DAILY_DIGEST
         elif (digest == 'weekly'):
-            logger.debug("SELECT eid, processed FROM event WHERE timestamp>='%s' AND timestamp<='%s' AND NOT (processed & 4)", time_period, now)
             ng.database_instance.cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)', (time_period, now))
             processed = ng.PROCESSED_WEEKLY_DIGEST
         rows = ng.database_instance.cursor.fetchall()
