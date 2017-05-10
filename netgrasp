@@ -98,7 +98,7 @@ class Netgrasp:
     class Email:
         def __init__(self):
             self.enabled = True
-            self.email_to = ng.config_instance.GetText('Email', 'to', None, True).split(',')
+            self.email_to = ng.config_instance.GetText('Email', 'to').split(',')
             valid = True
             for email in self.email_to:
                 if not valid_email_address(email):
@@ -107,20 +107,20 @@ class Netgrasp:
             if not valid:
                 self.enabled = False
 
-            self.email_from = ng.config_instance.GetText('Email', 'from', None, True)
+            self.email_from = ng.config_instance.GetText('Email', 'from')
             if not valid_email_address(self.email_from):
                 logger.warn('unable to send email, invalid from address (%s)', self.email_from)
                 self.enabled = False
 
-            self.email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname', None, True)
-            self.email_port = ng.config_instance.GetText('Email', 'smtp_port')
-            self.email_ssl = ng.config_instance.GetBoolean('Email', 'smtp_ssl', True)
+            self.email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname')
+            self.email_port = ng.config_instance.GetText('Email', 'smtp_port', None, False)
+            self.email_ssl = ng.config_instance.GetBoolean('Email', 'smtp_ssl', True, False)
             self.email_username = ng.config_instance.GetText('Email', 'smtp_username', None, False)
             self.email_password = ng.config_instance.GetText('Email', 'smtp_password', None, False, True)
 
             # @TODO validate configured alerts and digests
-            self.alerts = ng.config_instance.GetText('Email', 'alerts', True).split(',')
-            self.digest = ng.config_instance.GetText('Email', 'digests', True).split(',')
+            self.alerts = ng.config_instance.GetText('Email', 'alerts').split(',')
+            self.digest = ng.config_instance.GetText('Email', 'digests').split(',')
 
     # Determine who we are, for pretty logging.
     def whoami(self):
@@ -130,8 +130,8 @@ class Netgrasp:
     # Drop root permissions when no longer needed.
     def drop_root(self):
         os.setgroups([])
-        os.setgid(self.config_instance.GetInt('Security', 'gid', ng.DEFAULT_GID))
-        os.setuid(self.config_instance.GetInt('Security', 'uid', ng.DEFAULT_UID))
+        os.setgid(self.config_instance.GetInt('Security', 'gid', ng.DEFAULT_GID, False))
+        os.setuid(self.config_instance.GetInt('Security', 'uid', ng.DEFAULT_UID, False))
         logger.info('running as user %s',  self.whoami())
 
     def set_state(self, key, value, secret = False):
@@ -181,8 +181,8 @@ def main():
     # @TODO: Add indexes
     ng.database_lock.release()
 
-    ng.active_timeout = ng.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2)
-    ng.delay = ng.config_instance.GetInt('Listen', 'delay', 30)
+    ng.active_timeout = ng.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
+    ng.delay = ng.config_instance.GetInt('Listen', 'delay', 15, False)
 
     ng.email_instance = ng.Email()
 
@@ -233,7 +233,7 @@ def wiretap(database_lock, child_conn):
       logger.critical('no available devices (are you in a jail?), exiting')
       sys.exit("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
 
-    interface = ng.config_instance.GetText('Listen', 'interface', devices[0])
+    interface = ng.config_instance.GetText('Listen', 'interface', devices[0], False)
     local_net, local_mask = pcap.lookupnet(interface)
     logger.warning('listening for arp traffic on %s interface: %s/%s', interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
 
@@ -996,7 +996,7 @@ if __name__ == '__main__':
     if verbose:
         logger.warning("[Logging] level forced to DEBUG, started with -v flag.")
     else:
-        logger.setLevel(ng.config_instance.GetText('Logging', 'level', ng.DEFAULT_LOGLEVEL))
+        logger.setLevel(ng.config_instance.GetText('Logging', 'level', ng.DEFAULT_LOGLEVEL, False))
 
     keep_fds=[handler.stream.fileno()]
 
@@ -1026,7 +1026,7 @@ if __name__ == '__main__':
             logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting.")
             sys.exit("Fatal error: failed to import daemonize, try: 'pip install daemonize', exiting.")
 
-    ng.notification_alerts = ng.config_instance.GetText('Notifications', 'alerts').split(',')
+    ng.notification_alerts = ng.config_instance.GetText('Notifications', 'alerts', None, False).split(',')
     if ng.notification_alerts:
         try:
             import ntfy
@@ -1036,10 +1036,10 @@ if __name__ == '__main__':
             sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (whoami()))
     else:
         ng.notification_alerts = []
-    ng.database_filename = ng.config_instance.GetText('Database', 'filename', False)
+    ng.database_filename = ng.config_instance.GetText('Database', 'filename')
 
     if daemonize:
-        pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE)
+        pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE, False)
         try:
             daemon = Daemonize(app="netgrasp", pid=pidfile, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
             daemon.start()
