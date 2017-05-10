@@ -260,17 +260,28 @@ def wiretap(database_lock, child_conn):
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
-        logger.info('top of while loop: run', run)
+        now = datetime.datetime.now()
+        logger.debug('[%d] top of while loop: %s', run, now)
+
+        heartbeat = False
         while child_conn.poll():
             message = child_conn.recv()
             if (message == HEARTBEAT):
-                logger.debug('received heartbeat from main process')
-                last_heartbeat = datetime.datetime.now()
+                heartbeat = True
+        # It's possible to receive multiple heartbeats, but many or one is the same to us.
+        if heartbeat:
+            logger.debug('received heartbeat from main process')
+            last_heartbeat = now
+
+        # Wait an arp packet, then loop again.
         pc.loop(1, received_arp, child_conn)
+
+        # If we haven't heard from the main process in >1 minute, exit.
+        # @TODO: take into account [Listen] delay setting, which could be >1 60 seconds.
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
-        if (datetime.datetime.now() >= time_to_exit):
+        if (now >= time_to_exit):
             run = False
-    logger.critical('No recent heartbeats from main processing, exiting.')
+    logger.critical('No heartbeats from main process for >1 minute, exiting.')
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     logger.debug('Entering ip_seen(%s, %s, %s, %s, %d)', src_ip, src_mac, dst_ip, dst_mac, request)
