@@ -171,8 +171,8 @@ def main():
         ng.database_instance = ng.Database()
     except Exception as e:
         logger.critical("%s", e)
-        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, whoami())
-        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, whoami()))
+        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, ng.whoami())
+        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, ng.whoami()))
     logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
     ng.database_instance.cursor = ng.database_instance.connection.cursor()
 
@@ -252,8 +252,8 @@ def wiretap(database_lock, child_conn):
         ng.database_instance = ng.Database()
     except Exception as e:
         logger.critical("%s", e)
-        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, whoami())
-        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, whoami()))
+        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, ng.whoami())
+        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, ng.whoami()))
     logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
     ng.database_instance.cursor = ng.database_instance.connection.cursor()
 
@@ -1032,8 +1032,8 @@ if __name__ == '__main__':
             import ntfy
         except Exception as e:
             logger.critical("fatal exception: %s", e)
-            logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts, exiting.", whoami())
-            sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (whoami()))
+            logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts, exiting.", ng.whoami())
+            sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (ng.whoami()))
     else:
         ng.notification_alerts = []
     ng.database_filename = ng.config_instance.GetText('Database', 'filename')
