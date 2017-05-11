@@ -175,11 +175,10 @@ def main():
         sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, ng.whoami()))
     logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
     ng.database_instance.cursor = ng.database_instance.connection.cursor()
+    # http://www.sqlite.org/wal.html
+    ng.database_instance.cursor.execute('PRAGMA journal_mode=WAL')
 
-    ng.database_lock.acquire()
     create_database()
-    # @TODO: Add indexes
-    ng.database_lock.release()
 
     ng.active_timeout = ng.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
     ng.delay = ng.config_instance.GetInt('Listen', 'delay', 15, False)
@@ -423,6 +422,7 @@ def ip_is_mine(ip):
 
 # Database definitions.
 def create_database():
+    ng.database_lock.acquire()
     logger.debug('Creating database tables, if not already existing.')
 
     # Create state table.
@@ -515,6 +515,7 @@ def create_database():
     """)
     ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
     ng.database_instance.connection.commit()
+    ng.database_lock.release()
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
@@ -703,6 +704,8 @@ def send_email_alerts():
             ng.database_instance.cursor.execute('SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC', (row[1], row[2]))
             info = ng.database_instance.cursor.fetchone()
             if not info:
+                ng.database_instance.connection.commit()
+                ng.database_lock.release()
                 logger.warning("Event for ip %s [%s] that we haven't seen", row[2], row[1])
                 return
             firstSeen = first_seen(row[2], row[1])
@@ -858,8 +861,6 @@ def send_email_digests():
         logger.info('Sending %s digest', digest)
         ng.set_state(timestamp_string, future_digest_timestamp)
 
-        ng.database_lock.acquire()
-
         if (digest == 'daily'):
             # ng.PROCESSED_DAILY_DIGEST  = 2
             ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
@@ -939,10 +940,20 @@ def send_email_digests():
             ng.database_instance.cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)', (time_period, now))
             processed = ng.PROCESSED_WEEKLY_DIGEST
         rows = ng.database_instance.cursor.fetchall()
+        ng.database_lock.acquire()
+        counter = 0
         for row in rows:
+            # Give up the lock occasionally while processing a large number of rows, allowing the
+            # wiretap process to work if needed, avoiding potential timeout.
+            counter = counter + 1
+            if (counter > 100):
+                ng.database_instance.connection.commit()
+                ng.database_lock.release()
+                counter = 0
+                ng.database_lock.acquire()
             logger.debug('UPDATE event SET processed=%d WHERE eid=%d', row[1] + processed, row[0])
             ng.database_instance.cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + processed, row[0]))
-
+        ng.database_instance.connection.commit()
         ng.database_lock.release()
 
         logger.info('Sending %s digest', digest)
