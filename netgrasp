@@ -8,6 +8,7 @@ import io
 import logging
 import logging.handlers
 import pwd
+import grp
 import struct
 import socket
 import datetime
@@ -33,9 +34,9 @@ class Netgrasp:
     PROCESSED_WEEKLY_DIGEST = 4
     PROCESSED_NOTIFICATION  = 8
 
-    DEFAULT_UID       = 1
-    DEFAULT_GID       = 1
-    DEFAULT_LOGLEVEL  = logging.DEBUG
+    DEFAULT_USER      = "daemon"
+    DEFAULT_GROUP     = "daemon"
+    DEFAULT_LOGLEVEL  = logging.INFO
     DEFAULT_LOGFILE   = "netgrasp.log"
     DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
     DEFAULT_PIDFILE   = "netgrasp.pid"
@@ -130,8 +131,8 @@ class Netgrasp:
     # Drop root permissions when no longer needed.
     def drop_root(self):
         os.setgroups([])
-        os.setgid(self.config_instance.GetInt('Security', 'gid', ng.DEFAULT_GID, False))
-        os.setuid(self.config_instance.GetInt('Security', 'uid', ng.DEFAULT_UID, False))
+        os.setgid(grp.getgrnam(self.config_instance.GetText('Security', 'group', ng.DEFAULT_GROUP, False)).gr_gid)
+        os.setuid(pwd.getpwnam(self.config_instance.GetText('Security', 'user', ng.DEFAULT_USER, False)).pw_uid)
         logger.info('running as user %s',  self.whoami())
 
     def set_state(self, key, value, secret = False):
@@ -155,17 +156,27 @@ class Netgrasp:
         else:
             return default_value
 
-def main():
+# This is our main program loop.
+def main(*pcap):
     logger.info('main process running as user %s',  ng.whoami())
+
+    if pcap:
+        # We have daemonized and are not running as root.
+        pc = pcap[0]
+    else:
+        # We are running in the foreground as root.
+        pcap = get_pcap()
+        pc = pcap[0]
+        ng.drop_root()
+
+    # At this point we should no longer have/need root privileges.
+    assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     parent_conn, child_conn = multiprocessing.Pipe()
     ng.database_lock = multiprocessing.Lock()
-    child = multiprocessing.Process(name='wiretap', target=wiretap, args=[ng.database_lock, child_conn])
+    child = multiprocessing.Process(name='wiretap', target=wiretap, args=[pc, ng.database_lock, child_conn])
     child.daemon = True
     child.start()
-
-    ng.drop_root()
-    assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     try:
         ng.database_instance = ng.Database()
@@ -206,19 +217,11 @@ def valid_email_address(address):
     else:
         return True
 
-# Child process: wiretap, uses pcap to sniff arp packets.
-def wiretap(database_lock, child_conn):
+def get_pcap():
     import sys
-    logger.info('wiretap process running as user %s',  ng.whoami())
-
+    logger.info('entering get_pcap() as user %s',  ng.whoami())
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
 
-    try:
-        import dpkt
-    except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
-        sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
     try:
         import pcap
     except Exception as e:
@@ -234,17 +237,36 @@ def wiretap(database_lock, child_conn):
 
     interface = ng.config_instance.GetText('Listen', 'interface', devices[0], False)
     local_net, local_mask = pcap.lookupnet(interface)
-    logger.warning('listening for arp traffic on %s interface: %s/%s', interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
 
     try:
         pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
         pc.setfilter('arp')
+        logger.debug("pcap: %s", pc)
     except Exception as e:
         logger.critical("fatal exception: %s", e)
         logger.critical("failed to invoke pcap, exiting")
         sys.exit("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
-    ng.drop_root()
+    logger.warning('listening for arp traffic on %s: %s/%s', interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
+    return [pc]
+
+# Child process: wiretap, uses pcap to sniff arp packets.
+def wiretap(pc, database_lock, child_conn):
+    import sys
+
+    try:
+        import dpkt
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
+        logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
+        sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
+    try:
+        import pcap
+    except Exception as e:
+        logger.critical("fatal exception: %s", e)
+        logger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
+        sys.exit("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
+
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     try:
@@ -751,17 +773,15 @@ def send_email_alerts():
         ng.database_instance.connection.commit()
         ng.database_lock.release()
 
+# Finds new MAC addresses and assigns them a name.
 def identify_macs():
     logger.debug('Entering identify_macs()')
     import re
     import httplib
-    commit = 0
 
-    ng.database_lock.acquire()
     ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL')
     rows = ng.database_instance.cursor.fetchall()
     for row in rows:
-        commit = 1
         raw_mac = row[0]
         if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", raw_mac.lower()):
             mac = raw_mac
@@ -780,6 +800,7 @@ def identify_macs():
         url = """/%s""" % mac
         http.request("GET", url)
         response = http.getresponse()
+        ng.database_lock.acquire()
         if response.status == 200 and response.reason == 'OK':
             vendor = response.read()
             logger.info('Identified %s [%s] as %s', row[1], raw_mac, vendor)
@@ -787,11 +808,12 @@ def identify_macs():
         else:
             logger.info('Failed identify vendor for [%s]', raw_mac)
             ng.database_instance.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
+        ng.database_instance.connection.commit()
+        ng.database_lock.release()
 
     ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL')
     rows = ng.database_instance.cursor.fetchall()
     for row in rows:
-        commit = 1
         logger.debug('requesting gethostbyaddr for %s [%s]', row[1], row[0])
         try:
             hostname = socket.gethostbyaddr(row[1])
@@ -799,13 +821,13 @@ def identify_macs():
             logger.debug('gethostbyaddr failed: %s', e)
             hostname = ['unknown']
         logger.debug('hostname: %s', hostname)
+        ng.database_lock.acquire()
         ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (row[0], row[1], hostname[0]))
-
-    if commit:
         ng.database_instance.connection.commit()
+        ng.database_lock.release()
 
-    ng.database_lock.release()
 
+# Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
     logger.debug('Entering name_ip(%s, %s)', mac, ip)
     if (mac == ng.BROADCAST):
@@ -826,6 +848,7 @@ def name_ip(mac, ip):
     else:
         return detail[0]
 
+# Generates daily and weekly email digests.
 def send_email_digests():
     logger.debug('Entering send_email_digests()')
 
@@ -1066,8 +1089,10 @@ if __name__ == '__main__':
 
     if daemonize:
         pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE, False)
+        username = ng.config_instance.GetText('Security', 'user', ng.DEFAULT_USER, False)
+        groupname = ng.config_instance.GetText('Security', 'group', ng.DEFAULT_GROUP, False)
         try:
-            daemon = Daemonize(app="netgrasp", pid=pidfile, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
+            daemon = Daemonize(app="netgrasp", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
             daemon.start()
         except Exception as e:
             sys.exit("""Failed to daemonize: %s, exiting""" % e)
