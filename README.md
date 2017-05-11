@@ -58,15 +58,15 @@ delay = 5
 ```
 
 ## [Security]
-In the Security section, you must specify a non-root user ID and group ID under
-which Netgrasp will run. Though you start the process as root, it drops root
-privileges the moment it no longer needs them, instead becoming the user/group
-configured here. By default it will change to uid/gid 1, which is typically the
-Daemon user. For example:
+In the Security section, you must specify a non-root user name and group name
+under which Netgrasp will run. Though you start the process as root, it drops
+root privileges the moment it no longer needs them, instead becoming the
+user/group configured here. By default it will change to the daemon user. For
+example:
 ```
 [Security]
-uid = 1
-gid = 1
+user = daemon
+group = daemon
 ```
 
 Netgrasp will refuse to run as the root user, even if you configure the uid with
