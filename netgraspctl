@@ -1,0 +1,62 @@
+#!/usr/bin/env python2
+
+import argparse
+
+def start(args):
+    print 'start', args
+
+def stop(args):
+    print 'stop', args
+
+def restart(args):
+    print 'restart', args
+
+def status(args):
+    print 'status', args
+
+def list(args):
+    print 'list', args
+
+def identify(args):
+    print 'identify', args
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+            prog='netgraspctl',
+            description='A passive network observation tool')
+    # --verbose -v, verbose
+    parser.add_argument('--verbose', '-v', action='count', help='verbose output')
+    subparsers = parser.add_subparsers()
+
+    # start    (-t)     ,v
+    parser_start = subparsers.add_parser('start', help='start netgrasp')
+    parser_start.set_defaults(func=start)
+
+    # stop     (-p)     ,v
+    parser_stop = subparsers.add_parser('stop', help='stop netgrasp')
+    parser_stop.set_defaults(func=stop)
+
+    # restart  (-r)     ,v
+    parser_restart = subparsers.add_parser('restart', help='restart netgrasp')
+    parser_restart.set_defaults(func=restart)
+
+    # status   (-s)     ,v
+    parser_status = subparsers.add_parser('status', help='netgrasp status')
+    parser_status.set_defaults(func=status)
+
+    # list     (li, -l) ,v,e(events),d(devices),i(ip),m(mac), t(type: device,event)
+    parser_list = subparsers.add_parser('list', help='list devices')
+    parser_list.add_argument('--type', '-t', help='type of object to list')
+    parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff:ff:ff:ff:ff)')
+    parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0.0.1)')
+    parser_list.set_defaults(func=list)
+
+    # identify (id, -i) ,v,i(ip),m(mac)
+    parser_identify = subparsers.add_parser('identify', help='identify devices')
+    parser_identify.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff:ff:ff:ff:ff)')
+    parser_identify.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0.0.1)')
+    parser_identify.add_argument('--custom', '-c', help='set custom name (ex. -c "my iPhone")')
+    parser_identify.set_defaults(func=identify)
+
+    args = parser.parse_args()
+    args.func(args)
