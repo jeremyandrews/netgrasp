@@ -165,7 +165,6 @@ class ExclusiveFileLock:
     # Acquire blocking lock.
     def acquire(self):
         fcntl.flock(self.handle, fcntl.LOCK_EX)
-        logger.debug('grabbed lock')
 
     # Release blocking lock.
     def release(self):
