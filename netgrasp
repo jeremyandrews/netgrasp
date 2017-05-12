@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 import sys
+import fcntl
 import signal
 import multiprocessing
 import ConfigParser
@@ -15,8 +16,6 @@ import datetime
 from email.utils import parseaddr
 
 import time
-
-HEARTBEAT = 'nghb'
 
 class Netgrasp:
     BROADCAST = 'ff:ff:ff:ff:ff:ff'
@@ -156,6 +155,39 @@ class Netgrasp:
         else:
             return default_value
 
+class ExclusiveFileLock:
+    def __init__(self, lockfile):
+        self.lockfile = lockfile
+        # Create the lockfile if it doesn't already exist.
+        self.handle = open(lockfile, 'w')
+
+    # Acquire blocking lock.
+    def acquire(self):
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+        logger.debug('grabbed lock')
+
+    # Release blocking lock.
+    def release(self):
+        fcntl.flock(self.handle, fcntl.LOCK_UN)
+
+    def __del__(self):
+        self.handle.close()
+
+class Timer:
+    def __init__(self):
+        self.start = time.time()
+
+    def elapsed(self):
+        logger.debug('elapsed: %s', time.time() - self.start)
+        return time.time() - self.start
+
+# Simple, short text string used for heartbeat.
+HEARTBEAT = 'nghb'
+# Maximum rows to process before giving up lock
+MAXPROCESS = 100
+# Macimum seconds to process before returning to main loop
+MAXSECONDS = 5
+
 # This is our main program loop.
 def main(*pcap):
     logger.info('main process running as user %s',  ng.whoami())
@@ -163,18 +195,20 @@ def main(*pcap):
     if pcap:
         # We have daemonized and are not running as root.
         pc = pcap[0]
+        dblock_filename = ng.config_instance.GetText('Database', 'lockfile', '/tmp/.database_lock', False)
+        ng.database_lock = ExclusiveFileLock(dblock_filename)
     else:
         # We are running in the foreground as root.
         pcap = get_pcap()
         pc = pcap[0]
         ng.drop_root()
+        ng.database_lock = multiprocessing.Lock()
 
     # At this point we should no longer have/need root privileges.
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     parent_conn, child_conn = multiprocessing.Pipe()
-    ng.database_lock = multiprocessing.Lock()
-    child = multiprocessing.Process(name='wiretap', target=wiretap, args=[pc, ng.database_lock, child_conn])
+    child = multiprocessing.Process(name='wiretap', target=wiretap, args=[pc, child_conn])
     child.daemon = True
     child.start()
 
@@ -193,14 +227,30 @@ def main(*pcap):
 
     ng.active_timeout = ng.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
     ng.delay = ng.config_instance.GetInt('Listen', 'delay', 15, False)
+    if (ng.delay > 30):
+        ng.delay = 30
+    elif (ng.delay < 1):
+        ng.delay = 1
 
     ng.email_instance = ng.Email()
 
     run = True
+    last_heartbeat = datetime.datetime.now()
     while run:
         now = datetime.datetime.now()
         logger.debug('top of master while loop: %s', now)
+
         parent_conn.send(HEARTBEAT)
+        heartbeat = False
+        while parent_conn.poll():
+            message = parent_conn.recv()
+            if (message == HEARTBEAT):
+                heartbeat = True
+        # It's possible to receive multiple heartbeats, but many or one is the same to us.
+        if heartbeat:
+            logger.debug('received heartbeat from wiretap process')
+            last_heartbeat = now
+
         logger.debug('sleeping for %d seconds', ng.delay)
         time.sleep(ng.delay)
         identify_macs()
@@ -209,6 +259,12 @@ def main(*pcap):
         send_notifications()
         send_email_alerts()
         send_email_digests()
+
+        # If we haven't heard from the wiretap process in >1 minute, exit.
+        time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
+        if (now >= time_to_exit):
+            run = False
+    logger.critical('No heartbeats from wiretap process for >1 minute, exiting.')
 
 # Perform simplistic email address validation.
 def valid_email_address(address):
@@ -251,8 +307,13 @@ def get_pcap():
     return [pc]
 
 # Child process: wiretap, uses pcap to sniff arp packets.
-def wiretap(pc, database_lock, child_conn):
+def wiretap(pc, child_conn):
     import sys
+
+    if ng.daemonize:
+        # We use a lock file when daemonized, as this allows netgraspctl to coordinate
+        # with the daemon. Over-write the master-process handler with our own.
+        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', '/tmp/.database_lock', False))
 
     try:
         import dpkt
@@ -284,6 +345,8 @@ def wiretap(pc, database_lock, child_conn):
         now = datetime.datetime.now()
         logger.debug('[%d] top of while loop: %s', run, now)
 
+        child_conn.send(HEARTBEAT)
+
         heartbeat = False
         while child_conn.poll():
             message = child_conn.recv()
@@ -298,7 +361,6 @@ def wiretap(pc, database_lock, child_conn):
         pc.loop(1, received_arp, child_conn)
 
         # If we haven't heard from the main process in >1 minute, exit.
-        # @TODO: take into account [Listen] delay setting, which could be >1 60 seconds.
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
         if (now >= time_to_exit):
             run = False
@@ -310,13 +372,13 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
     ng.database_lock.acquire()
     ng.database_instance.cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, request, now))
+    ng.database_instance.connection.commit()
+    ng.database_lock.release()
     logger.debug('inserted into arplog')
 
     # @TODO research and see if we should be treating this another way
     if (src_ip == '0.0.0.0'):
         logger.info('Ignoring IP source of 0.0.0.0 [%s], dst %s [%s]', src_mac, dst_ip, dst_mac);
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
         return False
 
     active = False
@@ -324,7 +386,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     lastRequested = False
     counter = 0
     sid = 0
-    ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, src_mac))
+    ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1 LIMIT 1', (src_ip, src_mac))
     result = ng.database_instance.cursor.fetchone()
     if result:
         active = result[0]
@@ -334,7 +396,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         sid = result[4]
     else:
         if (src_mac != ng.BROADCAST):
-            ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1', (src_ip, ng.BROADCAST))
+            ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1 LIMIT 1', (src_ip, ng.BROADCAST))
             result = ng.database_instance.cursor.fetchone()
             if result:
                 active = result[0]
@@ -343,7 +405,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 counter = result[3]
                 sid = result[4]
         else:
-            ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND active=1', (src_ip,))
+            ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND active=1 LIMIT 1', (src_ip,))
             result = ng.database_instance.cursor.fetchone()
             if result:
                 active = result[0]
@@ -352,6 +414,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 counter = result[3]
                 sid = result[4]
 
+    ng.database_lock.acquire()
     log_event(src_ip, src_mac, ng.EVENT_SEEN)
     if active:
         if lastSeen:
@@ -681,15 +744,34 @@ def detect_netscans():
 def send_notifications():
     logger.debug('Entering send_notifications()')
     if ng.notification_alerts:
+        timer = Timer()
+
         alerts = ','.join(ng.notification_alerts)
         day = datetime.datetime.now() - datetime.timedelta(days=1)
         ng.database_instance.cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ('+ ','.join('?'*len(ng.notification_alerts)) + ')', ng.notification_alerts)
+
         rows = ng.database_instance.cursor.fetchall()
         if rows:
             ng.database_lock.acquire()
 
+        counter = 0
         for row in rows:
+            # Give up the lock occasionally while processing a large number of rows, allowing the
+            # wiretap process to work if needed, avoiding potential timeout.
+            counter = counter + 1
+            if (counter > MAXPROCESS):
+                logger.debug("updated 100 events, releasing/regrabbing lock")
+                ng.database_instance.connection.commit()
+                ng.database_lock.release()
+                if (timer.elapsed() > MAXSECONDS):
+                    # We've been processing notifications too long, quit for now and come back later.
+                    logger.debug("processing notifications >%d seconds, quitting for now", MAXSECONDS)
+                    return
+                counter = 0
+                ng.database_lock.acquire()
+
             logger.debug('processing event %d for %s [%s] at %s', row[0], row[2], row[1], row[3])
+
             # only send notifications for configured events
             if row[4] in ng.notification_alerts:
                 logger.info('event %s [%d] in %s, generating notification alert', row[4], row[0], ng.notification_alerts)
@@ -711,12 +793,29 @@ def send_email_alerts():
     import smtplib
     day = datetime.datetime.now() - datetime.timedelta(days=1)
 
+    timer = Timer()
+
     ng.database_instance.cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)');
     rows = ng.database_instance.cursor.fetchall()
     if rows:
         ng.database_lock.acquire()
 
+    counter = 0
     for row in rows:
+        # Give up the lock occasionally while processing a large number of rows, allowing the
+        # wiretap process to work if needed, avoiding potential timeout.
+        counter = counter + 1
+        if (counter > MAXPROCESS):
+            logger.debug("updated 100 events, releasing/regrabbing lock")
+            ng.database_instance.connection.commit()
+            ng.database_lock.release()
+            if (timer.elapsed() > MAXSECONDS):
+                # We've been processing alerts too long, quit for now and come back later.
+                logger.debug("processing email alerts >%d seconds, quitting for now", MAXSECONDS)
+                return
+            counter = 0
+            ng.database_lock.acquire()
+
         logger.debug('processing event %d for %s [%s] at %s', row[0], row[2], row[1], row[3])
         processed = True
         # only send emails for configured events
@@ -852,6 +951,8 @@ def name_ip(mac, ip):
 def send_email_digests():
     logger.debug('Entering send_email_digests()')
 
+    timer = Timer()
+
     import smtplib
     now = datetime.datetime.now()
 
@@ -969,12 +1070,16 @@ def send_email_digests():
             # Give up the lock occasionally while processing a large number of rows, allowing the
             # wiretap process to work if needed, avoiding potential timeout.
             counter = counter + 1
-            if (counter > 100):
+            if (counter > MAXPROCESS):
+                logger.debug("updated 100 events, releasing/regrabbing lock")
                 ng.database_instance.connection.commit()
                 ng.database_lock.release()
+                if (timer.elapsed() > MAXSECONDS):
+                    # We've been processing events for too long, quit for now and come back later.
+                    logger.debug("processing events >%d seconds, quitting for now", MAXSECONDS)
+                    return
                 counter = 0
                 ng.database_lock.acquire()
-            logger.debug('UPDATE event SET processed=%d WHERE eid=%d', row[1] + processed, row[0])
             ng.database_instance.cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + processed, row[0]))
         ng.database_instance.connection.commit()
         ng.database_lock.release()
@@ -1021,10 +1126,13 @@ if __name__ == '__main__':
     ng = Netgrasp()
     ng.config_instance = ng.Config(ConfigParser.ConfigParser())
 
+    ng.verbose = verbose
+    ng.daemonize = daemonize
+
     # Start logger, reading relevant configuration.
     logger = logging.getLogger(__name__)
     formatter = logging.Formatter(ng.DEFAULT_LOGFORMAT)
-    if daemonize:
+    if ng.daemonize:
         try:
             handler = logging.handlers.TimedRotatingFileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE), when="midnight", backupCount=3)
         except Exception as e:
@@ -1035,13 +1143,13 @@ if __name__ == '__main__':
 
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    if verbose:
+    if ng.verbose:
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)
     logger.info('starting')
     logger.info('loaded configuration file: %s', ng.config_instance.found)
-    if verbose:
+    if ng.verbose:
         logger.warning("[Logging] level forced to DEBUG, started with -v flag.")
     else:
         logger.setLevel(ng.config_instance.GetText('Logging', 'level', ng.DEFAULT_LOGLEVEL, False))
@@ -1066,7 +1174,7 @@ if __name__ == '__main__':
         logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
         sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
 
-    if daemonize:
+    if ng.daemonize:
         try:
             from daemonize import Daemonize
         except Exception as e:
@@ -1087,7 +1195,7 @@ if __name__ == '__main__':
         ng.notification_alerts = []
     ng.database_filename = ng.config_instance.GetText('Database', 'filename')
 
-    if daemonize:
+    if ng.daemonize:
         pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE, False)
         username = ng.config_instance.GetText('Security', 'user', ng.DEFAULT_USER, False)
         groupname = ng.config_instance.GetText('Security', 'group', ng.DEFAULT_GROUP, False)
