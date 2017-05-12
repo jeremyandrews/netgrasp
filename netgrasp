@@ -39,6 +39,7 @@ class Netgrasp:
     DEFAULT_LOGFILE   = "netgrasp.log"
     DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
     DEFAULT_PIDFILE   = "netgrasp.pid"
+    DEFAULT_DBLOCK    = "/tmp/.database_lock"
 
     config_instance = ''
     database_instane = ''
@@ -195,8 +196,7 @@ def main(*pcap):
     if pcap:
         # We have daemonized and are not running as root.
         pc = pcap[0]
-        dblock_filename = ng.config_instance.GetText('Database', 'lockfile', '/tmp/.database_lock', False)
-        ng.database_lock = ExclusiveFileLock(dblock_filename)
+        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', ng.DEFAULT_DBLOCK, False))
     else:
         # We are running in the foreground as root.
         pcap = get_pcap()
@@ -313,7 +313,7 @@ def wiretap(pc, child_conn):
     if ng.daemonize:
         # We use a lock file when daemonized, as this allows netgraspctl to coordinate
         # with the daemon. Over-write the master-process handler with our own.
-        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', '/tmp/.database_lock', False))
+        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', ng.DEFAULT_DBLOCK, False))
 
     try:
         import dpkt
