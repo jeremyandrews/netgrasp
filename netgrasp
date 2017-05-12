@@ -178,7 +178,6 @@ class Timer:
         self.start = time.time()
 
     def elapsed(self):
-        logger.debug('elapsed: %s', time.time() - self.start)
         return time.time() - self.start
 
 # Simple, short text string used for heartbeat.
