@@ -162,11 +162,11 @@ class ExclusiveFileLock:
         # Create the lockfile if it doesn't already exist.
         self.handle = open(lockfile, 'w')
 
-    # Acquire blocking lock.
+    # Acquire exclusive, blocking lock.
     def acquire(self):
         fcntl.flock(self.handle, fcntl.LOCK_EX)
 
-    # Release blocking lock.
+    # Release exclusive, blocking lock.
     def release(self):
         fcntl.flock(self.handle, fcntl.LOCK_UN)
 
@@ -215,7 +215,7 @@ def main(*pcap):
     except Exception as e:
         logger.critical("%s", e)
         logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, ng.whoami())
-        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, ng.whoami()))
+        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""" % (ng.database_filename, ng.whoami()))
     logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
     ng.database_instance.cursor = ng.database_instance.connection.cursor()
     # http://www.sqlite.org/wal.html
@@ -333,7 +333,7 @@ def wiretap(pc, child_conn):
     except Exception as e:
         logger.critical("%s", e)
         logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, ng.whoami())
-        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""", (ng.database_filename, ng.whoami()))
+        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""" % (ng.database_filename, ng.whoami()))
     logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
     ng.database_instance.cursor = ng.database_instance.connection.cursor()
 

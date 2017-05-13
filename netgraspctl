@@ -4,10 +4,13 @@ import argparse
 import ConfigParser
 import sys
 import os
+import pwd
 import signal
 import errno
 
 class NetgraspShared:
+    BROADCAST = 'ff:ff:ff:ff:ff:ff'
+
     DEFAULT_PIDFILE   = "netgrasp.pid"
     DEFAULT_DBLOCK    = "/tmp/.database_lock"
     DEFAULT_CONFIG    = ['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf']
@@ -28,18 +31,18 @@ class NetgraspShared:
             if self.verbose > 1:
                 if value:
                     if secret:
-                        print """%s set from [%s]""" % (option, section)
+                        print """Configuration %s set from [%s]""" % (option, section)
                     else:
-                        print """%s set to '%s' from [%s]""" % (option, value, section)
+                        print """Configuration %s set to '%s' from [%s]""" % (option, value, section)
                 else:
                     if default:
                         if secret:
-                            print """%s set to default from [%s]""" % (option, section)
+                            print """Configuration %s set to default from [%s]""" % (option, section)
                         else:
                             if self.parser.has_section(section):
-                                print """%s set to default of %s from [%s]""" % (option, value, section)
+                                print """Configuration %s set to default of %s from [%s]""" % (option, value, section)
                             else:
-                                print """%s set to default of %s, [%s] does not exist""" % (option, value, section)
+                                print """Configuration %s set to default of %s, [%s] does not exist""" % (option, value, section)
             return value
 
         def GetText(self, section, option, default = None, required = True, secret = False):
@@ -63,6 +66,37 @@ class NetgraspShared:
                 value = None
             return self._GetValue(section, option, value, default, required, secret)
 
+    class Database:
+        def __init__(self):
+            try:
+                import sqlite3
+            except Exception as e:
+                sys.exit("Failed to import sqlite3, try: 'pip install sqlite3', exiting.")
+
+            self.connection = sqlite3.connect(ngs.database_filename, detect_types=sqlite3.PARSE_DECLTYPES)
+
+    # Determine who we are, for pretty logging.
+    def whoami(self):
+        whoami = pwd.getpwuid(os.getuid())
+        return whoami[0]
+
+class ExclusiveFileLock:
+    def __init__(self, lockfile):
+        self.lockfile = lockfile
+        # Create the lockfile if it doesn't already exist.
+        self.handle = open(lockfile, 'w')
+
+    # Acquire exclusive, blocking lock.
+    def acquire(self):
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+
+    # Release exclusive, blocking lock.
+    def release(self):
+        fcntl.flock(self.handle, fcntl.LOCK_UN)
+
+    def __del__(self):
+        self.handle.close()
+
 # Determine if pid in pidfile is a running process.
 def is_running(pidfile):
     running = False
@@ -72,7 +106,7 @@ def is_running(pidfile):
         f.close()
         if pid > 0:
             if ngs.config_instance.verbose > 1:
-                print """found pidfile %s, contained pid %d""" % (pidfile, pid)
+                print """Found pidfile %s, contained pid %d""" % (pidfile, pid)
             try:
                 os.kill(pid, 0)
             except OSError as e:
@@ -81,6 +115,62 @@ def is_running(pidfile):
             else:
                 running = pid
     return running
+
+def pretty_date(time):
+    import datetime
+
+    if not time:
+        return "never"
+    now = datetime.datetime.now()
+    diff = now - time
+    second_diff = diff.seconds
+    day_diff = diff.days
+
+    if day_diff < 0:
+        return ''
+
+    if day_diff == 0:
+        if second_diff < 10:
+            return "just now"
+        if second_diff < 60:
+            return str(second_diff) + " seconds ago"
+        if second_diff < 120:
+            return "a minute ago"
+        if second_diff < 3600:
+            return str(second_diff / 60) + " minutes ago"
+        if second_diff < 7200:
+            return "an hour ago"
+        if second_diff < 86400:
+            return str(second_diff / 3600) + " hours ago"
+    if day_diff == 1:
+        return "yesterday"
+    if day_diff < 7:
+        return str(day_diff) + " days ago"
+    if day_diff < 31:
+        return str(day_diff / 7) + " weeks ago"
+    if day_diff < 365:
+        return str(day_diff / 30) + " months ago"
+    return str(day_diff / 365) + " years ago"
+
+# Provides a human-friendly name for a mac-ip pair.
+def name_ip(mac, ip):
+    if (mac == ngs.BROADCAST):
+        ngs.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
+    else:
+        ngs.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
+    detail = ngs.database_instance.cursor.fetchone()
+    if not detail:
+        return detail
+    if detail[2]:
+        return detail[2]
+    elif detail[3] and (detail[3] != 'unknown'):
+        return detail[3]
+    elif detail[4]:
+        return detail[4]
+    elif detail[5]:
+        return """Unidentified device by %s""" % (detail[5])
+    else:
+        return detail[0]
 
 def start(args):
     if ngs.is_running:
@@ -112,7 +202,35 @@ def status(args):
         print "Netgrasp is not running."
 
 def list(args):
-    print 'list', args
+    if not ngs.is_running:
+        sys.exit("Netgrasp is not running.")
+
+    ngs.database_filename = ngs.config_instance.GetText('Database', 'filename')
+
+    try:
+        ngs.database_instance = ngs.Database()
+    except Exception as e:
+        print e
+        sys.exit("""Failed to open or create database file %s (as user %s), exiting.""" % (ngs.database_filename, ngs.whoami()))
+
+    if args.verbose:
+        print """Opened %s as user %s""" % (ngs.database_filename, ngs.whoami())
+
+    ngs.database_instance.cursor = ngs.database_instance.connection.cursor()
+    ngs.database_lock = ExclusiveFileLock(ngs.config_instance.GetText('Database', 'lockfile', ngs.DEFAULT_DBLOCK, False))
+
+    if args.type == 'device':
+        ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE active = 1 AND mac != ? ORDER BY lastSeen DESC', (ngs.BROADCAST,))
+        rows = ngs.database_instance.cursor.fetchall()
+        if rows:
+            print ' Active devices:'
+            rowFormat = "{:>16}{:>30}{:>18}"
+            print rowFormat.format(*["IP", "Name", "Last seen"])
+        for row in rows:
+            print rowFormat.format(row[1], name_ip(row[0], row[1]), pretty_date(row[2]))
+
+    elif args.type == 'event':
+        print 'Listing events'
 
 def identify(args):
     print 'identify', args
@@ -146,7 +264,7 @@ if __name__ == '__main__':
 
     # list     (li, -l) ,v,e(events),d(devices),i(ip),m(mac), t(type: device,event)
     parser_list = subparsers.add_parser('list', help='list devices')
-    parser_list.add_argument('--type', '-t', help='type of object to list')
+    parser_list.add_argument('--type', '-t', choices=['device', 'event'], default='device', help='type of object to list')
     parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff:ff:ff:ff:ff)')
     parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0.0.1)')
     parser_list.set_defaults(func=list)
