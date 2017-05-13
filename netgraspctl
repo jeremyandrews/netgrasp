@@ -1,18 +1,115 @@
 #!/usr/bin/env python2
 
 import argparse
+import ConfigParser
+import sys
+import os
+import signal
+import errno
+
+class NetgraspShared:
+    DEFAULT_PIDFILE   = "netgrasp.pid"
+    DEFAULT_DBLOCK    = "/tmp/.database_lock"
+    DEFAULT_CONFIG    = ['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf']
+
+    class Config:
+        def __init__(self, parser, config = False):
+            self.parser = parser
+            if config:
+                self.found = self.parser.read(config)
+            else:
+                self.found = self.parser.read(ngs.DEFAULT_CONFIG)
+
+        def _GetValue(self, section, option, value, default, required, secret):
+            if not value and default:
+                value = default
+            if required and not value:
+                sys.exit("""Required [%s] '%s' not defined in configuration file, exiting.""" % (section, option))
+            if self.verbose > 1:
+                if value:
+                    if secret:
+                        print """%s set from [%s]""" % (option, section)
+                    else:
+                        print """%s set to '%s' from [%s]""" % (option, value, section)
+                else:
+                    if default:
+                        if secret:
+                            print """%s set to default from [%s]""" % (option, section)
+                        else:
+                            if self.parser.has_section(section):
+                                print """%s set to default of %s from [%s]""" % (option, value, section)
+                            else:
+                                print """%s set to default of %s, [%s] does not exist""" % (option, value, section)
+            return value
+
+        def GetText(self, section, option, default = None, required = True, secret = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.get(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+
+        def GetInt(self, section, option, default = None, required = True, secret = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.getint(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+
+        def GetBoolean(self, section, option, default = None, required = True, secret = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.getboolean(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+
+# Determine if pid in pidfile is a running process.
+def is_running(pidfile):
+    running = False
+    if os.path.isfile(pidfile):
+        f = open(pidfile)
+        pid = int(f.readline())
+        f.close()
+        if pid > 0:
+            if ngs.config_instance.verbose > 1:
+                print """found pidfile %s, contained pid %d""" % (pidfile, pid)
+            try:
+                os.kill(pid, 0)
+            except OSError as e:
+                if e.errno == errno.EPERM:
+                    running = pid
+            else:
+                running = pid
+    return running
 
 def start(args):
-    print 'start', args
+    if ngs.is_running:
+        sys.exit("""Netgrasp is already running with pid %d.""" % ngs.is_running)
+    if args.verbose:
+        print "Starting netgrasp..."
 
 def stop(args):
-    print 'stop', args
+    if not ngs.is_running:
+        sys.exit("Netgrasp is not running.")
+    if args.verbose:
+        print "Stopping netgrasp..."
+    try:
+        os.kill(ngs.is_running, signal.SIGTERM)
+    except OSError as e:
+        if e.errno == errno.EPERM:
+            print """Failed (perhaps try with sudo): %s""" % e
+        else:
+            print """Failed: %s""" % e
 
 def restart(args):
-    print 'restart', args
+    stop(args)
+    start(args)
 
 def status(args):
-    print 'status', args
+    if ngs.is_running:
+        print """Netgrasp is running with pid %d""" % (ngs.is_running)
+    else:
+        print "Netgrasp is not running."
 
 def list(args):
     print 'list', args
@@ -26,21 +123,24 @@ if __name__ == '__main__':
             description='A passive network observation tool')
     # --verbose -v, verbose
     parser.add_argument('--verbose', '-v', action='count', help='verbose output')
+    # --config -c, configuration file
+    parser.add_argument('--config', '-c', help='specify custom path for configuration file')
+
     subparsers = parser.add_subparsers()
 
-    # start    (-t)     ,v
+    # start
     parser_start = subparsers.add_parser('start', help='start netgrasp')
     parser_start.set_defaults(func=start)
 
-    # stop     (-p)     ,v
+    # stop
     parser_stop = subparsers.add_parser('stop', help='stop netgrasp')
     parser_stop.set_defaults(func=stop)
 
-    # restart  (-r)     ,v
+    # restart
     parser_restart = subparsers.add_parser('restart', help='restart netgrasp')
     parser_restart.set_defaults(func=restart)
 
-    # status   (-s)     ,v
+    # status
     parser_status = subparsers.add_parser('status', help='netgrasp status')
     parser_status.set_defaults(func=status)
 
@@ -59,4 +159,26 @@ if __name__ == '__main__':
     parser_identify.set_defaults(func=identify)
 
     args = parser.parse_args()
+
+    # @TODO import shared class from a common module.
+    ngs = NetgraspShared()
+
+    # Find/load configuration files(s).
+    if args.config:
+        configs = args.config
+    else:
+        configs = ngs.DEFAULT_CONFIG
+    ngs.config_instance = ngs.Config(ConfigParser.ConfigParser(), configs)
+    ngs.config_instance.verbose = args.verbose
+    if not ngs.config_instance.found:
+        sys.exit("""Configuration file not found at the following paths: %s, exiting.""" % (configs))
+    if ngs.config_instance.verbose > 1:
+        print """Loaded configuration file(s): %s""" % (ngs.config_instance.found)
+    if ngs.config_instance.verbose > 2:
+        print args
+
+    # Find/load pidfile.
+    ngs.pidfile = ngs.config_instance.GetText('Logging', 'pidfile', ngs.DEFAULT_PIDFILE, False)
+    ngs.is_running = is_running(ngs.pidfile)
+
     args.func(args)
