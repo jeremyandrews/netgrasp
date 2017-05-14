@@ -1131,7 +1131,7 @@ if __name__ == '__main__':
     formatter = logging.Formatter(ng.DEFAULT_LOGFORMAT)
     if ng.daemonize:
         try:
-            handler = logging.handlers.FileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE))
+            handler = logging.FileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE))
         except Exception as e:
             sys.exit("""Fatal exception setting up log handler: %s""" % e)
     else:
