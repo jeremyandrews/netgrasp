@@ -923,7 +923,6 @@ def identify_macs():
         ng.database_instance.connection.commit()
         ng.database_lock.release()
 
-
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
     logger.debug('Entering name_ip(%s, %s)', mac, ip)
@@ -1132,7 +1131,7 @@ if __name__ == '__main__':
     formatter = logging.Formatter(ng.DEFAULT_LOGFORMAT)
     if ng.daemonize:
         try:
-            handler = logging.handlers.TimedRotatingFileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE), when="midnight", backupCount=3)
+            handler = logging.handlers.FileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE))
         except Exception as e:
             sys.exit("""Fatal exception setting up log handler: %s""" % e)
     else:
