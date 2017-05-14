@@ -185,6 +185,10 @@ alerts = first_seen_recently,network_scan
      identify devices that we may not otherwise see via passive scanning
      devices
 * Support listening on multiple interfaces
+* Localize MAC lookup
+   * Currently we're using an online API
+   * Determine licensing, and download online list, for example:
+      * http://standards-oui.ieee.org/oui.txt
 * Add cross-platform UI for configuration, alerting, and ongoing network
   monitoring
    * [Kivy](https://kivy.org)
