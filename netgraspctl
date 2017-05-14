@@ -7,6 +7,7 @@ import os
 import pwd
 import signal
 import errno
+import datetime
 
 class NetgraspShared:
     BROADCAST = 'ff:ff:ff:ff:ff:ff'
@@ -117,8 +118,6 @@ def is_running(pidfile):
     return running
 
 def pretty_date(time):
-    import datetime
-
     if not time:
         return "never"
     now = datetime.datetime.now()
@@ -227,21 +226,35 @@ def list(args):
 
     if args.type == 'device':
         if args.all:
+            description = 'All devices'
             ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE mac != ? GROUP BY mac, ip ORDER BY lastSeen DESC', (ngs.BROADCAST,))
-            description = 'All'
         else:
+            description = 'Active devices'
             ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE active = 1 AND mac != ? ORDER BY lastSeen DESC', (ngs.BROADCAST,))
-            description = 'Active'
         rows = ngs.database_instance.cursor.fetchall()
-        if rows:
-            print """ %s devices:""" % description
-            rowFormat = "{:>16}{:>34}{:>22}"
-            print rowFormat.format(*["IP", "Name", "Last seen"])
-        for row in rows:
-            print rowFormat.format(truncate_string(row[1], 14), truncate_string(name_ip(row[0], row[1]), 32), truncate_string(pretty_date(row[2]), 20))
-
+        rowFormat = "{:>15}{:>34}{:>22}"
+        header = ["IP", "Name", "Last seen"]
     elif args.type == 'event':
-        print 'Listing events'
+        if args.all:
+            description = 'All alerts'
+            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE mac != ? GROUP BY mac, ip, event ORDER BY timestamp DESC', (ngs.BROADCAST,))
+        else:
+            ngs.active_timeout = ngs.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
+            recent = datetime.datetime.now() - datetime.timedelta(seconds=ngs.active_timeout)
+            description = 'Recent alerts'
+            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE mac != ? AND timestamp >= ? GROUP BY mac, ip, event ORDER BY timestamp DESC', (ngs.BROADCAST,recent))
+        rows = ngs.database_instance.cursor.fetchall()
+        rowFormat = "{:>15}{:>24}{:>22}{:>18}"
+        header = ["IP", "Name", "Event", "Last seen"]
+
+    if rows:
+        print """ %s:""" % description
+        print rowFormat.format(*header)
+    for row in rows:
+        if args.type == 'device':
+            print rowFormat.format(truncate_string(row[1], 14), truncate_string(name_ip(row[0], row[1]), 32), truncate_string(pretty_date(row[2]), 20))
+        else:
+            print rowFormat.format(truncate_string(row[1], 14), truncate_string(name_ip(row[0], row[1]), 22), truncate_string(row[3], 20), truncate_string(pretty_date(row[2]), 16))
 
 def identify(args):
     print 'identify', args
