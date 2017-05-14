@@ -172,6 +172,12 @@ def name_ip(mac, ip):
     else:
         return detail[0]
 
+# Truncate strings with they're too long.
+def truncate_string(string, maxlength, suffix = "..."):
+    if len(string) < maxlength:
+        return string
+    return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)
+
 def start(args):
     if ngs.is_running:
         sys.exit("""Netgrasp is already running with pid %d.""" % ngs.is_running)
@@ -224,10 +230,10 @@ def list(args):
         rows = ngs.database_instance.cursor.fetchall()
         if rows:
             print ' Active devices:'
-            rowFormat = "{:>16}{:>30}{:>18}"
+            rowFormat = "{:>16}{:>34}{:>22}"
             print rowFormat.format(*["IP", "Name", "Last seen"])
         for row in rows:
-            print rowFormat.format(row[1], name_ip(row[0], row[1]), pretty_date(row[2]))
+            print rowFormat.format(truncate_string(row[1], 14), truncate_string(name_ip(row[0], row[1]), 32), truncate_string(pretty_date(row[2]), 20))
 
     elif args.type == 'event':
         print 'Listing events'
