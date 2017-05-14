@@ -189,3 +189,5 @@ alerts = first_seen_recently,network_scan
   monitoring
    * [Kivy](https://kivy.org)
    * [Python GUI Programming](https://wiki.python.org/moin/GuiProgramming)
+* Identify unassociated mobile devices
+   * [Why MAC Address Randomization is not Enough](http://papers.mathyvanhoef.com/asiaccs2016.pdf)
