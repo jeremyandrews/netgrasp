@@ -235,14 +235,24 @@ def list(args):
         rowFormat = "{:>15}{:>34}{:>22}"
         header = ["IP", "Name", "Last seen"]
     elif args.type == 'event':
+        if args.mac:
+            mac_filter = "mac = ?"
+            mac_filter_args = args.mac
+        else:
+            mac_filter = "mac != ?"
+            mac_filter_args = ngs.BROADCAST
         if args.all:
+            if args.all > 1:
+                group_by = ""
+            else:
+                group_by = "GROUP BY mac, ip, event"
             description = 'All alerts'
-            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE mac != ? GROUP BY mac, ip, event ORDER BY timestamp DESC', (ngs.BROADCAST,))
+            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter +' '+ group_by +' ORDER BY timestamp DESC', (mac_filter_args,))
         else:
             ngs.active_timeout = ngs.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
             recent = datetime.datetime.now() - datetime.timedelta(seconds=ngs.active_timeout)
             description = 'Recent alerts'
-            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE mac != ? AND timestamp >= ? GROUP BY mac, ip, event ORDER BY timestamp DESC', (ngs.BROADCAST,recent))
+            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter +' AND timestamp >= ? GROUP BY mac, ip, event ORDER BY timestamp DESC', (mac_filter_args, recent))
         rows = ngs.database_instance.cursor.fetchall()
         rowFormat = "{:>15}{:>24}{:>22}{:>18}"
         header = ["IP", "Name", "Event", "Last seen"]
