@@ -335,9 +335,9 @@ if __name__ == '__main__':
     # list     (li, -l) ,v,e(events),d(devices),i(ip),m(mac), t(type: device,event)
     parser_list = subparsers.add_parser('list', help='list devices')
     parser_list.add_argument('--type', '-t', choices=['device', 'event'], default='device', help='type of object to list')
-    parser_list.add_argument('--all', '-a', action='count', help='list all devices ever seen')
-    parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff:ff:ff:ff:ff)')
-    parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0.0.1)')
+    parser_list.add_argument('--all', '-a', action='count', help='list all devices/events')
+    parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff)')
+    parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0)')
     parser_list.set_defaults(func=list)
 
     # identify (id, -i) ,v,i(ip),m(mac)
