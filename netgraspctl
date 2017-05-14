@@ -224,35 +224,71 @@ def list(args):
     ngs.database_instance.cursor = ngs.database_instance.connection.cursor()
     ngs.database_lock = ExclusiveFileLock(ngs.config_instance.GetText('Database', 'lockfile', ngs.DEFAULT_DBLOCK, False))
 
+    if args.mac:
+        mac_filter = " mac LIKE ?"
+        mac_filter_args = "%" + args.mac + "%"
+    else:
+        mac_filter = " mac != ?"
+        mac_filter_args = ngs.BROADCAST
+
+    if args.ip:
+        ip_filter = " ip LIKE ?"
+        ip_filter_args = "%" + args.ip + "%"
+
     if args.type == 'device':
+        # List devices.
         if args.all:
-            description = 'All devices'
-            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE mac != ? GROUP BY mac, ip ORDER BY lastSeen DESC', (ngs.BROADCAST,))
+            description = "All devices"
+            active = ""
         else:
-            description = 'Active devices'
-            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE active = 1 AND mac != ? ORDER BY lastSeen DESC', (ngs.BROADCAST,))
+            description = "Active devices"
+            active = " AND active = 1"
+
+        if args.all > 1:
+            group_by = ""
+        else:
+            group_by = " GROUP BY mac, ip"
+
+        if args.ip:
+            # Filter by IP and MAC.
+            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE ' + mac_filter + ' AND' + ip_filter + ' ' + active + group_by + ' ORDER BY lastSeen DESC', (mac_filter_args, ip_filter_args))
+        else:
+            # Filter by MAC only.
+            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE ' + mac_filter + active + group_by + ' ORDER BY lastSeen DESC', (mac_filter_args,))
+
         rows = ngs.database_instance.cursor.fetchall()
         rowFormat = "{:>15}{:>34}{:>22}"
         header = ["IP", "Name", "Last seen"]
+
     elif args.type == 'event':
-        if args.mac:
-            mac_filter = "mac = ?"
-            mac_filter_args = args.mac
-        else:
-            mac_filter = "mac != ?"
-            mac_filter_args = ngs.BROADCAST
+        # List events.
         if args.all:
-            if args.all > 1:
-                group_by = ""
-            else:
-                group_by = "GROUP BY mac, ip, event"
-            description = 'All alerts'
-            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter +' '+ group_by +' ORDER BY timestamp DESC', (mac_filter_args,))
+            description = "All alerts"
+            active = ""
         else:
+            description = 'Recent alerts'
             ngs.active_timeout = ngs.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
             recent = datetime.datetime.now() - datetime.timedelta(seconds=ngs.active_timeout)
-            description = 'Recent alerts'
-            ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter +' AND timestamp >= ? GROUP BY mac, ip, event ORDER BY timestamp DESC', (mac_filter_args, recent))
+            active = " AND timestamp >= ?"
+            active_args = recent
+
+        if args.all > 1:
+            group_by = ""
+        else:
+            group_by = " GROUP BY mac, ip, event"
+
+        if args.ip:
+            # Filter by IP and MAC.
+            if args.all:
+                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + ' AND' + ip_filter + group_by +' ORDER BY timestamp DESC', (mac_filter_args, ip_filter_args))
+            else:
+                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + ip_filter + active + group_by +' ORDER BY timestamp DESC', (mac_filter_args, ip_filter_args, active_args))
+        else:
+            if args.all:
+                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + group_by +' ORDER BY timestamp DESC', (mac_filter_args,))
+            else:
+                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + active + group_by +' ORDER BY timestamp DESC', (mac_filter_args, active_args))
+
         rows = ngs.database_instance.cursor.fetchall()
         rowFormat = "{:>15}{:>24}{:>22}{:>18}"
         header = ["IP", "Name", "Event", "Last seen"]
