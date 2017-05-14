@@ -98,6 +98,43 @@ class ExclusiveFileLock:
     def __del__(self):
         self.handle.close()
 
+class SelectQueryBuilder():
+    def __init__(self, table):
+        self.table = table
+        self.select = []
+        self.where = []
+        self.where_args = []
+        self.group = []
+        self.order = []
+
+    def db_select(self, key):
+        self.select.append(key)
+
+    def db_where(self, key, value):
+        self.where.append(key)
+        self.where_args.append(value)
+
+    def db_group(self, key):
+        self.group.append(key)
+
+    def db_order(self, value):
+        self.order.append(value)
+
+    def db_query(self):
+        query_string = "SELECT " + ", ".join(self.select) + " FROM " + self.table + " WHERE " + " AND ".join(self.where)
+        if len(self.group):
+            query_string += " GROUP BY " + ", ".join(self.group)
+        if len(self.order):
+            query_string += " ORDER BY " + ", ".join(self.order)
+        if ngs.config_instance.verbose > 1:
+            print 'Select query: ', query_string
+        return query_string
+
+    def db_args(self):
+        if ngs.config_instance.verbose > 1:
+            print 'Select args: ', self.where_args
+        return self.where_args
+
 # Determine if pid in pidfile is a running process.
 def is_running(pidfile):
     running = False
@@ -173,7 +210,7 @@ def name_ip(mac, ip):
 
 # Truncate strings with they're too long.
 def truncate_string(string, maxlength, suffix = "..."):
-    if len(string) < maxlength:
+    if len(string) <= maxlength:
         return string
     return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)
 
@@ -222,85 +259,76 @@ def list(args):
         print """Opened %s as user %s""" % (ngs.database_filename, ngs.whoami())
 
     ngs.database_instance.cursor = ngs.database_instance.connection.cursor()
-    ngs.database_lock = ExclusiveFileLock(ngs.config_instance.GetText('Database', 'lockfile', ngs.DEFAULT_DBLOCK, False))
-
-    if args.mac:
-        mac_filter = " mac LIKE ?"
-        mac_filter_args = "%" + args.mac + "%"
-    else:
-        mac_filter = " mac != ?"
-        mac_filter_args = ngs.BROADCAST
-
-    if args.ip:
-        ip_filter = " ip LIKE ?"
-        ip_filter_args = "%" + args.ip + "%"
+    #ngs.database_lock = ExclusiveFileLock(ngs.config_instance.GetText('Database', 'lockfile', ngs.DEFAULT_DBLOCK, False))
 
     if args.type == 'device':
         # List devices.
+        query = SelectQueryBuilder("seen")
+        query.db_select("mac")
+        query.db_select("ip")
+        query.db_select("lastSeen")
+
         if args.all:
             description = "All devices"
-            active = ""
         else:
             description = "Active devices"
-            active = " AND active = 1"
+            query.db_where("active = ?", 1)
 
-        if args.all > 1:
-            group_by = ""
-        else:
-            group_by = " GROUP BY mac, ip"
+        if (not args.all or args.all == 1):
+            query.db_group("mac")
+            query.db_group("ip")
 
-        if args.ip:
-            # Filter by IP and MAC.
-            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE ' + mac_filter + ' AND' + ip_filter + ' ' + active + group_by + ' ORDER BY lastSeen DESC', (mac_filter_args, ip_filter_args))
-        else:
-            # Filter by MAC only.
-            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE ' + mac_filter + active + group_by + ' ORDER BY lastSeen DESC', (mac_filter_args,))
+        query.db_order("lastSeen DESC")
 
-        rows = ngs.database_instance.cursor.fetchall()
-        rowFormat = "{:>15}{:>34}{:>22}"
+        rowFormat = "{:>16}{:>34}{:>22}"
         header = ["IP", "Name", "Last seen"]
 
     elif args.type == 'event':
         # List events.
+        query = SelectQueryBuilder('event')
+        query.db_select("mac")
+        query.db_select("ip")
+        query.db_select("timestamp")
+        query.db_select("event")
+
         if args.all:
             description = "All alerts"
-            active = ""
         else:
             description = 'Recent alerts'
             ngs.active_timeout = ngs.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
             recent = datetime.datetime.now() - datetime.timedelta(seconds=ngs.active_timeout)
-            active = " AND timestamp >= ?"
-            active_args = recent
+            query.db_where("timestamp >= ?", recent)
 
-        if args.all > 1:
-            group_by = ""
-        else:
-            group_by = " GROUP BY mac, ip, event"
+        if (not args.all or args.all == 1):
+            query.db_group("mac")
+            query.db_group("ip")
+            query.db_group("event")
 
-        if args.ip:
-            # Filter by IP and MAC.
-            if args.all:
-                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + ' AND' + ip_filter + group_by +' ORDER BY timestamp DESC', (mac_filter_args, ip_filter_args))
-            else:
-                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + ip_filter + active + group_by +' ORDER BY timestamp DESC', (mac_filter_args, ip_filter_args, active_args))
-        else:
-            if args.all:
-                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + group_by +' ORDER BY timestamp DESC', (mac_filter_args,))
-            else:
-                ngs.database_instance.cursor.execute('SELECT mac, ip, timestamp, event FROM event WHERE '+ mac_filter + active + group_by +' ORDER BY timestamp DESC', (mac_filter_args, active_args))
+        query.db_order("timestamp DESC")
 
-        rows = ngs.database_instance.cursor.fetchall()
-        rowFormat = "{:>15}{:>24}{:>22}{:>18}"
+        rowFormat = "{:>16}{:>24}{:>21}{:>18}"
         header = ["IP", "Name", "Event", "Last seen"]
 
+    if args.mac:
+        query.db_where("mac LIKE ?", "%"+args.mac+"%")
+        if not args.mac == ngs.BROADCAST:
+            query.db_where("mac != ?", ngs.BROADCAST)
+    else:
+        query.db_where("mac != ?", ngs.BROADCAST)
+
+    if args.ip:
+        query.db_where("ip LIKE ?", "%"+args.ip+"%")
+
+    ngs.database_instance.cursor.execute(query.db_query(), query.db_args())
+    rows = ngs.database_instance.cursor.fetchall()
     if rows:
         print """ %s:""" % description
         print rowFormat.format(*header)
     for row in rows:
         if args.type == 'device':
-            print rowFormat.format(truncate_string(row[1], 14), truncate_string(name_ip(row[0], row[1]), 32), truncate_string(pretty_date(row[2]), 20))
+            print rowFormat.format(truncate_string(row[1], 15), truncate_string(name_ip(row[0], row[1]), 32), truncate_string(pretty_date(row[2]), 20))
         else:
-            print rowFormat.format(truncate_string(row[1], 14), truncate_string(name_ip(row[0], row[1]), 22), truncate_string(row[3], 20), truncate_string(pretty_date(row[2]), 16))
+            print rowFormat.format(truncate_string(row[1], 15), truncate_string(name_ip(row[0], row[1]), 22), truncate_string(row[3], 19), truncate_string(pretty_date(row[2]), 16))
 
 def identify(args):
     print 'identify', args
@@ -338,6 +366,7 @@ if __name__ == '__main__':
     parser_list.add_argument('--all', '-a', action='count', help='list all devices/events')
     parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff)')
     parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0)')
+    parser_list.add_argument('--vendor', '-v', help='filter by vendor (ex. -v apple)')
     parser_list.set_defaults(func=list)
 
     # identify (id, -i) ,v,i(ip),m(mac)
