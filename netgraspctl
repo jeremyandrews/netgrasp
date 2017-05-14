@@ -107,18 +107,26 @@ class SelectQueryBuilder():
         self.group = []
         self.order = []
 
-    def db_select(self, key):
-        self.select.append(key)
+    def db_select(self, key, table = None):
+        if not table:
+            table = self.table
+        self.select.append(table + "." + key)
 
-    def db_where(self, key, value):
-        self.where.append(key)
+    def db_where(self, key, value, table = None):
+        if not table:
+            table = self.table
+        self.where.append(table + "." + key)
         self.where_args.append(value)
 
-    def db_group(self, key):
+    def db_group(self, key, table = None):
+        if not table:
+            table = self.table
         self.group.append(key)
 
-    def db_order(self, value):
-        self.order.append(value)
+    def db_order(self, value, table = None):
+        if not table:
+            table = self.table
+        self.order.append(table + "." + value)
 
     def db_query(self):
         query_string = "SELECT " + ", ".join(self.select) + " FROM " + self.table + " WHERE " + " AND ".join(self.where)
