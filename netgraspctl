@@ -226,10 +226,15 @@ def list(args):
     ngs.database_lock = ExclusiveFileLock(ngs.config_instance.GetText('Database', 'lockfile', ngs.DEFAULT_DBLOCK, False))
 
     if args.type == 'device':
-        ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE active = 1 AND mac != ? ORDER BY lastSeen DESC', (ngs.BROADCAST,))
+        if args.all:
+            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE mac != ? GROUP BY mac, ip ORDER BY lastSeen DESC', (ngs.BROADCAST,))
+            description = 'All'
+        else:
+            ngs.database_instance.cursor.execute('SELECT mac, ip, lastSeen FROM seen WHERE active = 1 AND mac != ? ORDER BY lastSeen DESC', (ngs.BROADCAST,))
+            description = 'Active'
         rows = ngs.database_instance.cursor.fetchall()
         if rows:
-            print ' Active devices:'
+            print """ %s devices:""" % description
             rowFormat = "{:>16}{:>34}{:>22}"
             print rowFormat.format(*["IP", "Name", "Last seen"])
         for row in rows:
@@ -271,6 +276,7 @@ if __name__ == '__main__':
     # list     (li, -l) ,v,e(events),d(devices),i(ip),m(mac), t(type: device,event)
     parser_list = subparsers.add_parser('list', help='list devices')
     parser_list.add_argument('--type', '-t', choices=['device', 'event'], default='device', help='type of object to list')
+    parser_list.add_argument('--all', '-a', action='count', help='list all devices ever seen')
     parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff:ff:ff:ff:ff)')
     parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0.0.1)')
     parser_list.set_defaults(func=list)
