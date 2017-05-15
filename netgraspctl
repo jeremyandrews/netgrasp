@@ -404,7 +404,7 @@ if __name__ == '__main__':
     parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff)')
     parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0)')
     parser_list.add_argument('--vendor', '-v', help='filter by vendor (ex. -v apple)')
-    parser_list.add_argument('--host', '-h', help='filter by host (ex. -h localhost)')
+    parser_list.add_argument('--hostname', '-n', help='filter by host (ex. -h localhost)')
     parser_list.add_argument('--custom', '-c', help='filter by custom name (ex. -i phone)')
     parser_list.set_defaults(func=list)
 
