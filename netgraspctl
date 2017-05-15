@@ -349,7 +349,7 @@ def list(args):
 
     if args.hostname:
         query.db_leftjoin("host", "({%BASE}.mac = host.mac AND {%BASE}.ip = host.ip)")
-        query.db_where("host.host LIKE ?", "%"+args.hostname+"%")
+        query.db_where("host.hostname LIKE ?", "%"+args.hostname+"%")
 
     if args.custom:
         query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
