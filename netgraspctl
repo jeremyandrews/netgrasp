@@ -106,30 +106,46 @@ class SelectQueryBuilder():
         self.where_args = []
         self.group = []
         self.order = []
+        self.leftjoin = []
 
-    def db_select(self, key, table = None):
-        if not table:
-            table = self.table
-        self.select.append(table + "." + key)
+    def _base_table(self, value):
+        if isinstance(value, basestring):
+            return value.replace('{%BASE}', self.table)
+        else:
+            return value
 
-    def db_where(self, key, value, table = None):
-        if not table:
-            table = self.table
-        self.where.append(table + "." + key)
-        self.where_args.append(value)
+    def db_select(self, key):
+        key = self._base_table(key)
+        self.select.append(key)
 
-    def db_group(self, key, table = None):
-        if not table:
-            table = self.table
+    def db_where(self, key, value, multiple = False):
+        key = self._base_table(key)
+        self.where.append(key)
+        value = self._base_table(value)
+        if multiple:
+            for v in value:
+                self.where_args.append(v)
+        else:
+            self.where_args.append(value)
+
+
+    def db_group(self, key):
+        key = self._base_table(key)
         self.group.append(key)
 
-    def db_order(self, value, table = None):
-        if not table:
-            table = self.table
-        self.order.append(table + "." + value)
+    def db_order(self, value):
+        value = self._base_table(value)
+        self.order.append(value)
+
+    def db_leftjoin(self, table, value):
+        value = self._base_table(value)
+        self.leftjoin.append(" LEFT JOIN " + table + " ON " + value)
 
     def db_query(self):
-        query_string = "SELECT " + ", ".join(self.select) + " FROM " + self.table + " WHERE " + " AND ".join(self.where)
+        query_string = "SELECT " + ", ".join(self.select) + " FROM " + self.table
+        if len(self.leftjoin):
+            query_string += " ".join(self.leftjoin)
+        query_string += " WHERE " + " AND ".join(self.where)
         if len(self.group):
             query_string += " GROUP BY " + ", ".join(self.group)
         if len(self.order):
@@ -272,21 +288,21 @@ def list(args):
     if args.type == 'device':
         # List devices.
         query = SelectQueryBuilder("seen")
-        query.db_select("mac")
-        query.db_select("ip")
-        query.db_select("lastSeen")
+        query.db_select("{%BASE}.mac")
+        query.db_select("{%BASE}.ip")
+        query.db_select("{%BASE}.lastSeen")
 
         if args.all:
             description = "All devices"
         else:
             description = "Active devices"
-            query.db_where("active = ?", 1)
+            query.db_where("{%BASE}.active = ?", 1)
 
         if (not args.all or args.all == 1):
-            query.db_group("mac")
-            query.db_group("ip")
+            query.db_group("{%BASE}.mac")
+            query.db_group("{%BASE}.ip")
 
-        query.db_order("lastSeen DESC")
+        query.db_order("{%BASE}.lastSeen DESC")
 
         rowFormat = "{:>16}{:>34}{:>22}"
         header = ["IP", "Name", "Last seen"]
@@ -294,10 +310,10 @@ def list(args):
     elif args.type == 'event':
         # List events.
         query = SelectQueryBuilder('event')
-        query.db_select("mac")
-        query.db_select("ip")
-        query.db_select("timestamp")
-        query.db_select("event")
+        query.db_select("{%BASE}.mac")
+        query.db_select("{%BASE}.ip")
+        query.db_select("{%BASE}.timestamp")
+        query.db_select("{%BASE}.event")
 
         if args.all:
             description = "All alerts"
@@ -305,27 +321,36 @@ def list(args):
             description = 'Recent alerts'
             ngs.active_timeout = ngs.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
             recent = datetime.datetime.now() - datetime.timedelta(seconds=ngs.active_timeout)
-            query.db_where("timestamp >= ?", recent)
+            query.db_where("{%BASE}.timestamp >= ?", recent)
 
         if (not args.all or args.all == 1):
-            query.db_group("mac")
-            query.db_group("ip")
-            query.db_group("event")
+            query.db_group("{%BASE}.mac")
+            query.db_group("{%BASE}.ip")
+            query.db_group("{%BASE}.event")
 
-        query.db_order("timestamp DESC")
+        query.db_order("{%BASE}.timestamp DESC")
 
         rowFormat = "{:>16}{:>24}{:>21}{:>18}"
         header = ["IP", "Name", "Event", "Last seen"]
 
     if args.mac:
-        query.db_where("mac LIKE ?", "%"+args.mac+"%")
+        query.db_where("{%BASE}.mac LIKE ?", "%"+args.mac+"%")
         if not args.mac == ngs.BROADCAST:
-            query.db_where("mac != ?", ngs.BROADCAST)
+            query.db_where("{%BASE}.mac != ?", ngs.BROADCAST)
     else:
-        query.db_where("mac != ?", ngs.BROADCAST)
+        query.db_where("{%BASE}.mac != ?", ngs.BROADCAST)
 
     if args.ip:
-        query.db_where("ip LIKE ?", "%"+args.ip+"%")
+        query.db_where("{%BASE}.ip LIKE ?", "%"+args.ip+"%")
+
+    if args.vendor:
+        query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
+        query.db_where("vendor.vendor LIKE ?", "%"+args.vendor+"%")
+
+    if args.custom:
+        query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
+        query.db_leftjoin("host", "({%BASE}.mac = host.mac AND {%BASE}.ip = host.ip)")
+        query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+args.custom+"%", "%"+args.custom+"%"], True)
 
     ngs.database_instance.cursor.execute(query.db_query(), query.db_args())
     rows = ngs.database_instance.cursor.fetchall()
@@ -375,6 +400,7 @@ if __name__ == '__main__':
     parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff)')
     parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0)')
     parser_list.add_argument('--vendor', '-v', help='filter by vendor (ex. -v apple)')
+    parser_list.add_argument('--custom', '-c', help='filter by custom name (ex. -i phone)')
     parser_list.set_defaults(func=list)
 
     # identify (id, -i) ,v,i(ip),m(mac)
