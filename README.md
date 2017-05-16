@@ -168,10 +168,7 @@ alerts = first_seen_recently,network_scan
 
 # Roadmap
 * CLI netgraspcli command for performing real time tasks:
-   * list active devices, with optional filters
-   * list recent events, with optional filters
-   * add customname to vendor and host
-   * start/stop/restart netgrasp daemon
+   * start netgrasp daemon
 * Alert on anomalies
    * multiple IP's associated with a single MAC address
    * multiple MAC addresses associated with a single IP address
