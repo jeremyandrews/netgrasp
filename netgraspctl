@@ -261,6 +261,7 @@ def stop(args):
 
 def restart(args):
     stop(args)
+    sleep(2)
     start(args)
 
 def status(args):

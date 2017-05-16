@@ -23,6 +23,7 @@ class Netgrasp:
     EVENT_SEEN              = 'seen'
     EVENT_SEEN_FIRST        = 'first_seen'
     EVENT_SEEN_FIRST_RECENT = 'first_seen_recently'
+    EVENT_CHANGED_IP        = 'changed_ip'
     EVENT_REQUESTED         = 'requested'
     EVENT_REQUESTED_FIRST   = 'first_requested'
     EVENT_STALE             = 'stale'
@@ -374,51 +375,46 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     ng.database_lock.release()
     logger.debug('inserted into arplog')
 
-    # @TODO research and see if we should be treating this another way
-    if (src_ip == '0.0.0.0'):
-        logger.info('Ignoring IP source of 0.0.0.0 [%s], dst %s [%s]', src_mac, dst_ip, dst_mac);
+    # @TODO Research and see if we should be treating these another way.
+    if (src_ip == '0.0.0.0' or src_mac == ng.BROADCAST):
+        logger.info('Ignoring IP source of %s [%s], dst %s [%s]', src_ip, src_mac, dst_ip, dst_mac);
         return False
 
-    active = False
-    lastSeen = False
-    lastRequested = False
-    counter = 0
-    sid = 0
-    ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1 LIMIT 1', (src_ip, src_mac))
+    # Check if we've seen this IP, MAC pair before.
+    active, lastSeen, lastRequested, counter, sid, changed_ip = [False, False, False, 0, 0, False]
+    ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, src_mac))
     result = ng.database_instance.cursor.fetchone()
     if result:
-        active = result[0]
-        lastSeen = result[1]
-        lastRequested = result[2]
-        counter = result[3]
-        sid = result[4]
+        active, lastSeen, lastRequested, counter, sid = result
     else:
-        if (src_mac != ng.BROADCAST):
-            ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? AND active=1 LIMIT 1', (src_ip, ng.BROADCAST))
-            result = ng.database_instance.cursor.fetchone()
-            if result:
-                active = result[0]
-                lastSeen = result[1]
-                lastRequested = result[2]
-                counter = result[3]
-                sid = result[4]
-        else:
-            ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND active=1 LIMIT 1', (src_ip,))
-            result = ng.database_instance.cursor.fetchone()
-            if result:
-                active = result[0]
-                lastSeen = result[1]
-                lastRequested = result[2]
-                counter = result[3]
-                sid = result[4]
+        # Or, check if we've seen this IP be requested before.
+        ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
+        result = ng.database_instance.cursor.fetchone()
+        if result:
+            active, lastSeen, lastRequested, counter, sid = result
+
+    if not result:
+        # Check if we've seen this MAC, hostname pair before, it may have gotten assigned a new IP.
+        hostname = dns_lookup(ip)
+        logger.debug('hostname: %s', hostname)
+        ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
+        result = ng.database_instance.cursor.fetchone()
+        if result:
+            active, lastSeen, lastRequested, counter, sid = result
+            changed_ip = true
+        # In the event of the same IP and a different hostname, we treat this like a different device
+        # (though it's likely a vm, jail, or alias). @TODO Revisit this.
 
     ng.database_lock.acquire()
     log_event(src_ip, src_mac, ng.EVENT_SEEN)
+    if changed_ip:
+        log_event(src_ip, src_mac, ng.EVENT_CHANGED_IP)
+        logger.info('[%s] has a new ip [%s]', src_mac, src_ip)
     if active:
         if lastSeen:
             # has been active recently
             logger.debug('%s (%s) is active', src_ip, src_mac)
-            ng.database_instance.cursor.execute('UPDATE seen set mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_mac, now, counter + 1, sid))
+            ng.database_instance.cursor.execute('UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, counter + 1, sid))
         else:
             # has not been active recently, but was requested recently
             if first_seen(src_ip, src_mac):
@@ -437,7 +433,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
 
             # @TODO properly handle multiple active occurences of the same IP
-            ng.database_instance.cursor.execute('UPDATE seen set mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_mac, now, now, counter + 1, sid))
+            ng.database_instance.cursor.execute('UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, now, counter + 1, sid))
     else:
         # First time we've seen this IP.
         log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
@@ -911,17 +907,21 @@ def identify_macs():
     ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL')
     rows = ng.database_instance.cursor.fetchall()
     for row in rows:
-        logger.debug('requesting gethostbyaddr for %s [%s]', row[1], row[0])
-        try:
-            hostname = socket.gethostbyaddr(row[1])
-        except Exception as e:
-            logger.debug('gethostbyaddr failed: %s', e)
-            hostname = ['unknown']
+        hostname = dns_lookup(row[1])
         logger.debug('hostname: %s', hostname)
         ng.database_lock.acquire()
         ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (row[0], row[1], hostname[0]))
         ng.database_instance.connection.commit()
         ng.database_lock.release()
+
+def dns_lookup(ip):
+    logger.debug('Entering gethostbyaddr(%s)', ip)
+    try:
+        hostname = socket.gethostbyaddr(ip)
+    except Exception as e:
+        logger.debug('gethostbyaddr failed: %s', e)
+        hostname = ['unknown']
+    return hostname
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
