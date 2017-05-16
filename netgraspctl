@@ -244,6 +244,7 @@ def start(args):
         sys.exit("""Netgrasp is already running with pid %d.""" % ngs.is_running)
     if args.verbose:
         print "Starting netgrasp..."
+    sys.exit("Feature not yet implemented. Manually run: 'sudo ./netgrasp -d'")
 
 def stop(args):
     if not ngs.is_running:
