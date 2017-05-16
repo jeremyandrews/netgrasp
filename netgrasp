@@ -395,15 +395,18 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
     if not result:
         # Check if we've seen this MAC, hostname pair before, it may have gotten assigned a new IP.
-        hostname = dns_lookup(ip)
+        # In the event of the same IP and a different hostname, we treat this like a different device
+        # (though it's likely a vm, jail, or alias). @TODO Revisit this.
+        hostname = dns_lookup(src_ip)
         logger.debug('hostname: %s', hostname)
         ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
         result = ng.database_instance.cursor.fetchone()
         if result:
             active, lastSeen, lastRequested, counter, sid = result
-            changed_ip = true
-        # In the event of the same IP and a different hostname, we treat this like a different device
-        # (though it's likely a vm, jail, or alias). @TODO Revisit this.
+            changed_ip = True
+
+    logger.debug('here4')
+    print active, lastSeen, lastRequested, counter, sid, changed_ip
 
     ng.database_lock.acquire()
     log_event(src_ip, src_mac, ng.EVENT_SEEN)
@@ -921,7 +924,7 @@ def dns_lookup(ip):
     except Exception as e:
         logger.debug('gethostbyaddr failed: %s', e)
         hostname = ['unknown']
-    return hostname
+    return hostname[0]
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):

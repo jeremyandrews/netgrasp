@@ -9,6 +9,7 @@ import signal
 import errno
 import datetime
 import fcntl
+import time
 
 class NetgraspShared:
     BROADCAST = 'ff:ff:ff:ff:ff:ff'
@@ -240,6 +241,7 @@ def truncate_string(string, maxlength, suffix = "..."):
     return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)
 
 def start(args):
+    ngs.is_running = is_running(ngs.pidfile)
     if ngs.is_running:
         sys.exit("""Netgrasp is already running with pid %d.""" % ngs.is_running)
     if args.verbose:
@@ -261,7 +263,7 @@ def stop(args):
 
 def restart(args):
     stop(args)
-    sleep(2)
+    time.sleep(1)
     start(args)
 
 def status(args):
