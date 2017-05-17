@@ -387,12 +387,6 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     result = ng.database_instance.cursor.fetchone()
     if result:
         active, lastSeen, lastRequested, counter, sid, did = result
-    else:
-        # Or, check if we've seen this IP be requested before.
-        ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
-        result = ng.database_instance.cursor.fetchone()
-        if result:
-            active, lastSeen, lastRequested, counter, sid, did = result
 
     if not result:
         # Check if we've seen this MAC, hostname pair before, it may have gotten assigned a new IP.
@@ -404,6 +398,13 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         if result:
             active, lastSeen, lastRequested, counter, sid, did= result
             changed_ip = True
+
+    if not result:
+        # Check if we've seen this IP be requested before.
+        ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
+        result = ng.database_instance.cursor.fetchone()
+        if result:
+            active, lastSeen, lastRequested, counter, sid, did = result
 
     ng.database_lock.acquire()
     log_event(src_ip, src_mac, ng.EVENT_SEEN)
@@ -682,11 +683,11 @@ def get_did(ip, mac):
     ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, mac))
     did = ng.database_instance.cursor.fetchone()
     if not did:
-        ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, ng.BROADCAST,))
-        did = ng.database_instance.cursor.fetchone()
-    if not did:
         hostname = dns_lookup(ip)
         ng.database_instance.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
+        did = ng.database_instance.cursor.fetchone()
+    if not did:
+        ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, ng.BROADCAST,))
         did = ng.database_instance.cursor.fetchone()
 
     if did:
