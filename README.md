@@ -135,6 +135,7 @@ The following alert types are supported:
 * first_seen: the first time an IP address is actively seen on your network
 * first_seen_recently: when a stale IP address becomes active again
 * seen: any time an IP address is actively seen on your network
+* changed_ip: a known device has changed IPs
 * stale: any time an IP address hasn't been seen for more than active_timeout
   seconds
 * network_scan: any time a device requests an abnormally large number of IPs
@@ -163,7 +164,7 @@ notifications.
 For example:
 ```
 [Notifications]
-alerts = first_seen_recently,network_scan
+alerts = first_seen_recently,network_scan,changed_ip
 ```
 
 # Roadmap
