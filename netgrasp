@@ -367,7 +367,7 @@ def wiretap(pc, child_conn):
     logger.critical('No heartbeats from main process for >1 minute, exiting.')
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
-    logger.debug('Entering ip_seen(%s, %s, %s, %s, %d)', src_ip, src_mac, dst_ip, dst_mac, request)
+    logger.debug('entering ip_seen(%s, %s, %s, %s, %d)', src_ip, src_mac, dst_ip, dst_mac, request)
     now = datetime.datetime.now()
 
     ng.database_lock.acquire()
@@ -455,7 +455,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     ng.database_lock.release()
 
 def ip_request(ip, mac, src_ip, src_mac):
-    logger.debug('Entering ip_request(%s, %s, %s, %s)', ip, mac, src_ip, src_mac)
+    logger.debug('entering ip_request(%s, %s, %s, %s)', ip, mac, src_ip, src_mac)
     now = datetime.datetime.now()
 
     if ((ip == src_ip) or (mac == src_mac)):
@@ -682,7 +682,7 @@ def get_did(ip, mac):
     ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, mac))
     did = ng.database_instance.cursor.fetchone()
     if not did:
-        ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ng.BROADCAST,))
+        ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, ng.BROADCAST,))
         did = ng.database_instance.cursor.fetchone()
     if not did:
         hostname = dns_lookup(ip)
@@ -750,7 +750,7 @@ def last_requested(ip, mac):
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips():
-    logger.debug('Entering detect_stale_ips()')
+    logger.debug('entering detect_stale_ips()')
     stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.active_timeout)
 
     ng.database_instance.cursor.execute('SELECT mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
@@ -773,7 +773,7 @@ def detect_stale_ips():
         ng.database_lock.release()
 
 def detect_netscans():
-    logger.debug('Entering detect_netscans()')
+    logger.debug('entering detect_netscans()')
     now = datetime.datetime.now()
 
     three_minutes_ago = now - datetime.timedelta(minutes=3)
@@ -793,7 +793,7 @@ def detect_netscans():
         ng.database_lock.release()
 
 def send_notifications():
-    logger.debug('Entering send_notifications()')
+    logger.debug('entering send_notifications()')
     if ng.notification_alerts:
         timer = Timer()
 
@@ -830,7 +830,7 @@ def send_notifications():
                 firstSeen = first_seen(ip, mac)
                 lastSeen = first_seen_recently(ip, mac)
                 previouslySeen = previously_seen(ip, mac)
-                title = """Netgrasp alert: %s""" % (alert)
+                title = """Netgrasp alert: %s""" % (event)
                 body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(mac, ip), ip, mac, pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstSeen))
                 ntfy.notify(body, title)
                 ng.database_instance.cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (processed + 8, eid))
@@ -841,7 +841,7 @@ def send_notifications():
             ng.database_lock.release()
 
 def send_email_alerts():
-    logger.debug('Entering send_email_alerts()')
+    logger.debug('entering send_email_alerts()')
     import smtplib
     day = datetime.datetime.now() - datetime.timedelta(days=1)
 
@@ -928,7 +928,7 @@ def send_email_alerts():
 
 # Finds new MAC addresses and assigns them a name.
 def identify_macs():
-    logger.debug('Entering identify_macs()')
+    logger.debug('entering identify_macs()')
     import re
     import httplib
 
@@ -974,7 +974,7 @@ def identify_macs():
         ng.database_lock.release()
 
 def dns_lookup(ip):
-    logger.debug('Entering gethostbyaddr(%s)', ip)
+    logger.debug('entering gethostbyaddr(%s)', ip)
     try:
         hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
     except Exception as e:
@@ -985,7 +985,7 @@ def dns_lookup(ip):
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
-    logger.debug('Entering name_ip(%s, %s)', mac, ip)
+    logger.debug('entering name_ip(%s, %s)', mac, ip)
     if (mac == ng.BROADCAST):
         ng.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
     else:
@@ -1006,7 +1006,7 @@ def name_ip(mac, ip):
 
 # Generates daily and weekly email digests.
 def send_email_digests():
-    logger.debug('Entering send_email_digests()')
+    logger.debug('entering send_email_digests()')
 
     timer = Timer()
 
