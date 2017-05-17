@@ -396,7 +396,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
         result = ng.database_instance.cursor.fetchone()
         if result:
-            active, lastSeen, lastRequested, counter, sid, did= result
+            active, lastSeen, lastRequested, counter, sid, did = result
             changed_ip = True
 
     if not result:
@@ -970,7 +970,7 @@ def identify_macs():
     for row in rows:
         hostname = dns_lookup(ip)
         ng.database_lock.acquire()
-        ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (raw_mac, ip, hostname[0]))
+        ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (raw_mac, ip, hostname))
         ng.database_instance.connection.commit()
         ng.database_lock.release()
 
