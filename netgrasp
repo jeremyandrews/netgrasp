@@ -981,7 +981,7 @@ def dns_lookup(ip):
         logger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", hostname, aliaslist, ipaddrlist)
     except Exception as e:
         logger.debug('gethostbyaddr failed: %s', e)
-        hostname = ['unknown']
+        hostname = 'unknown'
         logger.debug("hostname(%s)", hostname)
     return hostname
 
