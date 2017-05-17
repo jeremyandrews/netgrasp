@@ -223,6 +223,7 @@ def main(*pcap):
     ng.database_instance.cursor.execute('PRAGMA journal_mode=WAL')
 
     create_database()
+    update_database()
 
     ng.active_timeout = ng.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
     ng.delay = ng.config_instance.GetInt('Listen', 'delay', 15, False)
@@ -381,17 +382,17 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         return False
 
     # Check if we've seen this IP, MAC pair before.
-    active, lastSeen, lastRequested, counter, sid, changed_ip = [False, False, False, 0, 0, False]
-    ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, src_mac))
+    active, lastSeen, lastRequested, counter, sid, did, changed_ip = [False, False, False, 0, 0, 0, False]
+    ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, src_mac))
     result = ng.database_instance.cursor.fetchone()
     if result:
-        active, lastSeen, lastRequested, counter, sid = result
+        active, lastSeen, lastRequested, counter, sid, did = result
     else:
         # Or, check if we've seen this IP be requested before.
-        ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
+        ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
         result = ng.database_instance.cursor.fetchone()
         if result:
-            active, lastSeen, lastRequested, counter, sid = result
+            active, lastSeen, lastRequested, counter, sid, did = result
 
     if not result:
         # Check if we've seen this MAC, hostname pair before, it may have gotten assigned a new IP.
@@ -399,20 +400,17 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         # (though it's likely a vm, jail, or alias). @TODO Revisit this.
         hostname = dns_lookup(src_ip)
         logger.debug('hostname: %s', hostname)
-        ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
+        ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
         result = ng.database_instance.cursor.fetchone()
         if result:
-            active, lastSeen, lastRequested, counter, sid = result
+            active, lastSeen, lastRequested, counter, sid, did= result
             changed_ip = True
-
-    logger.debug('here4')
-    print active, lastSeen, lastRequested, counter, sid, changed_ip
 
     ng.database_lock.acquire()
     log_event(src_ip, src_mac, ng.EVENT_SEEN)
     if changed_ip:
         log_event(src_ip, src_mac, ng.EVENT_CHANGED_IP)
-        logger.info('[%s] has a new ip [%s]', src_mac, src_ip)
+        logger.info('[%d] (%s) has a new ip [%s]', did, src_mac, src_ip)
     if active:
         if lastSeen:
             # has been active recently
@@ -426,23 +424,34 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 lastSeen = last_seen(src_ip, src_mac)
                 if lastSeen:
                     timeSince = datetime.datetime.now() - lastSeen
-                    logger.info('%s (%s) is active again (after %s)', src_ip, src_mac, timeSince)
+                    logger.info('[%d] %s (%s) is active again (after %s)', did, src_ip, src_mac, timeSince)
                 else:
                     logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", src_ip, src_mac, first_seen(src_ip, src_mac))
             else:
                 # First time we've actively seen this IP.
                 log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
                 log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-                logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
+                logger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
 
             # @TODO properly handle multiple active occurences of the same IP
             ng.database_instance.cursor.execute('UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, now, counter + 1, sid))
     else:
-        # First time we've seen this IP.
-        log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
-        log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-        ng.database_instance.cursor.execute('INSERT INTO seen (mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)', (src_mac, src_ip, now, now, ip_is_mine(src_ip)))
-        logger.info('%s (%s) is active, first time seeing', src_ip, src_mac)
+        if did:
+            # First time we've seen this IP recently.
+            log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
+            logger.info('[%d] %s (%s) is active, first time seeing recently', did, src_ip, src_mac)
+        else:
+            # First time we've seen this IP.
+            ng.database_instance.cursor.execute("SELECT MAX(did) + 1 FROM seen")
+            row = fetchone()
+            if row:
+                did = row
+            else:
+                did = 1
+            log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
+            log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
+            logger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
+        ng.database_instance.cursor.execute('INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)', (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
     ng.database_instance.connection.commit()
     ng.database_lock.release()
 
@@ -520,6 +529,7 @@ def create_database():
     ng.database_instance.cursor.execute("""
       CREATE TABLE IF NOT EXISTS seen(
         sid INTEGER PRIMARY KEY,
+        did INTEGER,
         mac TEXT,
         ip TEXT,
         interface TEXT,
@@ -599,6 +609,26 @@ def create_database():
     ng.database_instance.connection.commit()
     ng.database_lock.release()
 
+def update_database():
+    # Update #1: add did column to seen table, populate
+    try:
+        ng.database_instance.cursor.execute("SELECT did FROM seen LIMIT 1")
+    except Exception as e:
+        logger.debug(e)
+        logger.debug('applying update #1 to database: adding did column to seen, populating')
+        ng.database_lock.acquire()
+        ng.database_instance.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
+        # Prior to this we assumed a new IP was a new device.
+        ng.database_instance.cursor.execute("SELECT DISTINCT ip, mac FROM seen")
+        rows = ng.database_instance.cursor.fetchall()
+        did = 1
+        for row in rows:
+            ip, mac = row
+            ng.database_instance.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
+            did += 1
+        ng.database_instance.connection.commit()
+        ng.database_lock.release()
+
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
     packet = dpkt.ethernet.Ethernet(data)
@@ -648,8 +678,27 @@ def pretty_date(time):
         return str(day_diff / 30) + " months ago"
     return str(day_diff / 365) + " years ago"
 
+# Determine appropriate device id for IP, MAC pair.
+def get_did(ip, mac):
+    ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, mac))
+    did = ng.database_instance.cursor.fetchone()
+    if not did:
+        ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ng.BROADCAST,))
+        did = ng.database_instance.cursor.fetchone()
+    if not did:
+        hostname = dns_lookup(ip)
+        logger.debug('hostname: %s', hostname)
+        ng.database_instance.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
+        did = ng.database_instance.cursor.fetchone()
+
+    if did:
+        return did[0]
+    else:
+        return False
+
 def first_seen(ip, mac):
-    ng.database_instance.cursor.execute('SELECT firstSeen FROM seen WHERE ip=? AND mac=? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1', (ip, mac))
+    did = get_did(ip, mac)
+    ng.database_instance.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1', (did,))
     active = ng.database_instance.cursor.fetchone()
     if active:
         return active[0]
@@ -657,7 +706,8 @@ def first_seen(ip, mac):
         return False
 
 def first_seen_recently(ip, mac):
-    ng.database_instance.cursor.execute('SELECT firstSeen FROM seen WHERE ip=? AND mac=? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (ip, mac))
+    did = get_did(ip, mac)
+    ng.database_instance.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
     recent = ng.database_instance.cursor.fetchone()
     if recent:
         return recent[0]
@@ -665,7 +715,8 @@ def first_seen_recently(ip, mac):
         return False
 
 def last_seen(ip, mac):
-    ng.database_instance.cursor.execute('SELECT lastSeen FROM seen WHERE ip=? AND mac=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (ip, mac))
+    did = get_did(ip, mac)
+    ng.database_instance.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
     active = ng.database_instance.cursor.fetchone()
     if active:
         return active[0]
@@ -673,7 +724,8 @@ def last_seen(ip, mac):
         return False
 
 def previously_seen(ip, mac):
-    ng.database_instance.cursor.execute('SELECT lastSeen FROM seen WHERE ip=? AND mac=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (ip, mac))
+    did = get_did(ip, mac)
+    ng.database_instance.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
     previous = ng.database_instance.cursor.fetchone()
     if previous:
         return previous[0]
@@ -681,7 +733,8 @@ def previously_seen(ip, mac):
         return False
 
 def first_requested(ip, mac):
-    ng.database_instance.cursor.execute('SELECT firstRequested FROM seen WHERE ip=? AND mac=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (ip, mac))
+    did = get_did(ip, mac)
+    ng.database_instance.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
     active = ng.database_instance.cursor.fetchone()
     if active:
         return active[0]
@@ -689,7 +742,8 @@ def first_requested(ip, mac):
         return False
 
 def last_requested(ip, mac):
-    ng.database_instance.cursor.execute('SELECT lastRequested FROM seen WHERE ip=? AND mac=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (ip, mac))
+    did = get_did(ip, mac)
+    ng.database_instance.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
     last = ng.database_instance.cursor.fetchone()
     if last:
         return last[0]
