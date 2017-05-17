@@ -399,7 +399,6 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         # In the event of the same IP and a different hostname, we treat this like a different device
         # (though it's likely a vm, jail, or alias). @TODO Revisit this.
         hostname = dns_lookup(src_ip)
-        logger.debug('hostname: %s', hostname)
         ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
         result = ng.database_instance.cursor.fetchone()
         if result:
@@ -687,7 +686,6 @@ def get_did(ip, mac):
         did = ng.database_instance.cursor.fetchone()
     if not did:
         hostname = dns_lookup(ip)
-        logger.debug('hostname: %s', hostname)
         ng.database_instance.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
         did = ng.database_instance.cursor.fetchone()
 
@@ -784,11 +782,12 @@ def detect_netscans():
     if scans:
         ng.database_lock.acquire()
     for scan in scans:
-        ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (scan[1], scan[2], ng.EVENT_SCAN, three_minutes_ago))
+        count, src_mac, src_ip = scan
+        ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, ng.EVENT_SCAN, three_minutes_ago))
         already_detected = ng.database_instance.cursor.fetchone()
         if not already_detected:
-            ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (scan[1], scan[2], now, ng.EVENT_SCAN))
-            logger.info('Detected network scan by %s [%s]', scan[2], scan[1])
+            ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (src_mac, src_ip, now, ng.EVENT_SCAN))
+            logger.info('Detected network scan by %s [%s]', src_ip, src_mac)
     if scans:
         ng.database_instance.connection.commit()
         ng.database_lock.release()
@@ -871,7 +870,7 @@ def send_email_alerts():
             ng.database_lock.acquire()
 
         logger.debug('processing event %d for %s [%s] at %s', eid, ip, mac, timestamp)
-        processed = True
+        alerted = True
         # only send emails for configured events
         if event in ng.email_instance.alerts:
             logger.info('event %s [%d] in %s, generating notification email', event, eid, ng.email_instance.alerts)
@@ -917,10 +916,10 @@ def send_email_alerts():
 
             except Exception as e:
                 logger.warning('Failed to send email: %s', e)
-                processed = False
+                alerted = False
         else:
             logger.debug('event %s [%d] NOT in %s', event, eid, ng.email_instance.alerts)
-        if processed:
+        if alerted:
             ng.database_instance.cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (processed + 1, eid))
 
     if rows:
@@ -936,7 +935,7 @@ def identify_macs():
     ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL')
     rows = ng.database_instance.cursor.fetchall()
     for row in rows:
-        raw_mac = row[0]
+        raw_mac, ip = row
         if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", raw_mac.lower()):
             mac = raw_mac
         else:
@@ -949,7 +948,7 @@ def identify_macs():
                     piece = '0'+piece
                 mac.append(piece)
             mac = ":".join(mac)
-        logger.debug('Looking up vendor for %s [%s]', row[1], raw_mac)
+        logger.debug('Looking up vendor for %s [%s]', ip, raw_mac)
         http = httplib.HTTPConnection('api.macvendors.com', 80)
         url = """/%s""" % mac
         http.request("GET", url)
@@ -957,7 +956,7 @@ def identify_macs():
         ng.database_lock.acquire()
         if response.status == 200 and response.reason == 'OK':
             vendor = response.read()
-            logger.info('Identified %s [%s] as %s', row[1], raw_mac, vendor)
+            logger.info('Identified %s [%s] as %s', ip, raw_mac, vendor)
             ng.database_instance.cursor.execute('INSERT INTO vendor (mac, vendor) VALUES (?, ?)', (raw_mac, vendor))
         else:
             logger.info('Failed identify vendor for [%s]', raw_mac)
@@ -968,21 +967,21 @@ def identify_macs():
     ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL')
     rows = ng.database_instance.cursor.fetchall()
     for row in rows:
-        hostname = dns_lookup(row[1])
-        logger.debug('hostname: %s', hostname)
+        hostname = dns_lookup(ip)
         ng.database_lock.acquire()
-        ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (row[0], row[1], hostname[0]))
+        ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (raw_mac, ip, hostname[0]))
         ng.database_instance.connection.commit()
         ng.database_lock.release()
 
 def dns_lookup(ip):
     logger.debug('Entering gethostbyaddr(%s)', ip)
     try:
-        hostname = socket.gethostbyaddr(ip)
+        hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
     except Exception as e:
         logger.debug('gethostbyaddr failed: %s', e)
         hostname = ['unknown']
-    return hostname[0]
+    logger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", hostname, aliaslist, ipaddrlist)
+    return hostname
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
@@ -1117,14 +1116,15 @@ def send_email_digests():
 
         if (digest == 'daily'):
             ng.database_instance.cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (time_period, now))
-            processed = ng.PROCESSED_DAILY_DIGEST
+            alerted = ng.PROCESSED_DAILY_DIGEST
         elif (digest == 'weekly'):
             ng.database_instance.cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)', (time_period, now))
-            processed = ng.PROCESSED_WEEKLY_DIGEST
+            alerted = ng.PROCESSED_WEEKLY_DIGEST
         rows = ng.database_instance.cursor.fetchall()
         ng.database_lock.acquire()
         counter = 0
         for row in rows:
+            eid, processed = row
             # Give up the lock occasionally while processing a large number of rows, allowing the
             # wiretap process to work if needed, avoiding potential timeout.
             counter = counter + 1
@@ -1138,7 +1138,7 @@ def send_email_digests():
                     return
                 counter = 0
                 ng.database_lock.acquire()
-            ng.database_instance.cursor.execute('UPDATE event SET processed=? WHERE eid=?', (row[1] + processed, row[0]))
+            ng.database_instance.cursor.execute('UPDATE event SET processed=? WHERE eid=?', (processed + alerted, eid))
         ng.database_instance.connection.commit()
         ng.database_lock.release()
 
