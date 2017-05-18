@@ -151,10 +151,13 @@ class Netgrasp:
         value = self.database_instance.cursor.fetchone();
         if value:
             if date:
+                logger.debug('returning date: %s', value[0])
                 return datetime.datetime.strptime(value[0], "%Y-%m-%d %H:%M:%S.%f")
             else:
+                logger.debug('returning value: %s', value[0])
                 return value[0]
         else:
+            logger.debug('returning default value: %s', default_value)
             return default_value
 
 class ExclusiveFileLock:
@@ -1005,7 +1008,7 @@ def name_ip(mac, ip):
     elif detail[4]:
         return detail[4]
     elif detail[5]:
-        return """Unidentified device by %s""" % (detail[5])
+        return """%s device""" % (detail[5])
     else:
         return detail[0]
 
