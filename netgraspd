@@ -29,6 +29,7 @@ class Netgrasp:
     EVENT_STALE             = 'stale'
     EVENT_SCAN              = 'network_scan'
     EVENT_DUPLICATE_IP      = 'duplicate_ip'
+    EVENT_DUPLICATE_MAC     = 'duplicate_mac'
 
     PROCESSED_ALERT         = 1
     PROCESSED_DAILY_DIGEST  = 2
@@ -822,6 +823,26 @@ def detect_anomalies():
             if not already_detected:
                 ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (mac, ip, now, ng.EVENT_DUPLICATE_IP))
                 logger.info('Detected multiple MACs with same IP %s [%s]', ip, mac)
+    if duplicates:
+        ng.database_instance.connection.commit()
+        ng.database_lock.release()
+
+    # Multiple IP's with the same MAC.
+    ng.database_instance.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (ng.BROADCAST,))
+    duplicates = ng.database_instance.cursor.fetchall()
+    if duplicates:
+        ng.database_lock.acquire()
+    for duplicate in duplicates:
+        count, mac = duplicate
+        ng.database_instance.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1;", (mac,))
+        details = ng.database_instance.cursor.fetchall()
+        for detail in details:
+            ip, mac, sid, did = detail
+            ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, ng.EVENT_DUPLICATE_IP, stale))
+            already_detected = ng.database_instance.cursor.fetchone()
+            if not already_detected:
+                ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (mac, ip, now, ng.EVENT_DUPLICATE_MAC))
+                logger.info('Detected multiple IPs with same MAC %s [%s]', ip, mac)
     if duplicates:
         ng.database_instance.connection.commit()
         ng.database_lock.release()

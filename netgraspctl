@@ -14,9 +14,9 @@ import time
 class NetgraspShared:
     BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
-    DEFAULT_PIDFILE   = "netgrasp.pid"
+    DEFAULT_PIDFILE   = "netgraspd.pid"
     DEFAULT_DBLOCK    = "/tmp/.database_lock"
-    DEFAULT_CONFIG    = ['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf']
+    DEFAULT_CONFIG    = ['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf']
 
     class Config:
         def __init__(self, parser, config = False):
@@ -245,14 +245,14 @@ def start(args):
     if ngs.is_running:
         sys.exit("""Netgrasp is already running with pid %d.""" % ngs.is_running)
     if args.verbose:
-        print "Starting netgrasp..."
-    sys.exit("Feature not yet implemented. Manually run: 'sudo ./netgrasp -d'")
+        print "Starting netgraspd..."
+    sys.exit("Feature not yet implemented. Manually run: 'sudo ./netgraspd -d'")
 
 def stop(args):
     if not ngs.is_running:
         sys.exit("Netgrasp is not running.")
     if args.verbose:
-        print "Stopping netgrasp..."
+        print "Stopping netgraspd..."
     try:
         os.kill(ngs.is_running, signal.SIGTERM)
     except OSError as e:
@@ -467,19 +467,19 @@ if __name__ == '__main__':
     subparsers = parser.add_subparsers()
 
     # start
-    parser_start = subparsers.add_parser('start', help='start netgrasp')
+    parser_start = subparsers.add_parser('start', help='start netgraspd')
     parser_start.set_defaults(func=start)
 
     # stop
-    parser_stop = subparsers.add_parser('stop', help='stop netgrasp')
+    parser_stop = subparsers.add_parser('stop', help='stop netgraspd')
     parser_stop.set_defaults(func=stop)
 
     # restart
-    parser_restart = subparsers.add_parser('restart', help='restart netgrasp')
+    parser_restart = subparsers.add_parser('restart', help='restart netgraspd')
     parser_restart.set_defaults(func=restart)
 
     # status
-    parser_status = subparsers.add_parser('status', help='netgrasp status')
+    parser_status = subparsers.add_parser('status', help='netgraspd status')
     parser_status.set_defaults(func=status)
 
     # list
