@@ -383,7 +383,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
     # Check if we've seen this IP, MAC pair before.
     active, lastSeen, lastRequested, counter, sid, did, changed_ip = [False, False, False, 0, 0, 0, False]
-    logger.debug('first_seen query 1')
+    logger.debug('ip_seen query 1')
     ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, src_mac))
     result = ng.database_instance.cursor.fetchone()
     if result:
@@ -394,7 +394,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         # In the event of the same IP and a different hostname, we treat this like a different device
         # (though it's likely a vm, jail, or alias). @TODO Revisit this.
         hostname = dns_lookup(src_ip)
-        logger.debug('first_seen query 2')
+        logger.debug('ip_seen query 2')
         ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
         result = ng.database_instance.cursor.fetchone()
         if result:
@@ -403,7 +403,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
     if not result:
         # Check if we've seen this IP be requested before.
-        logger.debug('first_seen query 3')
+        logger.debug('ip_seen query 3')
         ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
         result = ng.database_instance.cursor.fetchone()
         if result:
