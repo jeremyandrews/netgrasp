@@ -234,7 +234,7 @@ def name_ip(mac, ip):
     else:
         return detail[0]
 
-# Truncate strings with they're too long.
+# Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):
     if len(string) <= maxlength:
         return string
