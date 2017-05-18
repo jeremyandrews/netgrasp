@@ -39,9 +39,9 @@ class Netgrasp:
     DEFAULT_USER      = "daemon"
     DEFAULT_GROUP     = "daemon"
     DEFAULT_LOGLEVEL  = logging.INFO
-    DEFAULT_LOGFILE   = "netgrasp.log"
+    DEFAULT_LOGFILE   = "netgraspd.log"
     DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
-    DEFAULT_PIDFILE   = "netgrasp.pid"
+    DEFAULT_PIDFILE   = "netgraspd.pid"
     DEFAULT_DBLOCK    = "/tmp/.database_lock"
 
     config_instance = ''
