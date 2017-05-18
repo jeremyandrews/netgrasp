@@ -51,7 +51,7 @@ class Netgrasp:
     class Config:
         def __init__(self, parser):
             self.parser = parser
-            self.found = self.parser.read(['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf'])
+            self.found = self.parser.read(['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf'])
 
         def _GetValue(self, section, option, value, default, required, secret):
             if value:
