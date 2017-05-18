@@ -130,12 +130,13 @@ smtp_password = password
 ```
 
 The following alert types are supported:
-* first_requested: the first time an IP address is requested on your network
-* requested: any time an IP address is requested on your network
-* first_seen: the first time an IP address is actively seen on your network
+* first_requested: the first time an IP address is requested on the network
+* requested: any time an IP address is requested on the network
+* first_seen: the first time an IP address is actively seen on the network
 * first_seen_recently: when a stale IP address becomes active again
-* seen: any time an IP address is actively seen on your network
+* seen: any time an IP address is actively seen on the network
 * changed_ip: a known device has changed IPs
+* duplicate_ip: multiple MACs with the same IP active on the network
 * stale: any time an IP address hasn't been seen for more than active_timeout
   seconds
 * network_scan: any time a device requests an abnormally large number of IPs
@@ -143,7 +144,7 @@ The following alert types are supported:
 For example:
 ```
 [Email]
-alerts = first_seen_recently,first_seen,network_scan
+alerts = first_seen_recently,first_seen,network_scan,duplicate_ip
 ```
 
 The following digest types are supported:
@@ -164,7 +165,7 @@ notifications.
 For example:
 ```
 [Notifications]
-alerts = first_seen_recently,network_scan,changed_ip
+alerts = first_seen_recently,network_scan,changed_ip,duplicate_ip
 ```
 
 # Roadmap
@@ -172,7 +173,6 @@ alerts = first_seen_recently,network_scan,changed_ip
    * start netgrasp daemon
 * Alert on anomalies
    * multiple IP's associated with a single MAC address
-   * multiple MAC addresses associated with a single IP address
    * destination/source IP of 0.0.0.0, or other invalid IPs
    * [Reserved IP addresses](https://en.wikipedia.org/wiki/Reserved_IP_addresses)
 * Add semi-active and active modes
