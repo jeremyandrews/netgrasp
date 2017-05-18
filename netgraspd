@@ -838,7 +838,7 @@ def detect_anomalies():
         details = ng.database_instance.cursor.fetchall()
         for detail in details:
             ip, mac, sid, did = detail
-            ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, ng.EVENT_DUPLICATE_IP, stale))
+            ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, ng.EVENT_DUPLICATE_MAC, stale))
             already_detected = ng.database_instance.cursor.fetchone()
             if not already_detected:
                 ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (mac, ip, now, ng.EVENT_DUPLICATE_MAC))
