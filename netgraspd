@@ -74,6 +74,17 @@ class Netgrasp:
                     sys.exit("""Required [%s] '%s' not defined in configuration file, exiting.""" % (section, option))
             return value
 
+        def GetTextList(self, section, option, default = None, required = True, secret = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                text = self.parser.get(section, option)
+                values = text.split(',')
+                textlist = []
+                for value in values:
+                    textlist.append(value.strip())
+            else:
+                textlist = None
+            return self._GetValue(section, option, textlist, default, required, secret)
+
         def GetText(self, section, option, default = None, required = True, secret = False):
             if (self.parser.has_section(section) and self.parser.has_option(section, option)):
                 value = self.parser.get(section, option)
@@ -102,7 +113,8 @@ class Netgrasp:
     class Email:
         def __init__(self):
             self.enabled = True
-            self.email_to = ng.config_instance.GetText('Email', 'to').split(',')
+            self.email_to = ng.config_instance.GetTextList('Email', 'to')
+            sys.exit()
             valid = True
             for email in self.email_to:
                 if not valid_email_address(email):
@@ -123,8 +135,8 @@ class Netgrasp:
             self.email_password = ng.config_instance.GetText('Email', 'smtp_password', None, False, True)
 
             # @TODO validate configured alerts and digests
-            self.alerts = ng.config_instance.GetText('Email', 'alerts').split(',')
-            self.digest = ng.config_instance.GetText('Email', 'digests').split(',')
+            self.alerts = ng.config_instance.GetTextList('Email', 'alerts')
+            self.digest = ng.config_instance.GetTextList('Email', 'digests')
 
     # Determine who we are, for pretty logging.
     def whoami(self):
