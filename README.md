@@ -29,6 +29,7 @@ provide daily summary digests detailing devices on your network.
  * [dpkt](https://github.com/kbandla/dpkt) (`pip install dpkt`)
  * [pcap](https://github.com/dugsong/pypcap) (`pip install pypcap`)
  * sqlite3
+ * (_OPTIONAL_) [pyzmail](http://www.magiksys.net/pyzmail/) (`pip install pyzmail`)
  * (_OPTIONAL_) [ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
 
 ### Limitations

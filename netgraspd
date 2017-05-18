@@ -54,7 +54,7 @@ class Netgrasp:
             self.found = self.parser.read(['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf'])
 
         def _GetValue(self, section, option, value, default, required, secret):
-            if value:
+            if value != None:
                 if secret:
                     logger.info("configuration [%s] '%s' set", section, option)
                 else:
@@ -73,17 +73,6 @@ class Netgrasp:
                     logger.critical("Required [%s] '%s' not defined in configuration file, exiting.", section, option)
                     sys.exit("""Required [%s] '%s' not defined in configuration file, exiting.""" % (section, option))
             return value
-
-        def GetTextList(self, section, option, default = None, required = True, secret = False):
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-                text = self.parser.get(section, option)
-                values = text.split(',')
-                textlist = []
-                for value in values:
-                    textlist.append(value.strip())
-            else:
-                textlist = None
-            return self._GetValue(section, option, textlist, default, required, secret)
 
         def GetText(self, section, option, default = None, required = True, secret = False):
             if (self.parser.has_section(section) and self.parser.has_option(section, option)):
@@ -106,27 +95,72 @@ class Netgrasp:
                 value = None
             return self._GetValue(section, option, value, default, required, secret)
 
+        def GetTextList(self, section, option, default = None, required = True, secret = False, quiet = False):
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                text = self.parser.get(section, option)
+                values = text.split(',')
+                textlist = []
+                for value in values:
+                    textlist.append(value.strip())
+            else:
+                textlist = None
+            if quiet:
+                return textlist
+            else:
+                return self._GetValue(section, option, textlist, default, required, secret)
+
+        def GetEmailList(self, section, option, default = None, required = True, secret = False):
+            emails = self.GetTextList(section, option, default, required, secret, True)
+            addresses = []
+            for email in emails:
+                pieces = email.split('|')
+                if len(pieces) == 2:
+                    name, address = pieces
+                    if valid_email_address(address):
+                        addresses.append((name.strip(), address.strip()))
+                    else:
+                        logger.warn('ignoring invalid email address (%s)', address)
+                elif len(pieces) == 1:
+                    if valid_email_address(email):
+                        addresses.append(email)
+                    else:
+                        logger.warn('ignoring invalid email address (%s)', email)
+                else:
+                    logger.warn('ignoring invalid address (%s)', email)
+            return self._GetValue(section, option, addresses, default, required, secret)
+
     class Database:
         def __init__(self):
             self.connection = sqlite3.connect(ng.database_filename, detect_types=sqlite3.PARSE_DECLTYPES)
 
     class Email:
         def __init__(self):
-            self.enabled = True
-            self.email_to = ng.config_instance.GetTextList('Email', 'to')
-            sys.exit()
-            valid = True
-            for email in self.email_to:
-                if not valid_email_address(email):
-                    valid = False
-                    logger.warn('unable to send email, invalid to address (%s)', email)
-            if not valid:
-                self.enabled = False
+            self.enabled = ng.config_instance.GetBoolean('Email', 'enabled', True, False)
+            if not self.enabled:
+                logger.warning('email is disabled')
+                return
+            email_to = ng.config_instance.GetEmailList('Email', 'to')
+            if not len(email_to):
+                logger.warning('no valid to address configured, email is disabled')
+                return
 
-            self.email_from = ng.config_instance.GetText('Email', 'from')
-            if not valid_email_address(self.email_from):
-                logger.warn('unable to send email, invalid from address (%s)', self.email_from)
-                self.enabled = False
+            self.email_to = email_to
+
+            email_from = ng.config_instance.GetEmailList('Email', 'from')
+            if len(email_from) > 1:
+                logger.warn('only able to send from one address, using %s', email_from[0])
+            elif not len(email_from):
+                logger.warning('no valid from address configured, email is disabled')
+                return
+
+            self.email_from = email_from[0]
+
+            try:
+                import pyzmail
+            except Exception as e:
+                logger.critical("fatal exception: %s", e)
+                logger.critical("failed to import pyzmail, try: 'pip install pyzmail', exiting")
+                sys.exit("Fatal error: failed to import pcap, try: 'pip install pyzmail', exiting")
 
             self.email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname')
             self.email_port = ng.config_instance.GetText('Email', 'smtp_port', None, False)
@@ -909,7 +943,17 @@ def send_notifications():
 
 def send_email_alerts():
     logger.debug('entering send_email_alerts()')
-    import smtplib
+
+    import pyzmail
+
+    if not ng.email_instance.enabled:
+        logger.debug('email disabled')
+        return False
+
+    if not ng.email_instance.alerts:
+        logger.debug('no alerts configured')
+        return False
+
     day = datetime.datetime.now() - datetime.timedelta(days=1)
 
     timer = Timer()
@@ -963,27 +1007,16 @@ def send_email_alerts():
                 body += """\nIn the last day, this device talked to:"""
             for peer in results:
                 body += """\n - %s (%s)""" % (peer[0], name_ip(peer[1], peer[0]))
-            message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (ng.email_instance.email_from, ", ".join(ng.email_instance.email_to), subject, body)
-            try:
-                if ng.email_instance.email_ssl:
-                    try:
-                        server = smtplib.SMTP_SSL(ng.email_instance.email_hostname, ng.email_instance.email_port)
-                        server.ehlo()
-                    except:
-                        server = smtplib.SMTP(ng.email_instance.email_hostname, ng.email_instance.email_port)
-                        server.ehlo()
-                        server.starttls()
+            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, 'iso-8859-1', (body, 'us-ascii'))
+            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, 'tls', ng.email_instance.email_username, ng.email_instance.email_password)
+            if isinstance(ret, dict):
+                if ret:
+                    logger.warning("failed receipients: %s", ', '.join(ret.keys()))
                 else:
-                    server = smtplib.SMTP(ng.email_instance.email_hostname, ng.email_instance.email_port)
-                    server.ehlo()
-                if ng.email_instance.email_username and ng.email_instance.email_password:
-                    server.login(ng.email_instance.email_username, ng.email_instance.email_password)
-                server.sendmail(ng.email_instance.email_from, ng.email_instance.email_to, message)
-                server.close()
+                    logger.debug("email sent: %s", ret)
+            else:
+                logger.warning("error: %s", ret)
 
-            except Exception as e:
-                logger.warning('Failed to send email: %s', e)
-                alerted = False
         else:
             logger.debug('event %s [%d] NOT in %s', event, eid, ng.email_instance.alerts)
         if alerted:
@@ -1077,9 +1110,16 @@ def name_ip(mac, ip):
 def send_email_digests():
     logger.debug('entering send_email_digests()')
 
-    timer = Timer()
+    import pyzmail
 
-    import smtplib
+    if not ng.email_instance.enabled:
+        return False
+
+    if not ng.email_instance.digest:
+        logger.debug('no digests configured')
+        return False
+
+    timer = Timer()
     now = datetime.datetime.now()
 
     digests = ['daily', 'weekly']
@@ -1212,26 +1252,16 @@ def send_email_digests():
         ng.database_lock.release()
 
         logger.info('Sending %s digest', digest)
-        message = """From: %s\nTo: %s\nSubject: %s\n\n%s""" % (ng.email_instance.email_from, ", ".join(ng.email_instance.email_to), subject, body)
-        try:
-            if ng.email_instance.email_ssl:
-                try:
-                    server = smtplib.SMTP_SSL(ng.email_instance.email_hostname, ng.email_instance.email_port)
-                    server.ehlo()
-                except:
-                    server = smtplib.SMTP(ng.email_instance.email_hostname, ng.email_instance.email_port)
-                    server.ehlo()
-                    server.starttls()
-            else:
-                server = smtplib.SMTP(ng.email_instance.email_hostname, ng.email_instance.email_port)
-                server.ehlo()
-            if ng.email_instance.email_username and ng.email_instance.email_password:
-                server.login(ng.email_instance.email_username, ng.email_instance.email_password)
-            server.sendmail(ng.email_instance.email_from, ng.email_instance.email_to, message)
-            server.close()
 
-        except Exception as e:
-            logger.warning('Failed to send email: %s', e)
+        payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, 'iso-8859-1', (body, 'us-ascii'))
+        ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, 'tls', ng.email_instance.email_username, ng.email_instance.email_password)
+        if isinstance(ret, dict):
+            if ret:
+                logger.warning("failed receipients: %s", ', '.join(ret.keys()))
+            else:
+                logger.debug("email sent: %s", ret)
+        else:
+            logger.warning("error: %s", ret)
 
 if __name__ == '__main__':
     import getopt
