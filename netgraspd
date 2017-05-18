@@ -1001,9 +1001,10 @@ def identify_macs():
     ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL')
     rows = ng.database_instance.cursor.fetchall()
     for row in rows:
+        mac, ip = row
         hostname = dns_lookup(ip)
         ng.database_lock.acquire()
-        ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (raw_mac, ip, hostname))
+        ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (mac, ip, hostname))
         ng.database_instance.connection.commit()
         ng.database_lock.release()
 
