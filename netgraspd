@@ -1327,15 +1327,21 @@ def garbage_collection():
     ng.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
     oldest_arplog = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_arplog', 60 * 60 * 24 * 7 * 2, False))
-    logger.debug("deleting arplog entries older than %s", oldest_arplog)
     oldest_event = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_event', 60 * 60 * 24 * 7 * 2, False))
-    logger.debug("deleting event entries older than %s", oldest_event)
 
     ng.database_lock.acquire()
+    # Purge old arplog entries.
+    ng.database_instance.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (oldest_arplog,))
+    arplog_count = ng.database_instance.cursor.fetchone()
     ng.database_instance.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (oldest_arplog,))
+    # Purge old event entries.
+    ng.database_instance.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (oldest_event,))
+    event_count = ng.database_instance.cursor.fetchone()
     ng.database_instance.cursor.execute("DELETE FROM event WHERE timestamp < ?", (oldest_event,))
     ng.database_instance.connection.commit()
     ng.database_lock.release()
+    logger.debug("deleted %d arplog entries older than %s", arplog_count[0], oldest_arplog)
+    logger.debug("deleted %d event entries older than %s", event_count[0], oldest_event)
 
 if __name__ == '__main__':
     import getopt
