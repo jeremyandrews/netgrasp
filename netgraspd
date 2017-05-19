@@ -177,6 +177,7 @@ class Netgrasp:
             self.digest = ng.config_instance.GetTextList('Email', 'digests')
 
         def MailSend(self, subject, encoding, body):
+            import pyzmail
             payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, encoding, body)
             ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, ng.email_instance.email_mode, ng.email_instance.email_username, ng.email_instance.email_password)
             if isinstance(ret, dict):
@@ -968,8 +969,6 @@ def send_notifications():
 def send_email_alerts():
     logger.debug('entering send_email_alerts()')
 
-    import pyzmail
-
     if not ng.email_instance.enabled:
         logger.debug('email disabled')
         return False
@@ -1124,8 +1123,6 @@ def name_ip(mac, ip):
 # Generates daily and weekly email digests.
 def send_email_digests():
     logger.debug('entering send_email_digests()')
-
-    import pyzmail
 
     if not ng.email_instance.enabled:
         return False
