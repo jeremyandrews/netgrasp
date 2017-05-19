@@ -13,12 +13,8 @@ Netgrasp should be controlled with the netgraspctl command:
   netgraspctl -h
 ```
 
-(Note: the 'start' functionality is not yet implemented, and will instruct you
-to manually start netgraspd:
-```
-  sudo netgraspd -d
-```
-)
+> Note: the 'start' functionality is not yet implemented, and will instruct you to manually start netgraspd:
+> `  sudo netgraspd -d`
 
 Netgrasp tracks IP and MAC address pairs seen on the network while it runs,
 optionally notifying you when a new device joins your network. It can also
