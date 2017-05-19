@@ -50,6 +50,7 @@ class Netgrasp:
     config_instance = ''
     database_instane = ''
     email_instance = ''
+    notification_instance = ''
 
     class Config:
         def __init__(self, parser):
@@ -138,17 +139,18 @@ class Netgrasp:
 
     class Email:
         def __init__(self):
-            try:
-                import pyzmail
-            except Exception as e:
-                logger.critical("fatal exception: %s", e)
-                logger.critical("failed to import pyzmail, try: 'pip install pyzmail', exiting")
-                sys.exit("Fatal error: failed to import pcap, try: 'pip install pyzmail', exiting")
-
             self.enabled = ng.config_instance.GetBoolean('Email', 'enabled', True, False)
             if not self.enabled:
                 logger.warning('email is disabled')
                 return
+
+            try:
+                import pyzmail
+            except Exception as e:
+                logger.critical("fatal exception: %s", e)
+                logger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", ng.whoami())
+                sys.exit("""Fatal error: failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email].""" % (ng.whoami()))
+
             self.email_to = ng.config_instance.GetEmailList('Email', 'to')
             if not len(self.email_to):
                 logger.warning('no valid to address configured, email is disabled')
@@ -162,7 +164,6 @@ class Netgrasp:
                 logger.warning('no valid from address configured, email is disabled')
                 self.enabled = False
                 return
-
             self.email_from = email_from[0]
 
             self.email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname')
@@ -177,8 +178,8 @@ class Netgrasp:
 
             self.alerts = []
             self.digest = []
-            alerts = ng.config_instance.GetTextList('Email', 'alerts')
-            digests = ng.config_instance.GetTextList('Email', 'digests')
+            alerts = ng.config_instance.GetTextList('Email', 'alerts', None, False)
+            digests = ng.config_instance.GetTextList('Email', 'digests', None, False)
             for alert in alerts:
                 if alert in ng.ALERT_TYPES:
                     self.alerts.append(alert)
@@ -201,6 +202,28 @@ class Netgrasp:
                     logger.debug("email sent: %s", ret)
             else:
                 logger.warning("email error: %s", ret)
+
+    class Notification:
+        def __init__(self):
+            self.enabled = ng.config_instance.GetBoolean('Notifications', 'enabled', True, False)
+            if not self.enabled:
+                logger.warning('notifications are disabled')
+                return
+
+            self.alerts = []
+            alerts = ng.config_instance.GetTextList('Notifications', 'alerts', None, False)
+            for alert in alerts:
+                if alert in ng.ALERT_TYPES:
+                    self.alerts.append(alert)
+                else:
+                    logger.warn("ignoring unrecognized alert type (%s), supported types: %s", alert, ng.ALERT_TYPES)
+
+            try:
+                import ntfy
+            except Exception as e:
+                logger.critical("fatal exception: %s", e)
+                logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts, exiting.", ng.whoami())
+                sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (ng.whoami()))
 
     # Determine who we are, for pretty logging.
     def whoami(self):
@@ -926,59 +949,58 @@ def detect_anomalies():
 def send_notifications():
     logger.debug('entering send_notifications()')
 
-    if not ng.email_instance.enabled:
+    if not ng.notification_instance.enabled:
         logger.debug('notifications disabled')
         return False
 
-    if not ng.notification_alerts:
-        logger.debug('no alerts configured')
+    if not ng.notification_instance.alerts:
+        logger.debug('no notification alerts configured')
         return False
 
-    if ng.notification_alerts:
-        timer = Timer()
+    import ntfy
+    timer = Timer()
 
-        alerts = ','.join(ng.notification_alerts)
-        day = datetime.datetime.now() - datetime.timedelta(days=1)
-        ng.database_instance.cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ('+ ','.join('?'*len(ng.notification_alerts)) + ')', ng.notification_alerts)
+    day = datetime.datetime.now() - datetime.timedelta(days=1)
+    ng.database_instance.cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ('+ ','.join('?'*len(ng.notification_instance.alerts)) + ')', ng.notification_instance.alerts)
 
-        rows = ng.database_instance.cursor.fetchall()
-        if rows:
-            ng.database_lock.acquire()
+    rows = ng.database_instance.cursor.fetchall()
+    if rows:
+        ng.database_lock.acquire()
 
-        counter = 0
-        for row in rows:
-            eid, mac, ip, timestamp, event, processed = row
-            # Give up the lock occasionally while processing a large number of rows, allowing the
-            # wiretap process to work if needed, avoiding potential timeout.
-            counter = counter + 1
-            if (counter > MAXPROCESS):
-                logger.debug("updated 100 events, releasing/regrabbing lock")
-                ng.database_instance.connection.commit()
-                ng.database_lock.release()
-                if (timer.elapsed() > MAXSECONDS):
-                    # We've been processing notifications too long, quit for now and come back later.
-                    logger.debug("processing notifications >%d seconds, quitting for now", MAXSECONDS)
-                    return
-                counter = 0
-                ng.database_lock.acquire()
-
-            logger.debug('processing event %d for %s [%s] at %s', eid, ip, mac, timestamp)
-
-            # only send notifications for configured events
-            if event in ng.notification_alerts:
-                logger.info('event %s [%d] in %s, generating notification alert', event, eid, ng.notification_alerts)
-                firstSeen = first_seen(ip, mac)
-                lastSeen = first_seen_recently(ip, mac)
-                previouslySeen = previously_seen(ip, mac)
-                title = """Netgrasp alert: %s""" % (event)
-                body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(mac, ip), ip, mac, pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstSeen))
-                ntfy.notify(body, title)
-                ng.database_instance.cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (processed + 8, eid))
-            else:
-                logger.debug('event %s [%d] NOT in %s', event, eid, ng.notification_alerts)
-        if rows:
+    counter = 0
+    for row in rows:
+        eid, mac, ip, timestamp, event, processed = row
+        # Give up the lock occasionally while processing a large number of rows, allowing the
+        # wiretap process to work if needed, avoiding potential timeout.
+        counter = counter + 1
+        if (counter > MAXPROCESS):
+            logger.debug("updated 100 events, releasing/regrabbing lock")
             ng.database_instance.connection.commit()
             ng.database_lock.release()
+            if (timer.elapsed() > MAXSECONDS):
+                # We've been processing notifications too long, quit for now and come back later.
+                logger.debug("processing notifications >%d seconds, quitting for now", MAXSECONDS)
+                return
+            counter = 0
+            ng.database_lock.acquire()
+
+        logger.debug('processing event %d for %s [%s] at %s', eid, ip, mac, timestamp)
+
+        # only send notifications for configured events
+        if event in ng.notification_instance.alerts:
+            logger.info('event %s [%d] in %s, generating notification alert', event, eid, ng.notification_instance.alerts)
+            firstSeen = first_seen(ip, mac)
+            lastSeen = first_seen_recently(ip, mac)
+            previouslySeen = previously_seen(ip, mac)
+            title = """Netgrasp alert: %s""" % (event)
+            body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(mac, ip), ip, mac, pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstSeen))
+            ntfy.notify(body, title)
+            ng.database_instance.cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (processed + 8, eid))
+        else:
+            logger.debug('event %s [%d] NOT in %s', event, eid, ng.notification_instance.alerts)
+    if rows:
+        ng.database_instance.connection.commit()
+        ng.database_lock.release()
 
 def send_email_alerts():
     logger.debug('entering send_email_alerts()')
@@ -988,7 +1010,7 @@ def send_email_alerts():
         return False
 
     if not ng.email_instance.alerts:
-        logger.debug('no alerts configured')
+        logger.debug('no email alerts configured')
         return False
 
     day = datetime.datetime.now() - datetime.timedelta(days=1)
@@ -1356,17 +1378,8 @@ if __name__ == '__main__':
             logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting.")
             sys.exit("Fatal error: failed to import daemonize, try: 'pip install daemonize', exiting.")
 
-    ng.notification_alerts = ng.config_instance.GetText('Notifications', 'alerts', None, False)
-    if ng.notification_alerts:
-        ng.notification_alerts = ng.notification_alerts.split(',')
-        try:
-            import ntfy
-        except Exception as e:
-            logger.critical("fatal exception: %s", e)
-            logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts, exiting.", ng.whoami())
-            sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (ng.whoami()))
-    else:
-        ng.notification_alerts = []
+    ng.notification_instance = ng.Notification()
+
     ng.database_filename = ng.config_instance.GetText('Database', 'filename')
 
     if ng.daemonize:
