@@ -20,6 +20,9 @@ import time
 class Netgrasp:
     BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
+    ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan']
+    DIGEST_TYPES = ['daily', 'weekly']
+
     EVENT_SEEN              = 'seen'
     EVENT_SEEN_FIRST        = 'first_seen'
     EVENT_SEEN_FIRST_RECENT = 'first_seen_recently'
@@ -135,32 +138,32 @@ class Netgrasp:
 
     class Email:
         def __init__(self):
-            self.enabled = ng.config_instance.GetBoolean('Email', 'enabled', True, False)
-            if not self.enabled:
-                logger.warning('email is disabled')
-                return
-            email_to = ng.config_instance.GetEmailList('Email', 'to')
-            if not len(email_to):
-                logger.warning('no valid to address configured, email is disabled')
-                return
-
-            self.email_to = email_to
-
-            email_from = ng.config_instance.GetEmailList('Email', 'from')
-            if len(email_from) > 1:
-                logger.warning('only able to send from one address, using %s', email_from[0])
-            elif not len(email_from):
-                logger.warning('no valid from address configured, email is disabled')
-                return
-
-            self.email_from = email_from[0]
-
             try:
                 import pyzmail
             except Exception as e:
                 logger.critical("fatal exception: %s", e)
                 logger.critical("failed to import pyzmail, try: 'pip install pyzmail', exiting")
                 sys.exit("Fatal error: failed to import pcap, try: 'pip install pyzmail', exiting")
+
+            self.enabled = ng.config_instance.GetBoolean('Email', 'enabled', True, False)
+            if not self.enabled:
+                logger.warning('email is disabled')
+                return
+            self.email_to = ng.config_instance.GetEmailList('Email', 'to')
+            if not len(self.email_to):
+                logger.warning('no valid to address configured, email is disabled')
+                self.enabled = False
+                return
+
+            email_from = ng.config_instance.GetEmailList('Email', 'from')
+            if len(email_from) > 1:
+                logger.warning('only able to send from one address, using %s', email_from[0])
+            elif not len(email_from):
+                logger.warning('no valid from address configured, email is disabled')
+                self.enabled = False
+                return
+
+            self.email_from = email_from[0]
 
             self.email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname')
             self.email_port = ng.config_instance.GetText('Email', 'smtp_port', None, False)
@@ -172,9 +175,20 @@ class Netgrasp:
             self.email_username = ng.config_instance.GetText('Email', 'smtp_username', None, False)
             self.email_password = ng.config_instance.GetText('Email', 'smtp_password', None, False, True)
 
-            # @TODO validate configured alerts and digests
-            self.alerts = ng.config_instance.GetTextList('Email', 'alerts')
-            self.digest = ng.config_instance.GetTextList('Email', 'digests')
+            self.alerts = []
+            self.digest = []
+            alerts = ng.config_instance.GetTextList('Email', 'alerts')
+            digests = ng.config_instance.GetTextList('Email', 'digests')
+            for alert in alerts:
+                if alert in ng.ALERT_TYPES:
+                    self.alerts.append(alert)
+                else:
+                    logger.warn("ignoring unrecognized alert type (%s), supported types: %s", alert, ng.ALERT_TYPES)
+            for digest in digests:
+                if digest in ng.DIGEST_TYPES:
+                    self.digest.append(digest)
+                else:
+                    logger.warn("ignoring unrecognized digest type (%s), supported types: %s", digest, ng.DIGEST_TYPES)
 
         def MailSend(self, subject, encoding, body):
             import pyzmail
