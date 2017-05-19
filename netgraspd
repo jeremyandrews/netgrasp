@@ -364,6 +364,7 @@ def main(*pcap):
         send_notifications()
         send_email_alerts()
         send_email_digests()
+        garbage_collection()
 
         # If we haven't heard from the wiretap process in >1 minute, exit.
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
@@ -1301,6 +1302,37 @@ def send_email_digests():
 
         logger.info('Sending %s digest', digest)
         ng.email_instance.MailSend(subject, 'iso-8859-1', (body, 'us-ascii'))
+
+def garbage_collection():
+    logger.debug('entering garbage_collection()')
+
+    if not ng.config_instance.GetBoolean('Database', 'gcenabled', True, False):
+        logger.debug('garbage collection disabled')
+
+    garbage_collection_string = "garbage collection"
+
+    now = datetime.datetime.now()
+    next_garbage_collection = ng.get_state(garbage_collection_string, '', True)
+
+    if not next_garbage_collection:
+        # perform first garbage collection now
+        next_garbage_collection = now
+
+    if now < next_garbage_collection:
+        # it's not yet time to send this digest
+        return False
+
+    logger.info("performing garbage collection")
+    # schedule next garbage collection
+    ng.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
+
+    oldest_arplog = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_arplog', 60 * 60 * 24 * 7 * 2, False))
+    oldest_event = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_event', 60 * 60 * 24 * 7 * 2, False))
+
+    ng.database_lock.acquire()
+    ng.database_instance.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (oldest_arplog))
+    ng.database_instance.cursor.execute("DELETE FROM event WHERE timestamp < ?", (oldest_event))
+    ng.database_lock.release()
 
 if __name__ == '__main__':
     import getopt
