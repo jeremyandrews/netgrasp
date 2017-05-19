@@ -139,7 +139,7 @@ class Netgrasp:
 
     class Email:
         def __init__(self):
-            self.enabled = ng.config_instance.GetBoolean('Email', 'enabled', True, False)
+            self.enabled = ng.config_instance.GetBoolean('Email', 'enabled', False, False)
             if not self.enabled:
                 logger.warning('email is disabled')
                 return
@@ -205,7 +205,7 @@ class Netgrasp:
 
     class Notification:
         def __init__(self):
-            self.enabled = ng.config_instance.GetBoolean('Notifications', 'enabled', True, False)
+            self.enabled = ng.config_instance.GetBoolean('Notifications', 'enabled', False, False)
             if not self.enabled:
                 logger.warning('notifications are disabled')
                 return
