@@ -31,6 +31,7 @@ provide daily summary digests detailing devices on your network.
 ### Limitations
  * Windows not supported
  * Python 3 not supported
+ * IPv6 not supported
 
 # Control
 
