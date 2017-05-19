@@ -1327,7 +1327,9 @@ def garbage_collection():
     ng.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
     oldest_arplog = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_arplog', 60 * 60 * 24 * 7 * 2, False))
+    logger.debug("deleting arplog entries older than %s", oldest_arplog)
     oldest_event = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_event', 60 * 60 * 24 * 7 * 2, False))
+    logger.debug("deleting event entries older than %s", oldest_event)
 
     ng.database_lock.acquire()
     ng.database_instance.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (oldest_arplog,))
