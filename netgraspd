@@ -1332,6 +1332,7 @@ def garbage_collection():
     ng.database_lock.acquire()
     ng.database_instance.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (oldest_arplog,))
     ng.database_instance.cursor.execute("DELETE FROM event WHERE timestamp < ?", (oldest_event,))
+    ng.database_instance.connection.commit()
     ng.database_lock.release()
 
 if __name__ == '__main__':
