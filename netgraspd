@@ -176,7 +176,7 @@ class Netgrasp:
             self.alerts = ng.config_instance.GetTextList('Email', 'alerts')
             self.digest = ng.config_instance.GetTextList('Email', 'digests')
 
-        def MailSend(subject, encoding, body):
+        def MailSend(self, subject, encoding, body):
             payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, encoding, body)
             ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, ng.email_instance.email_mode, ng.email_instance.email_username, ng.email_instance.email_password)
             if isinstance(ret, dict):
