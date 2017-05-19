@@ -910,6 +910,15 @@ def detect_anomalies():
 
 def send_notifications():
     logger.debug('entering send_notifications()')
+
+    if not ng.email_instance.enabled:
+        logger.debug('notifications disabled')
+        return False
+
+    if not ng.notification_alerts:
+        logger.debug('no alerts configured')
+        return False
+
     if ng.notification_alerts:
         timer = Timer()
 

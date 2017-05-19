@@ -125,7 +125,7 @@ and digests.  Alerts are as-they-happen notifications of things such as new
 devices appearing on your network. Digests are regular summaries of activity on
 your network.
 
-In order for Netgrasp to send you notificaitons, you must properly configure an
+In order for Netgrasp to send you notifications, you must properly configure an
 smtp server that it can use. Notifications can be sent to multiple people in a
 comma separated list of the format NAME|EMAIL, NAME|EMAIL where NAME is optional.
 For example:
@@ -180,6 +180,7 @@ notifications.
 For example:
 ```
 [Notifications]
+enabled = true
 alerts = first_seen_recently,network_scan,changed_ip,duplicate_ip
 ```
 
