@@ -153,7 +153,14 @@ class SelectQueryBuilder():
         if len(self.order):
             query_string += " ORDER BY " + ", ".join(self.order)
         if ngs.config_instance.verbose > 1:
-            print 'Select query: ', query_string
+            print "Select query:"
+            print query_string
+        if ngs.config_instance.verbose > 2:
+            print "Query plan:"
+            ngs.database_instance.cursor.execute("EXPLAIN QUERY PLAN " + query_string, self.where_args)
+            plans = ngs.database_instance.cursor.fetchall()
+            for plan in plans:
+                print " - " + plan[3]
         return query_string
 
     def db_args(self):
