@@ -53,7 +53,7 @@ default only currently active devices are show, but the `-a` flag can also show
 inactive devices. The `-aa` flag shows all activity, not just the latest activity.
 
 Lists can be filtered by MAC address (`--mac` or `-m`), IP address (`--ip` or
-`-i-), vendor (`--vendor` or `-v`), hostname (`--hostname` or `-h`) or custom
+`-i`), vendor (`--vendor` or `-v`), hostname (`--hostname` or `-h`) or custom
 name (`--custom` or `-c`). Filters can be arbitrarily combined.
 
 By default devices are listed. Optionally use `--type event` to list events
@@ -87,7 +87,8 @@ in listings, alerts and notifications. Custom names are attached to the MAC
 address, as well as to the MAC and IP address pair.
 
 Identifiation is a two-step process. First, find the ID associated with the
-device you want to identify. Second, set a custom name for that ID.
+device you want to identify. Second, set a custom name for that ID. During
+step one, you can use the same filters documented earlier for listing devices.
 
 ### List IDs of all unidentified devices
 `netgraspctl identify`
