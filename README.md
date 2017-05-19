@@ -8,15 +8,15 @@ as soon as possible during startup.
 
 Netgrasp should be controlled with the netgraspctl command:
 ```
-  sudo ./netgraspctl start
-  ./netgraspctl status
-  ./netgraspctl -h
+  sudo netgraspctl start
+  netgraspctl status
+  netgraspctl -h
 ```
 
 (Note: the 'start' functionality is not yet implemented, and will instruct you
 to manually start netgraspd:
 ```
-  sudo ./netgraspd -d
+  sudo netgraspd -d
 ```
 )
 
@@ -33,8 +33,77 @@ provide daily summary digests detailing devices on your network.
  * (_OPTIONAL_) [ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
 
 ### Limitations
- * Doesn't work on Windows
- * Doesn't work with Python 3
+ * Windows not supported
+ * Python 3 not supported
+
+# Control
+
+Once netgraspd has been started (with the -d flag), use netgraspctl to control it.
+For an overview on supported commands, use the -h flag:
+```
+  netgraspctl -h
+  netgraspctl list -h
+  netgraspctl identify -h
+  netgraspctl start -h
+  netgraspctl stop -h
+  netgraspctl restart -h
+  netgraspctl status -h
+```
+
+## Listing Devices
+
+Use `netgraspctl list` to list devices and related events on your network. By
+default only currently active devices are show, but the `-a` flag can also show
+inactive devices. The `-aa` flag shows all activity, not just the latest activity.
+
+Lists can be filtered by MAC address (`--mac` or `-m`), IP address (`--ip` or
+`-i-), vendor (`--vendor` or `-v`), hostname (`--hostname` or `-h`) or custom
+name (`--custom` or `-c`). Filters can be arbitrarily combined.
+
+By default devices are listed. Optionally use `--type event` to list events
+instead.
+
+### All currently active devices
+`netgraspctl list`
+
+### All currently active Apple devices
+`netgraspctl list -v apple`
+
+### All Apple devices that have ever been active on your network
+`netgraspctl list -av apple`
+
+### All currently active devices with an IP containing 10.0
+`netgraspctl list -i 10.0`
+
+### All records for all Apple devices ever active on your network
+`netgraspctl list -aav apple`
+
+### All events related to currently active Apple devices
+`netgraspctl list -t event -v apple`
+
+### All events related to all Apple devices
+`netgraspctl list -t event -av apple`
+
+## Identifying Devices
+
+Once devices are manually identified, the custom name you assign will be used
+in listings, alerts and notifications. Custom names are attached to the MAC
+address, as well as to the MAC and IP address pair.
+
+Identifiation is a two-step process. First, find the ID associated with the
+device you want to identify. Second, set a custom name for that ID.
+
+### List IDs of all unidentified devices
+`netgraspctl identify`
+
+### List IDs of all devices, even if already identified
+`netgraspctl identify -a`
+
+### List IDs of all Apple devices
+`netgraspctl identify -av apple`
+
+### Set custom name for ID
+`netgraspctl --set 4 "my iPhone"`
 
 # Configuration
 
@@ -107,7 +176,7 @@ You can force Netgrasp to generate verbose logs by starting the program with the
 -v flag. This causes Netgrasp to ignore the [Logging] level setting, and instead
 to use DEBUG. You can do this with our without the -d (daemon) flag.
 ```
-  sudo python2 ./netgraspd -v
+  sudo python2 netgraspd -v
 ```
 
 If you choose to daemonize Netgrasp, the mast process pid gets written to a pid
