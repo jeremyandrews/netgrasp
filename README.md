@@ -127,17 +127,21 @@ your network.
 
 In order for Netgrasp to send you notificaitons, you must properly configure an
 smtp server that it can use. Notifications can be sent to multiple people in a
-comma separated list. For example
+comma separated list of the format NAME|EMAIL, NAME|EMAIL where NAME is optional.
+For example:
 ```
 [Email]
-to = user1@example.com,user2@example.com,user3@example.com
-from = netgrasp@example.com
+enabled = yes
+to = User 1|user1@example.com, User 2|user2@example.com, user3@example.com
+from = Netgrasp|netgrasp@example.com
 smtp_hostname = example.com
 smtp_port = 587
-smtp_ssl = yes
+smtp_mode = tls
 smtp_username = username
 smtp_password = password
 ```
+
+Supported email modes: normal, ssl, tls
 
 The following alert types are supported:
 * first_requested: the first time an IP address is requested on the network

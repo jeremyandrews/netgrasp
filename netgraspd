@@ -119,14 +119,14 @@ class Netgrasp:
                     if valid_email_address(address):
                         addresses.append((name.strip(), address.strip()))
                     else:
-                        logger.warn('ignoring invalid email address (%s)', address)
+                        logger.warning('ignoring invalid email address (%s)', address)
                 elif len(pieces) == 1:
                     if valid_email_address(email):
                         addresses.append(email)
                     else:
-                        logger.warn('ignoring invalid email address (%s)', email)
+                        logger.warning('ignoring invalid email address (%s)', email)
                 else:
-                    logger.warn('ignoring invalid address (%s)', email)
+                    logger.warning('ignoring invalid address (%s)', email)
             return self._GetValue(section, option, addresses, default, required, secret)
 
     class Database:
@@ -148,7 +148,7 @@ class Netgrasp:
 
             email_from = ng.config_instance.GetEmailList('Email', 'from')
             if len(email_from) > 1:
-                logger.warn('only able to send from one address, using %s', email_from[0])
+                logger.warning('only able to send from one address, using %s', email_from[0])
             elif not len(email_from):
                 logger.warning('no valid from address configured, email is disabled')
                 return
@@ -164,13 +164,28 @@ class Netgrasp:
 
             self.email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname')
             self.email_port = ng.config_instance.GetText('Email', 'smtp_port', None, False)
-            self.email_ssl = ng.config_instance.GetBoolean('Email', 'smtp_ssl', True, False)
+            self.email_mode = ng.config_instance.GetText('Email', 'smtp_mode', 'normal', False)
+            if not self.email_mode in ['normal', 'ssl', 'tls']:
+                logger.warning('ignoring invalid email mode (%s), must be one of: normal, ssl, tls', self.email_mode)
+                self.email_mode = 'normal'
+
             self.email_username = ng.config_instance.GetText('Email', 'smtp_username', None, False)
             self.email_password = ng.config_instance.GetText('Email', 'smtp_password', None, False, True)
 
             # @TODO validate configured alerts and digests
             self.alerts = ng.config_instance.GetTextList('Email', 'alerts')
             self.digest = ng.config_instance.GetTextList('Email', 'digests')
+
+        def MailSend(subject, encoding, body):
+            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, encoding, body)
+            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, ng.email_instance.email_mode, ng.email_instance.email_username, ng.email_instance.email_password)
+            if isinstance(ret, dict):
+                if ret:
+                    logger.warning("failed to send email, failed receipients: %s", ', '.join(ret.keys()))
+                else:
+                    logger.debug("email sent: %s", ret)
+            else:
+                logger.warning("email error: %s", ret)
 
     # Determine who we are, for pretty logging.
     def whoami(self):
@@ -1007,16 +1022,7 @@ def send_email_alerts():
                 body += """\nIn the last day, this device talked to:"""
             for peer in results:
                 body += """\n - %s (%s)""" % (peer[0], name_ip(peer[1], peer[0]))
-            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, 'iso-8859-1', (body, 'us-ascii'))
-            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, 'tls', ng.email_instance.email_username, ng.email_instance.email_password)
-            if isinstance(ret, dict):
-                if ret:
-                    logger.warning("failed receipients: %s", ', '.join(ret.keys()))
-                else:
-                    logger.debug("email sent: %s", ret)
-            else:
-                logger.warning("error: %s", ret)
-
+            ng.email_instance.MailSend(subject, 'iso-8859-1', (body, 'us-ascii'))
         else:
             logger.debug('event %s [%d] NOT in %s', event, eid, ng.email_instance.alerts)
         if alerted:
@@ -1252,16 +1258,7 @@ def send_email_digests():
         ng.database_lock.release()
 
         logger.info('Sending %s digest', digest)
-
-        payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, 'iso-8859-1', (body, 'us-ascii'))
-        ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, 'tls', ng.email_instance.email_username, ng.email_instance.email_password)
-        if isinstance(ret, dict):
-            if ret:
-                logger.warning("failed receipients: %s", ', '.join(ret.keys()))
-            else:
-                logger.debug("email sent: %s", ret)
-        else:
-            logger.warning("error: %s", ret)
+        ng.email_instance.MailSend(subject, 'iso-8859-1', (body, 'us-ascii'))
 
 if __name__ == '__main__':
     import getopt
