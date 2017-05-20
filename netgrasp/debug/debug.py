@@ -27,12 +27,12 @@ class Debugger:
         self.level = level
         self.verbosity = False
 
-    def debug(self, message, args, severity):
+    def log(self, message, args, severity):
         level, verbose, fatal = severity
         if self.mode == FILE:
             if not self.logger:
                 self.mode = PRINT
-                self.debug(message, args, level, 9)
+                self.log(message, args, level, 9)
                 self.fatal("fatal error, no logger provided, exiting")
             if not verbose or verbose >= self.verbosity:
                 self.logger.log(level, message, *args)
@@ -47,6 +47,27 @@ class Debugger:
                     print message % args
                 else:
                     print message
+
+    def debug(self, message, args):
+        self.log(message, args, DEBUG)
+
+    def debug2(self, message, args):
+        self.log(message, args, DEBUG2)
+
+    def debug3(self, message, args):
+        self.log(message, args, DEBUG3)
+
+    def info(self, message, args):
+        self.log(message, args, INFO)
+
+    def warning(self, message, args):
+        self.log(message, args, WARNING)
+
+    def error(self, message, args):
+        self.log(message, args, ERROR)
+
+    def critical(self, message, args):
+        self.log(message, args, CRITICAL)
 
     def fatal(self, message, args = None):
         if args:
