@@ -1,6 +1,5 @@
 from netgrasp.debug import debug
 
-
 #!/usr/bin/env python2
 import os
 import sys
@@ -20,122 +19,36 @@ from email.utils import parseaddr
 
 import time
 
+BROADCAST = 'ff:ff:ff:ff:ff:ff'
+
+ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan']
+DIGEST_TYPES = ['daily', 'weekly']
+
+EVENT_SEEN              = 'seen'
+EVENT_SEEN_FIRST        = 'first_seen'
+EVENT_SEEN_FIRST_RECENT = 'first_seen_recently'
+EVENT_CHANGED_IP        = 'changed_ip'
+EVENT_REQUESTED         = 'requested'
+EVENT_REQUESTED_FIRST   = 'first_requested'
+EVENT_STALE             = 'stale'
+EVENT_SCAN              = 'network_scan'
+EVENT_DUPLICATE_IP      = 'duplicate_ip'
+EVENT_DUPLICATE_MAC     = 'duplicate_mac'
+
+PROCESSED_ALERT         = 1
+PROCESSED_DAILY_DIGEST  = 2
+PROCESSED_WEEKLY_DIGEST = 4
+PROCESSED_NOTIFICATION  = 8
+
+DEFAULT_USER      = "daemon"
+DEFAULT_GROUP     = "daemon"
+DEFAULT_LOGLEVEL  = logging.INFO
+DEFAULT_LOGFILE   = "netgraspd.log"
+DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
+DEFAULT_PIDFILE   = "netgraspd.pid"
+DEFAULT_DBLOCK    = "/tmp/.database_lock"
+
 class Netgrasp:
-    BROADCAST = 'ff:ff:ff:ff:ff:ff'
-
-    ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan']
-    DIGEST_TYPES = ['daily', 'weekly']
-
-    EVENT_SEEN              = 'seen'
-    EVENT_SEEN_FIRST        = 'first_seen'
-    EVENT_SEEN_FIRST_RECENT = 'first_seen_recently'
-    EVENT_CHANGED_IP        = 'changed_ip'
-    EVENT_REQUESTED         = 'requested'
-    EVENT_REQUESTED_FIRST   = 'first_requested'
-    EVENT_STALE             = 'stale'
-    EVENT_SCAN              = 'network_scan'
-    EVENT_DUPLICATE_IP      = 'duplicate_ip'
-    EVENT_DUPLICATE_MAC     = 'duplicate_mac'
-
-    PROCESSED_ALERT         = 1
-    PROCESSED_DAILY_DIGEST  = 2
-    PROCESSED_WEEKLY_DIGEST = 4
-    PROCESSED_NOTIFICATION  = 8
-
-    DEFAULT_USER      = "daemon"
-    DEFAULT_GROUP     = "daemon"
-    DEFAULT_LOGLEVEL  = logging.INFO
-    DEFAULT_LOGFILE   = "netgraspd.log"
-    DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
-    DEFAULT_PIDFILE   = "netgraspd.pid"
-    DEFAULT_DBLOCK    = "/tmp/.database_lock"
-
-    config_instance = ''
-    database_instane = ''
-    email_instance = ''
-    notification_instance = ''
-
-    class Config:
-        def __init__(self, parser):
-            self.parser = parser
-            self.found = self.parser.read(['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf'])
-
-        def _GetValue(self, section, option, value, default, required, secret):
-            if value != None:
-                if secret:
-                    logger.info("configuration [%s] '%s' set", section, option)
-                else:
-                    logger.info("configuration [%s] '%s' set to '%s'", section, option, value)
-            else:
-                if default:
-                    value = default
-                    if not secret:
-                        if self.parser.has_section(section):
-                            logger.info("configuration [%s] '%s' set to default of '%s'", section, option, value)
-                        else:
-                            logger.info("configuration [%s] does not exist: '%s' set to default '%s'", section, option, value)
-                    else:
-                        logger.info("configuration [%s] '%s' set to default", section, option)
-                elif required:
-                    logger.critical("Required [%s] '%s' not defined in configuration file, exiting.", section, option)
-                    sys.exit("""Required [%s] '%s' not defined in configuration file, exiting.""" % (section, option))
-            return value
-
-        def GetText(self, section, option, default = None, required = True, secret = False):
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-                value = self.parser.get(section, option)
-            else:
-                value = None
-            return self._GetValue(section, option, value, default, required, secret)
-
-        def GetInt(self, section, option, default = None, required = True, secret = False):
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-                value = self.parser.getint(section, option)
-            else:
-                value = None
-            return self._GetValue(section, option, value, default, required, secret)
-
-        def GetBoolean(self, section, option, default = None, required = True, secret = False):
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-                value = self.parser.getboolean(section, option)
-            else:
-                value = None
-            return self._GetValue(section, option, value, default, required, secret)
-
-        def GetTextList(self, section, option, default = None, required = True, secret = False, quiet = False):
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-                text = self.parser.get(section, option)
-                values = text.split(',')
-                textlist = []
-                for value in values:
-                    textlist.append(value.strip())
-            else:
-                textlist = None
-            if quiet:
-                return textlist
-            else:
-                return self._GetValue(section, option, textlist, default, required, secret)
-
-        def GetEmailList(self, section, option, default = None, required = True, secret = False):
-            emails = self.GetTextList(section, option, default, required, secret, True)
-            addresses = []
-            for email in emails:
-                pieces = email.split('|')
-                if len(pieces) == 2:
-                    name, address = pieces
-                    if valid_email_address(address):
-                        addresses.append((name.strip(), address.strip()))
-                    else:
-                        logger.warning('ignoring invalid email address (%s)', address)
-                elif len(pieces) == 1:
-                    if valid_email_address(email):
-                        addresses.append(email)
-                    else:
-                        logger.warning('ignoring invalid email address (%s)', email)
-                else:
-                    logger.warning('ignoring invalid address (%s)', email)
-            return self._GetValue(section, option, addresses, default, required, secret)
-
     class Database:
         def __init__(self):
             self.connection = sqlite3.connect(ng.database_filename, detect_types=sqlite3.PARSE_DECLTYPES)

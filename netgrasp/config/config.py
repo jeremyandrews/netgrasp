@@ -10,23 +10,27 @@ class Config:
         self.found = self.parser.read(['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf'])
 
     def _GetValue(self, section, option, value, default, required, secret):
+        if not value and default:
+            value = default
+
+        if required and not value:
+            debugger.critical("Required [%s] '%s' not defined in configuration file, exiting.", (section, option))
+
         if value != None:
             if secret:
-                debugger.info("configuration [%s] '%s' set", (section, option))
+                debugger.info2("configuration [%s] '%s' set", (section, option))
             else:
-                debugger.info("configuration [%s] '%s' set to '%s'", (section, option, value))
+                debugger.info2("configuration [%s] '%s' set to '%s'", (section, option, value))
         else:
-            if default:
-                value = default
-                if not secret:
-                    if self.parser.has_section(section):
-                        debugger.info("configuration [%s] '%s' set to default of '%s'", (section, option, value))
-                    else:
-                        debugger.info("configuration [%s] does not exist: '%s' set to default '%s'", (section, option, value))
+            if value:
+                if secret:
+                    debugger.info2("configuration [%s] '%s' set to default", (section, option))
                 else:
-                    debugger.info("configuration [%s] '%s' set to default", (section, option))
-            elif required:
-                debugger.critical("Required [%s] '%s' not defined in configuration file, exiting.", (section, option))
+                    if default:
+                        if secret:
+                            debugger.info2("configuration [%s] '%s' set to default", (section, option))
+                        else:
+                            debugger.info2("configuration [%s] '%s' set to default of '%s'", (section, option, value))
         return value
 
     def GetText(self, section, option, default = None, required = True, secret = False):

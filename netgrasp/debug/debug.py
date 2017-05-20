@@ -1,5 +1,6 @@
 import logging
 import sys
+import pwd
 
 ALWAYS   = 0
 VERBOSE  = 1
@@ -12,6 +13,7 @@ DEBUG    = (logging.DEBUG, VERBOSE, NOTFATAL)
 DEBUG2   = (logging.DEBUG, VERBOSE2, NOTFATAL)
 DEBUG3   = (logging.DEBUG, VERBOSE3, NOTFATAL)
 INFO     = (logging.INFO, VERBOSE, NOTFATAL)
+INFO     = (logging.INFO, VERBOSE2, NOTFATAL)
 WARNING  = (logging.WARNING, ALWAYS, NOTFATAL)
 ERROR    = (logging.ERROR, ALWAYS, NOTFATAL)
 CRITICAL = (logging.CRITICAL, ALWAYS, FATAL)
@@ -48,6 +50,12 @@ class Debugger:
                 else:
                     print message
 
+    # Determine who we are, for pretty logging.
+    def whoami(self):
+        whoami = pwd.getpwuid(os.getuid())
+        if whoami:
+            return whoami[0]
+
     def debug(self, message, args):
         self.log(message, args, DEBUG)
 
@@ -59,6 +67,9 @@ class Debugger:
 
     def info(self, message, args):
         self.log(message, args, INFO)
+
+    def info2(self, message, args):
+        self.log(message, args, INFO2)
 
     def warning(self, message, args):
         self.log(message, args, WARNING)
