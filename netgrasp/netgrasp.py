@@ -1,3 +1,6 @@
+from netgrasp.debug import debug
+
+
 #!/usr/bin/env python2
 import os
 import sys
