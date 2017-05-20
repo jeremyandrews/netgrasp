@@ -1,0 +1,31 @@
+#!/usr/bin/env python2
+
+from netgrasp import netgrasp
+import argparse
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="netgraspd", description="A passive network observation tool")
+    parser.add_argument("--verbose", "-v", action="count", help="verbose logging")
+    parser.add_argument("--foreground", "-f", action="count", help="don't daemonize, run in the foreground")
+    parser.add_argument("--config", "-c", help="specify custom path for configuration file")
+
+    args = parser.parse_args()
+
+    if args.config:
+        config = args.config
+    else:
+        config = None
+
+    if args.verbose:
+        verbose = args.verbose
+    else:
+        verbose = False
+
+    if args.foreground:
+        daemonize = False
+    else:
+        daemonize = True
+
+    ng = netgrasp.Netgrasp(config, verbose, daemonize)
+
+    netgrasp.start()
