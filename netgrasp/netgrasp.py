@@ -1,21 +1,24 @@
-from netgrasp.debug import debug
+from utils import debug
+from utils import exclusive_lock
+from config import config
+import db
 
-#!/usr/bin/env python2
-import os
-import sys
-import fcntl
-import signal
-import multiprocessing
-import ConfigParser
-import io
 import logging
 import logging.handlers
 import pwd
-import grp
-import struct
-import socket
-import datetime
-from email.utils import parseaddr
+import sys
+import os
+
+#import fcntl
+#import signal
+#import multiprocessing
+#import ConfigParser
+#import io
+#import grp
+#import struct
+#import socket
+#import datetime
+#from email.utils import parseaddr
 
 import time
 
@@ -40,6 +43,7 @@ PROCESSED_DAILY_DIGEST  = 2
 PROCESSED_WEEKLY_DIGEST = 4
 PROCESSED_NOTIFICATION  = 8
 
+DEFAULT_CONFIG    = ['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf']
 DEFAULT_USER      = "daemon"
 DEFAULT_GROUP     = "daemon"
 DEFAULT_LOGLEVEL  = logging.INFO
@@ -49,9 +53,14 @@ DEFAULT_PIDFILE   = "netgraspd.pid"
 DEFAULT_DBLOCK    = "/tmp/.database_lock"
 
 class Netgrasp:
-    class Database:
-        def __init__(self):
-            self.connection = sqlite3.connect(ng.database_filename, detect_types=sqlite3.PARSE_DECLTYPES)
+    def __init__(self, config, verbose = False, daemonize = True):
+        self.verbose = verbose
+        self.daemonize = daemonize
+
+        if config:
+            self.config = config
+        else:
+            self.config = DEFAULT_CONFIG
 
     class Email:
         def __init__(self):
@@ -140,11 +149,6 @@ class Netgrasp:
                 logger.critical("fatal exception: %s", e)
                 logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts, exiting.", ng.whoami())
                 sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (ng.whoami()))
-
-    # Determine who we are, for pretty logging.
-    def whoami(self):
-        whoami = pwd.getpwuid(os.getuid())
-        return whoami[0]
 
     # Drop root permissions when no longer needed.
     def drop_root(self):
@@ -476,6 +480,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
             log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
             log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
             logger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
+        # BUG HERE - one of these variables isn't available?
         ng.database_instance.cursor.execute('INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)', (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
     ng.database_instance.connection.commit()
     ng.database_lock.release()
@@ -1260,80 +1265,6 @@ def garbage_collection():
     logger.debug("deleted %d event entries older than %s", event_count[0], oldest_event)
 
 if __name__ == '__main__':
-    import getopt
-
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], "vd")
-    except getopt.GetoptError as err:
-        print str(err)
-        sys.exit(2)
-
-    verbose = False
-    daemonize = False
-    for o, a in opts:
-        if o == '-v':
-            verbose = True
-        if o == '-d':
-            daemonize = True
-
-    ng = Netgrasp()
-    ng.config_instance = ng.Config(ConfigParser.ConfigParser())
-
-    ng.verbose = verbose
-    ng.daemonize = daemonize
-
-    # Start logger, reading relevant configuration.
-    logger = logging.getLogger(__name__)
-    formatter = logging.Formatter(ng.DEFAULT_LOGFORMAT)
-    if ng.daemonize:
-        try:
-            handler = logging.FileHandler(ng.config_instance.GetText('Logging', 'filename', ng.DEFAULT_LOGFILE))
-        except Exception as e:
-            sys.exit("""Fatal exception setting up log handler: %s""" % e)
-    else:
-        logger.warning("Output forced to stderr, started without -d flag.")
-        handler = logging.StreamHandler()
-
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    if ng.verbose:
-        logger.setLevel(logging.DEBUG)
-    else:
-        logger.setLevel(logging.INFO)
-    logger.info('starting')
-    logger.info('loaded configuration file: %s', ng.config_instance.found)
-    if ng.verbose:
-        logger.warning("[Logging] level forced to DEBUG, started with -v flag.")
-    else:
-        logger.setLevel(ng.config_instance.GetText('Logging', 'level', ng.DEFAULT_LOGLEVEL, False))
-
-    keep_fds=[handler.stream.fileno()]
-
-    if os.getuid() != 0:
-        logger.critical("netgrasp must be run as root (currently running as %s), exiting", ng.whoami())
-        sys.exit("""Netgrasp must be run as root (currently running as %s), exiting.""" % (ng.whoami()))
-
-    try:
-        import sqlite3
-    except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import sqlite3, try: 'pip install sqlite3', exiting.")
-        sys.exit("Fatal error: failed to import sqlite3, try: 'pip install sqlite3', exiting.")
-
-    try:
-        import dpkt
-    except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
-        sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
-
-    if ng.daemonize:
-        try:
-            from daemonize import Daemonize
-        except Exception as e:
-            logger.critical("fatal exception: %s", e)
-            logger.critical("failed to import daemonize, try: 'pip install daemonize', exiting.")
-            sys.exit("Fatal error: failed to import daemonize, try: 'pip install daemonize', exiting.")
 
     ng.notification_instance = ng.Notification()
 
@@ -1350,3 +1281,67 @@ if __name__ == '__main__':
             sys.exit("""Failed to daemonize: %s, exiting""" % e)
     else:
         main()
+
+#################
+#################
+#################
+
+def start(ng):
+    # Get a logger and config parser.
+    logger = logging.getLogger(__name__)
+    formatter = logging.Formatter(DEFAULT_LOGFORMAT)
+    if os.getuid() != 0:
+        # We're going to fail, so write to stderr.
+        ng.debugger = debug.Debugger()
+    else:
+        ng.debugger = debug.Debugger(ng.verbose, logger, debug.FILE)
+    ng.config_instance = config.Config(ng.debugger)
+
+    # Start logger, reading relevant configuration.
+    if ng.daemonize:
+        try:
+            handler = logging.FileHandler(ng.config_instance.GetText('Logging', 'filename', DEFAULT_LOGFILE))
+        except Exception as e:
+            ng.debugger.critical("Fatal exception setting up log handler: %s", (e,))
+    else:
+        handler = logging.StreamHandler()
+
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    if ng.verbose:
+        ng.debugger.setLevel(logging.DEBUG)
+        ng.debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
+    else:
+        logger.setLevel(ng.config_instance.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
+    ng.debugger.info('loaded configuration file: %s', ng.config_instance.found)
+
+    if not ng.daemonize:
+        ng.debugger.warning("Output forced to stderr, started with --foreground flag.")
+
+    keep_fds=[handler.stream.fileno()]
+
+    if os.getuid() != 0:
+        ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", ng.debugger.whoami())
+
+    try:
+        import sqlite3
+    except Exception as e:
+        ng.debugger.error("fatal exception: %s", e)
+        ng.debugger.critical("failed to import sqlite3, try 'pip install sqlite3', exiting")
+    ng.debugger.info('successfuly imported sqlite3')
+    try:
+        import dpkt
+    except Exception as e:
+        ng.debugger.error("fatal exception: %s", e)
+        ng.debugger.critical("failed to import dpkt, try 'pip install dpkt', exiting")
+    ng.debugger.info('successfuly imported dpkt')
+    if ng.daemonize:
+        try:
+            import daemonize
+        except Exception as e:
+            ng.debugger.error("fatal exception: %s", e)
+            ng.debugger.critical("failed to import daemonize, try 'pip install daemonize', exiting")
+        ng.debugger.info('successfuly imported daemonize')
+
+

@@ -1,6 +1,7 @@
 import logging
 import sys
 import pwd
+import os
 
 ALWAYS   = 0
 VERBOSE  = 1
@@ -13,7 +14,7 @@ DEBUG    = (logging.DEBUG, VERBOSE, NOTFATAL)
 DEBUG2   = (logging.DEBUG, VERBOSE2, NOTFATAL)
 DEBUG3   = (logging.DEBUG, VERBOSE3, NOTFATAL)
 INFO     = (logging.INFO, VERBOSE, NOTFATAL)
-INFO     = (logging.INFO, VERBOSE2, NOTFATAL)
+INFO2    = (logging.INFO, VERBOSE2, NOTFATAL)
 WARNING  = (logging.WARNING, ALWAYS, NOTFATAL)
 ERROR    = (logging.ERROR, ALWAYS, NOTFATAL)
 CRITICAL = (logging.CRITICAL, ALWAYS, FATAL)
@@ -23,28 +24,32 @@ FILE     = 1
 
 # mode: PRINT or FILE
 class Debugger:
-    def __init__(self, mode = PRINT, logger = None, level = logging.WARNING, verbosity = False):
-        self.mode = mode
+    def __init__(self, verbose = False, logger = None, mode = PRINT, level = logging.CRITICAL):
+        self.verbose = verbose
         self.logger = logger
+        self.mode = mode
         self.level = level
-        self.verbosity = False
+        if logger:
+            self.logger.setLevel(self.level)
 
     def log(self, message, args, severity):
         level, verbose, fatal = severity
         if self.mode == FILE:
             if not self.logger:
                 self.mode = PRINT
-                self.log(message, args, level, 9)
+                self.log(message, args, logging.CRITICAL)
                 self.fatal("fatal error, no logger provided, exiting")
-            if not verbose or verbose >= self.verbosity:
+            if args:
                 self.logger.log(level, message, *args)
+            else:
+                self.logger.log(level, message)
 
         if fatal:
             # if writing to file we log and then print message, otherwise just print
             self.fatal(message, args)
 
         if self.mode == PRINT:
-            if verbose >= self.verbosity:
+            if self.verbose and verbose >= self.verbose:
                 if args:
                     print message % args
                 else:
@@ -56,28 +61,32 @@ class Debugger:
         if whoami:
             return whoami[0]
 
-    def debug(self, message, args):
+    def setLevel(self, level):
+        self.level = level
+        self.logger.setLevel(level)
+
+    def debug(self, message, args = None):
         self.log(message, args, DEBUG)
 
-    def debug2(self, message, args):
+    def debug2(self, message, args = None):
         self.log(message, args, DEBUG2)
 
-    def debug3(self, message, args):
+    def debug3(self, message, args = None):
         self.log(message, args, DEBUG3)
 
-    def info(self, message, args):
+    def info(self, message, args = None):
         self.log(message, args, INFO)
 
-    def info2(self, message, args):
+    def info2(self, message, args = None):
         self.log(message, args, INFO2)
 
-    def warning(self, message, args):
+    def warning(self, message, args = None):
         self.log(message, args, WARNING)
 
-    def error(self, message, args):
+    def error(self, message, args = None):
         self.log(message, args, ERROR)
 
-    def critical(self, message, args):
+    def critical(self, message, args = None):
         self.log(message, args, CRITICAL)
 
     def fatal(self, message, args = None):

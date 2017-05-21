@@ -27,5 +27,4 @@ if __name__ == "__main__":
         daemonize = True
 
     ng = netgrasp.Netgrasp(config, verbose, daemonize)
-
-    netgrasp.start()
+    netgrasp.start(ng)

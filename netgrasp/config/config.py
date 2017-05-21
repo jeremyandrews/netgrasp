@@ -1,11 +1,11 @@
-from netgrasp.debug import debug
+from netgrasp.utils import debug
 
 import ConfigParser
 import sys
 
 class Config:
-    def __init__(self, parser, debugger):
-        self.parser = parser
+    def __init__(self, debugger):
+        self.parser = ConfigParser.ConfigParser()
         self.debugger = debugger
         self.found = self.parser.read(['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf'])
 
@@ -14,23 +14,23 @@ class Config:
             value = default
 
         if required and not value:
-            debugger.critical("Required [%s] '%s' not defined in configuration file, exiting.", (section, option))
+            self.debugger.critical("Required [%s] '%s' not defined in configuration file, exiting.", (section, option))
 
         if value != None:
             if secret:
-                debugger.info2("configuration [%s] '%s' set", (section, option))
+                self.debugger.info2("configuration [%s] '%s' set", (section, option))
             else:
-                debugger.info2("configuration [%s] '%s' set to '%s'", (section, option, value))
+                self.debugger.info2("configuration [%s] '%s' set to '%s'", (section, option, value))
         else:
             if value:
                 if secret:
-                    debugger.info2("configuration [%s] '%s' set to default", (section, option))
+                    self.debugger.info2("configuration [%s] '%s' set to default", (section, option))
                 else:
                     if default:
                         if secret:
-                            debugger.info2("configuration [%s] '%s' set to default", (section, option))
+                            self.debugger.info2("configuration [%s] '%s' set to default", (section, option))
                         else:
-                            debugger.info2("configuration [%s] '%s' set to default of '%s'", (section, option, value))
+                            self.debugger.info2("configuration [%s] '%s' set to default of '%s'", (section, option, value))
         return value
 
     def GetText(self, section, option, default = None, required = True, secret = False):
@@ -78,13 +78,13 @@ class Config:
                 if valid_email_address(address):
                     addresses.append((name.strip(), address.strip()))
                 else:
-                    debugger.error('ignoring invalid email address (%s)', (address,))
+                    self.debugger.error('ignoring invalid email address (%s)', (address,))
             elif len(pieces) == 1:
                 if valid_email_address(email):
                     addresses.append(email)
                 else:
-                    debugger.error('ignoring invalid email address (%s)', (email,))
+                    self.debugger.error('ignoring invalid email address (%s)', (email,))
             else:
-                debugger.error('ignoring invalid email address (%s)', (email,))
+                self.debugger.error('ignoring invalid email address (%s)', (email,))
         return self._GetValue(section, option, addresses, default, required, secret)
 
