@@ -1,14 +1,16 @@
 from utils import debug
 from utils import exclusive_lock
+from utils import email
 from config import config
 from notify import notify
-import db
+from db import db
 
 import logging
 import logging.handlers
 import pwd
 import sys
 import os
+import datetime
 
 #import fcntl
 #import signal
@@ -16,7 +18,6 @@ import os
 #import io
 #import struct
 #import socket
-#import datetime
 #from email.utils import parseaddr
 
 import time
@@ -61,72 +62,6 @@ class Netgrasp:
         else:
             self.config = DEFAULT_CONFIG
 
-    class Email:
-        def __init__(self):
-            self.enabled = ng.config_instance.GetBoolean('Email', 'enabled', False, False)
-            if not self.enabled:
-                logger.warning('email is disabled')
-                return
-
-            try:
-                import pyzmail
-            except Exception as e:
-                logger.critical("fatal exception: %s", e)
-                logger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", ng.whoami())
-                sys.exit("""Fatal error: failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email].""" % (ng.whoami()))
-
-            self.email_to = ng.config_instance.GetEmailList('Email', 'to')
-            if not len(self.email_to):
-                logger.warning('no valid to address configured, email is disabled')
-                self.enabled = False
-                return
-
-            email_from = ng.config_instance.GetEmailList('Email', 'from')
-            if len(email_from) > 1:
-                logger.warning('only able to send from one address, using %s', email_from[0])
-            elif not len(email_from):
-                logger.warning('no valid from address configured, email is disabled')
-                self.enabled = False
-                return
-            self.email_from = email_from[0]
-
-            self.email_hostname = ng.config_instance.GetText('Email', 'smtp_hostname')
-            self.email_port = ng.config_instance.GetText('Email', 'smtp_port', None, False)
-            self.email_mode = ng.config_instance.GetText('Email', 'smtp_mode', 'normal', False)
-            if not self.email_mode in ['normal', 'ssl', 'tls']:
-                logger.warning('ignoring invalid email mode (%s), must be one of: normal, ssl, tls', self.email_mode)
-                self.email_mode = 'normal'
-
-            self.email_username = ng.config_instance.GetText('Email', 'smtp_username', None, False)
-            self.email_password = ng.config_instance.GetText('Email', 'smtp_password', None, False, True)
-
-            self.alerts = []
-            self.digest = []
-            alerts = ng.config_instance.GetTextList('Email', 'alerts', None, False)
-            digests = ng.config_instance.GetTextList('Email', 'digests', None, False)
-            for alert in alerts:
-                if alert in ng.ALERT_TYPES:
-                    self.alerts.append(alert)
-                else:
-                    logger.warn("ignoring unrecognized alert type (%s), supported types: %s", alert, ng.ALERT_TYPES)
-            for digest in digests:
-                if digest in ng.DIGEST_TYPES:
-                    self.digest.append(digest)
-                else:
-                    logger.warn("ignoring unrecognized digest type (%s), supported types: %s", digest, ng.DIGEST_TYPES)
-
-        def MailSend(self, subject, encoding, body):
-            import pyzmail
-            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email_instance.email_from, ng.email_instance.email_to, subject, encoding, body)
-            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email_instance.email_hostname, ng.email_instance.email_port, ng.email_instance.email_mode, ng.email_instance.email_username, ng.email_instance.email_password)
-            if isinstance(ret, dict):
-                if ret:
-                    logger.warning("failed to send email, failed receipients: %s", ', '.join(ret.keys()))
-                else:
-                    logger.debug("email sent: %s", ret)
-            else:
-                logger.warning("email error: %s", ret)
-
     class Notification:
         def __init__(self):
             self.enabled = ng.config_instance.GetBoolean('Notifications', 'enabled', False, False)
@@ -156,30 +91,6 @@ class Netgrasp:
         os.setgid(grp.getgrnam(self.config.GetText('Security', 'group', DEFAULT_GROUP, False)).gr_gid)
         os.setuid(pwd.getpwnam(self.config.GetText('Security', 'user', DEFAULT_USER, False)).pw_uid)
         ng.debugger.info('running as user %s',  (self.debugger.whoami(),))
-
-    def set_state(self, key, value, secret = False):
-        self.database_lock.acquire()
-        self.database_instance.cursor.execute('INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)', (key, value))
-        self.database_instance.connection.commit()
-        self.database_lock.release()
-        if secret:
-            logger.info('set key[%s] to hidden value', key)
-        else:
-            logger.info('set key[%s] to value[%s]', key, value)
-
-    def get_state(self, key, default_value, date = False):
-        self.database_instance.cursor.execute('SELECT value FROM state WHERE key=?', (key,));
-        value = self.database_instance.cursor.fetchone();
-        if value:
-            if date:
-                logger.debug('returning date: %s', value[0])
-                return datetime.datetime.strptime(value[0], "%Y-%m-%d %H:%M:%S.%f")
-            else:
-                logger.debug('returning value: %s', value[0])
-                return value[0]
-        else:
-            logger.debug('returning default value: %s', default_value)
-            return default_value
 
 class ExclusiveFileLock:
     def __init__(self, lockfile):
@@ -220,49 +131,50 @@ def main(ng, *pcap):
     if pcap:
         # We have daemonized and are not running as root.
         pc = pcap[0]
-        ng.database_lock = ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False))
+        ng._database_lock = ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False))
     else:
         # We are running in the foreground as root.
         pcap = get_pcap()
         pc = pcap[0]
         ng.drop_root(ng)
-        ng.database_lock = multiprocessing.Lock()
+        ng._database_lock = multiprocessing.Lock()
 
     # At this point we should no longer have/need root privileges.
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     parent_conn, child_conn = multiprocessing.Pipe()
-    child = multiprocessing.Process(name='wiretap', target=wiretap, args=[pc, child_conn])
+    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[pc, child_conn])
     child.daemon = True
     child.start()
 
     try:
-        ng.database_instance = Database()
+        ng.db = db.DB(ng.database_filename, ng.debugger)
     except Exception as e:
         ng.debugger.critical("%s", (e,))
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
-    logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
-    ng.database_instance.cursor = ng.database_instance.connection.cursor()
+    ng.db.lock = ng._database_lock
+    ng.debugger.info("opened %s as user %s", (ng.database_filename, ng.debugger.whoami()));
+    ng.db.cursor = ng.db.connection.cursor()
     # http://www.sqlite.org/wal.html
-    ng.database_instance.cursor.execute('PRAGMA journal_mode=WAL')
+    ng.db.cursor.execute("PRAGMA journal_mode=WAL")
 
-    create_database()
-    update_database()
+    create_database(ng.db, ng.debugger)
+    update_database(ng.db, ng.debugger)
 
-    ng.active_timeout = ng.config.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
-    ng.delay = ng.config.GetInt('Listen', 'delay', 15, False)
+    ng.active_timeout = ng.config.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
+    ng.delay = ng.config.GetInt("Listen", "delay", 15, False)
     if (ng.delay > 30):
         ng.delay = 30
     elif (ng.delay < 1):
         ng.delay = 1
 
-    ng.email_instance = ng.Email()
+    ng.email = email.Email(ng.config, ng.debugger)
 
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
         now = datetime.datetime.now()
-        logger.debug('top of master while loop: %s', now)
+        ng.debugger.debug("top of master while loop: %s", (now,))
 
         parent_conn.send(HEARTBEAT)
         heartbeat = False
@@ -272,32 +184,28 @@ def main(ng, *pcap):
                 heartbeat = True
         # It's possible to receive multiple heartbeats, but many or one is the same to us.
         if heartbeat:
-            logger.debug('received heartbeat from wiretap process')
+            ng.debugger.debug("received heartbeat from wiretap process")
             last_heartbeat = now
 
-        logger.debug('sleeping for %d seconds', ng.delay)
-        time.sleep(ng.delay)
-        identify_macs()
-        detect_stale_ips()
-        detect_netscans()
-        detect_anomalies()
-        send_notifications()
-        send_email_alerts()
-        send_email_digests()
-        garbage_collection()
+        try:
+            ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
+            time.sleep(ng.delay)
+            identify_macs(ng.debugger, ng.db)
+            detect_stale_ips(ng.debugger, ng.db, ng.active_timeout)
+            detect_netscans(ng.debugger, ng.db)
+            detect_anomalies(ng.debugger, ng.db, ng.active_timeout)
+            send_notifications(ng.debugger, ng.db, ng.notify)
+            send_email_alerts(ng.debugger, ng.db, ng.email)
+            send_email_digests(ng.debugger, ng.db, ng.email)
+            garbage_collection(ng.debugger, ng.db, ng.config)
+        except Exception as e:
+            ng.debugger.error("FIXME: %s", (e,))
 
         # If we haven't heard from the wiretap process in >1 minute, exit.
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
         if (now >= time_to_exit):
             run = False
-    logger.critical('No heartbeats from wiretap process for >1 minute, exiting.')
-
-# Perform simplistic email address validation.
-def valid_email_address(address):
-    if not '@' in parseaddr(address)[1]:
-        return False
-    else:
-        return True
+    ng.debugger.critical("No heartbeats from wiretap process for >1 minute, exiting.")
 
 def get_pcap():
     import sys
@@ -351,19 +259,19 @@ def wiretap(pc, child_conn):
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     try:
-        ng.database_instance = Database()
+        ng.db = db.DB(ng.database_filename, ng.debugger)
     except Exception as e:
-        logger.critical("%s", e)
-        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, ng.whoami())
+        logger.critical("%s", (e))
+        logger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
         sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""" % (ng.database_filename, ng.whoami()))
-    logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
-    ng.database_instance.cursor = ng.database_instance.connection.cursor()
+    debugger.info('opened %s as user %s', ng.database_filename, ng.whoami());
+    ng.db.cursor = ng.db.connection.cursor()
 
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
         now = datetime.datetime.now()
-        logger.debug('[%d] top of while loop: %s', run, now)
+        debugger.debug('[%d] top of while loop: %s', run, now)
 
         child_conn.send(HEARTBEAT)
 
@@ -374,7 +282,7 @@ def wiretap(pc, child_conn):
                 heartbeat = True
         # It's possible to receive multiple heartbeats, but many or one is the same to us.
         if heartbeat:
-            logger.debug('received heartbeat from main process')
+            debugger.debug('received heartbeat from main process')
             last_heartbeat = now
 
         # Wait an arp packet, then loop again.
@@ -387,25 +295,25 @@ def wiretap(pc, child_conn):
     logger.critical('No heartbeats from main process for >1 minute, exiting.')
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
-    logger.debug('entering ip_seen(%s, %s, %s, %s, %d)', src_ip, src_mac, dst_ip, dst_mac, request)
+    debugger.debug('entering ip_seen(%s, %s, %s, %s, %d)', src_ip, src_mac, dst_ip, dst_mac, request)
     now = datetime.datetime.now()
 
-    ng.database_lock.acquire()
-    ng.database_instance.cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, request, now))
-    ng.database_instance.connection.commit()
-    ng.database_lock.release()
-    logger.debug('inserted into arplog')
+    ng.db.database_lock.acquire()
+    ng.db.cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, request, now))
+    ng.db.connection.commit()
+    ng.db.database_lock.release()
+    debugger.debug('inserted into arplog')
 
     # @TODO Research and see if we should be treating these another way.
     if (src_ip == '0.0.0.0' or src_mac == ng.BROADCAST):
-        logger.info('Ignoring IP source of %s [%s], dst %s [%s]', src_ip, src_mac, dst_ip, dst_mac);
+        debugger.info('Ignoring IP source of %s [%s], dst %s [%s]', src_ip, src_mac, dst_ip, dst_mac);
         return False
 
     # Check if we've seen this IP, MAC pair before.
     active, lastSeen, lastRequested, counter, sid, did, changed_ip = [False, False, False, 0, 0, 0, False]
-    logger.debug('ip_seen query 1')
-    ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, src_mac))
-    result = ng.database_instance.cursor.fetchone()
+    debugger.debug('ip_seen query 1')
+    ng.db.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, src_mac))
+    result = ng.db.cursor.fetchone()
     if result:
         active, lastSeen, lastRequested, counter, sid, did = result
 
@@ -414,31 +322,31 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         # In the event of the same IP and a different hostname, we treat this like a different device
         # (though it's likely a vm, jail, or alias). @TODO Revisit this.
         hostname = dns_lookup(src_ip)
-        logger.debug('ip_seen query 2')
-        ng.database_instance.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
-        result = ng.database_instance.cursor.fetchone()
+        debugger.debug('ip_seen query 2')
+        ng.db.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
+        result = ng.db.cursor.fetchone()
         if result:
             active, lastSeen, lastRequested, counter, sid, did = result
             changed_ip = True
 
     if not result:
         # Check if we've seen this IP be requested before.
-        logger.debug('ip_seen query 3')
-        ng.database_instance.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
-        result = ng.database_instance.cursor.fetchone()
+        debugger.debug('ip_seen query 3')
+        ng.db.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
+        result = ng.db.cursor.fetchone()
         if result:
             active, lastSeen, lastRequested, counter, sid, did = result
 
-    ng.database_lock.acquire()
+    ng.db.database_lock.acquire()
     log_event(src_ip, src_mac, ng.EVENT_SEEN)
     if changed_ip:
         log_event(src_ip, src_mac, ng.EVENT_CHANGED_IP)
-        logger.info('[%d] (%s) has a new ip [%s]', did, src_mac, src_ip)
+        debugger.info('[%d] (%s) has a new ip [%s]', did, src_mac, src_ip)
     if active:
         if lastSeen:
             # has been active recently
-            logger.debug('%s (%s) is active', src_ip, src_mac)
-            ng.database_instance.cursor.execute('UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, counter + 1, sid))
+            debugger.debug('%s (%s) is active', src_ip, src_mac)
+            ng.db.cursor.execute('UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, counter + 1, sid))
         else:
             # has not been active recently, but was requested recently
             if first_seen(src_ip, src_mac):
@@ -447,25 +355,25 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 lastSeen = last_seen(src_ip, src_mac)
                 if lastSeen:
                     timeSince = datetime.datetime.now() - lastSeen
-                    logger.info('[%d] %s (%s) is active again (after %s)', did, src_ip, src_mac, timeSince)
+                    debugger.info('[%d] %s (%s) is active again (after %s)', did, src_ip, src_mac, timeSince)
                 else:
-                    logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", src_ip, src_mac, first_seen(src_ip, src_mac))
+                    logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_ip, src_mac)))
             else:
                 # First time we've actively seen this IP.
                 log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
                 log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-                logger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
+                debugger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
 
             # @TODO properly handle multiple active occurences of the same IP
-            ng.database_instance.cursor.execute('UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, now, counter + 1, sid))
+            ng.db.cursor.execute('UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, now, counter + 1, sid))
     else:
         if did:
             # First time we've seen this IP recently.
             log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-            logger.info('[%d] %s (%s) is active, first time seeing recently', did, src_ip, src_mac)
+            debugger.info('[%d] %s (%s) is active, first time seeing recently', did, src_ip, src_mac)
         else:
             # First time we've seen this IP.
-            ng.database_instance.cursor.execute("SELECT MAX(did) + 1 FROM seen")
+            ng.db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
             row = fetchone()
             if row:
                 did = row
@@ -473,24 +381,24 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 did = 1
             log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
             log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-            logger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
+            debugger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
         # BUG HERE - one of these variables isn't available?
-        ng.database_instance.cursor.execute('INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)', (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
-    ng.database_instance.connection.commit()
-    ng.database_lock.release()
+        ng.db.cursor.execute('INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)', (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
+    ng.db.connection.commit()
+    ng.db.database_lock.release()
 
 def ip_request(ip, mac, src_ip, src_mac):
-    logger.debug('entering ip_request(%s, %s, %s, %s)', ip, mac, src_ip, src_mac)
+    debugger.debug('entering ip_request(%s, %s, %s, %s)', ip, mac, src_ip, src_mac)
     now = datetime.datetime.now()
 
     if ((ip == src_ip) or (mac == src_mac)):
-        logger.debug('requesting self, ignoring')
+        debugger.debug('requesting self, ignoring')
         return
 
     active = False
     lastRequested = False
-    ng.database_instance.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, mac))
-    requested = ng.database_instance.cursor.fetchone()
+    ng.db.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, mac))
+    requested = ng.db.cursor.fetchone()
     if requested:
         active = requested[0]
         lastRequested = requested[1]
@@ -498,16 +406,16 @@ def ip_request(ip, mac, src_ip, src_mac):
     else:
         if (mac == ng.BROADCAST):
             # Maybe we already have seen a request for this address
-            ng.database_instance.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, ng.BROADCAST))
-            requested = ng.database_instance.cursor.fetchone()
+            ng.db.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, ng.BROADCAST))
+            requested = ng.db.cursor.fetchone()
             if requested:
                 active = requested[0]
                 lastRequested = requested[1]
                 sid = requested[2]
             else:
                 # Maybe the IP has been seen already
-                ng.database_instance.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND active=1', (ip,))
-                requested = ng.database_instance.cursor.fetchone()
+                ng.db.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND active=1', (ip,))
+                requested = ng.db.cursor.fetchone()
                 if requested:
                     active = requested[0]
                     lastRequested = requested[1]
@@ -517,31 +425,31 @@ def ip_request(ip, mac, src_ip, src_mac):
     log_event(ip, mac, ng.EVENT_REQUESTED)
     if active:
         # Update:
-        ng.database_instance.cursor.execute('UPDATE seen set lastRequested=? WHERE sid=?', (now, sid))
-        logger.debug('%s (%s) requested', ip, mac)
+        ng.db.cursor.execute('UPDATE seen set lastRequested=? WHERE sid=?', (now, sid))
+        debugger.debug('%s (%s) requested', ip, mac)
     else:
         # First time we've seen a request for this IP.
         log_event(ip, mac, ng.EVENT_REQUESTED_FIRST)
-        ng.database_instance.cursor.execute("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)", (mac, ip, now, now, ip_is_mine(ip)))
-        logger.info('%s (%s) requested, first time seeing', ip, mac)
-    ng.database_instance.connection.commit()
+        ng.db.cursor.execute("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)", (mac, ip, now, now, ip_is_mine(ip)))
+        debugger.info('%s (%s) requested, first time seeing', ip, mac)
+    ng.db.connection.commit()
     ng.database_lock.release()
 
 # Assumes we already have the database lock.
 def log_event(ip, mac, event):
     now = datetime.datetime.now()
-    ng.database_instance.connection.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)', (mac, ip, now, 0, event))
+    ng.db.connection.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)', (mac, ip, now, 0, event))
 
 def ip_is_mine(ip):
     return (ip == socket.gethostbyname(socket.gethostname()))
 
 # Database definitions.
-def create_database():
-    ng.database_lock.acquire()
-    logger.debug('Creating database tables, if not already existing.')
+def create_database(db, debugger):
+    db.lock.acquire()
+    debugger.debug('Creating database tables, if not already existing.')
 
     # Create state table.
-    ng.database_instance.cursor.execute("""
+    db.cursor.execute("""
       CREATE TABLE IF NOT EXISTS state(
         id INTEGER PRIMARY KEY,
         key VARCHAR UNIQUE,
@@ -550,7 +458,7 @@ def create_database():
     """)
 
     # Create seen table.
-    ng.database_instance.cursor.execute("""
+    db.cursor.execute("""
       CREATE TABLE IF NOT EXISTS seen(
         sid INTEGER PRIMARY KEY,
         did INTEGER,
@@ -567,16 +475,16 @@ def create_database():
         self NUMERIC
       )
     """)
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstSeen ON seen (ip, mac, firstSeen)")
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastSeen ON seen (ip, mac, lastSeen)")
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstRequested ON seen (ip, mac, firstRequested)")
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastRequested ON seen (ip, mac, lastRequested)")
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_lastSeen ON seen (active, lastSeen)")
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_active ON seen (ip, mac, active)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstSeen ON seen (ip, mac, firstSeen)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastSeen ON seen (ip, mac, lastSeen)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstRequested ON seen (ip, mac, firstRequested)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastRequested ON seen (ip, mac, lastRequested)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_lastSeen ON seen (active, lastSeen)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_active ON seen (ip, mac, active)")
     # PRAGMA index_list(seen)
 
     # Create arplog table.
-    ng.database_instance.cursor.execute("""
+    db.cursor.execute("""
       CREATE TABLE IF NOT EXISTS arplog(
         aid INTEGER PRIMARY KEY,
         src_mac TEXT,
@@ -589,10 +497,10 @@ def create_database():
         timestamp TIMESTAMP
       )
     """)
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
 
     # Create event table.
-    ng.database_instance.cursor.execute("""
+    db.cursor.execute("""
       CREATE TABLE IF NOT EXISTS event(
         eid INTEGER PRIMARY KEY,
         mac TEXT,
@@ -604,12 +512,12 @@ def create_database():
         event TEXT
       )
     """)
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_timestamp_processed ON event (event, timestamp, processed)")
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_processed ON event (timestamp, processed)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_timestamp_processed ON event (event, timestamp, processed)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_processed ON event (timestamp, processed)")
     # PRAGMA index_list(event)
 
     # Create vendor table.
-    ng.database_instance.cursor.execute("""
+    db.cursor.execute("""
       CREATE TABLE IF NOT EXISTS vendor(
         vid INTEGER PRIMARY KEY,
         mac TEXT,
@@ -617,10 +525,10 @@ def create_database():
         customname TEXT
       )
     """)
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac ON vendor (mac)")
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac ON vendor (mac)")
 
     # Create host table.
-    ng.database_instance.cursor.execute("""
+    db.cursor.execute("""
       CREATE TABLE IF NOT EXISTS host(
         hid INTEGER PRIMARY KEY,
         mac TEXT,
@@ -629,29 +537,29 @@ def create_database():
         customname TEXT
       )
     """)
-    ng.database_instance.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
-    ng.database_instance.connection.commit()
-    ng.database_lock.release()
+    db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
+    db.connection.commit()
+    db.lock.release()
 
-def update_database():
+def update_database(db, debugger):
     # Update #1: add did column to seen table, populate
     try:
-        ng.database_instance.cursor.execute("SELECT did FROM seen LIMIT 1")
+        db.cursor.execute("SELECT did FROM seen LIMIT 1")
     except Exception as e:
-        logger.debug(e)
-        logger.debug('applying update #1 to database: adding did column to seen, populating')
-        ng.database_lock.acquire()
-        ng.database_instance.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
+        debugger.debug("%s", (e,))
+        debugger.debug("applying update #1 to database: adding did column to seen, populating")
+        db.lock.acquire()
+        db.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
         # Prior to this we assumed a new IP was a new device.
-        ng.database_instance.cursor.execute("SELECT DISTINCT ip, mac FROM seen")
-        rows = ng.database_instance.cursor.fetchall()
+        db.cursor.execute("SELECT DISTINCT ip, mac FROM seen")
+        rows = db.cursor.fetchall()
         did = 1
         for row in rows:
             ip, mac = row
-            ng.database_instance.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
+            db.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
             did += 1
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.connection.commit()
+        db.release()
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
@@ -661,12 +569,12 @@ def received_arp(hdr, data, child_conn):
     dst_ip = socket.inet_ntoa(packet.data.tpa)
     dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
     if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-        logger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+        debugger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
         ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
         ip_request(dst_ip, dst_mac, src_ip, src_mac)
     elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
         ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
-        logger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+        debugger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
 
 def pretty_date(time):
     if not time:
@@ -704,15 +612,15 @@ def pretty_date(time):
 
 # Determine appropriate device id for IP, MAC pair.
 def get_did(ip, mac):
-    ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, mac))
-    did = ng.database_instance.cursor.fetchone()
+    ng.database.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, mac))
+    did = ng.database.cursor.fetchone()
     if not did:
         hostname = dns_lookup(ip)
-        ng.database_instance.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
-        did = ng.database_instance.cursor.fetchone()
+        ng.database.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
+        did = ng.database.cursor.fetchone()
     if not did:
-        ng.database_instance.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, ng.BROADCAST,))
-        did = ng.database_instance.cursor.fetchone()
+        ng.database.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, ng.BROADCAST,))
+        did = ng.database.cursor.fetchone()
 
     if did:
         return did[0]
@@ -721,8 +629,8 @@ def get_did(ip, mac):
 
 def first_seen(ip, mac):
     did = get_did(ip, mac)
-    ng.database_instance.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1', (did,))
-    active = ng.database_instance.cursor.fetchone()
+    ng.database.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1', (did,))
+    active = ng.database.cursor.fetchone()
     if active:
         return active[0]
     else:
@@ -730,8 +638,8 @@ def first_seen(ip, mac):
 
 def first_seen_recently(ip, mac):
     did = get_did(ip, mac)
-    ng.database_instance.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
-    recent = ng.database_instance.cursor.fetchone()
+    ng.database.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
+    recent = ng.database.cursor.fetchone()
     if recent:
         return recent[0]
     else:
@@ -739,8 +647,8 @@ def first_seen_recently(ip, mac):
 
 def last_seen(ip, mac):
     did = get_did(ip, mac)
-    ng.database_instance.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
-    active = ng.database_instance.cursor.fetchone()
+    ng.database.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
+    active = ng.database.cursor.fetchone()
     if active:
         return active[0]
     else:
@@ -748,8 +656,8 @@ def last_seen(ip, mac):
 
 def previously_seen(ip, mac):
     did = get_did(ip, mac)
-    ng.database_instance.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
-    previous = ng.database_instance.cursor.fetchone()
+    ng.database.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
+    previous = ng.database.cursor.fetchone()
     if previous:
         return previous[0]
     else:
@@ -757,8 +665,8 @@ def previously_seen(ip, mac):
 
 def first_requested(ip, mac):
     did = get_did(ip, mac)
-    ng.database_instance.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
-    active = ng.database_instance.cursor.fetchone()
+    ng.database.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
+    active = ng.database.cursor.fetchone()
     if active:
         return active[0]
     else:
@@ -766,122 +674,122 @@ def first_requested(ip, mac):
 
 def last_requested(ip, mac):
     did = get_did(ip, mac)
-    ng.database_instance.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
-    last = ng.database_instance.cursor.fetchone()
+    ng.database.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
+    last = ng.database.cursor.fetchone()
     if last:
         return last[0]
     else:
         return False
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
-def detect_stale_ips():
-    logger.debug('entering detect_stale_ips()')
-    stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.active_timeout)
+def detect_stale_ips(debugger, db, timeout):
+    debugger.debug("entering detect_stale_ips()")
+    stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
-    ng.database_instance.cursor.execute('SELECT mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?', (stale,))
-    rows = ng.database_instance.cursor.fetchall()
+    db.cursor.execute("SELECT sid, mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?", (stale,))
+    rows = db.cursor.fetchall()
     if rows:
-        ng.database_lock.acquire()
+        db.lock.acquire()
 
     for row in rows:
-        mac, ip, firstSeen, lastSeen = row
+        sid, mac, ip, firstSeen, lastSeen = row
         if (firstSeen and lastSeen):
             timeActive = lastSeen - firstSeen
         else:
-            timeActive = 'unknown'
-        log_event(ip, mac, ng.EVENT_STALE)
-        logger.info("%s [%s] is no longer active (was active for %s)", ip, mac, timeActive)
-        ng.database_instance.cursor.execute('UPDATE seen SET active = 0 WHERE ip=? AND mac=?', (ip, mac))
+            timeActive = "unknown"
+        log_event(ip, mac, EVENT_STALE)
+        debugger.info("%s [%s] is no longer active (was active for %s)", ip, mac, timeActive)
+        db.cursor.execute("UPDATE seen SET active = 0 WHERE sid=?", (sid,))
 
     if rows:
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.connection.commit()
+        db.lock.release()
 
-def detect_netscans():
-    logger.debug('entering detect_netscans()')
+def detect_netscans(debugger, db):
+    debugger.debug("entering detect_netscans()")
     now = datetime.datetime.now()
 
     three_minutes_ago = now - datetime.timedelta(minutes=3)
-    ng.database_instance.cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50', (three_minutes_ago,))
-    scans = ng.database_instance.cursor.fetchall()
+    db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50", (three_minutes_ago,))
+    scans = db.cursor.fetchall()
     if scans:
-        ng.database_lock.acquire()
+        db.lock.acquire()
     for scan in scans:
         count, src_mac, src_ip = scan
-        ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, ng.EVENT_SCAN, three_minutes_ago))
-        already_detected = ng.database_instance.cursor.fetchone()
+        db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, EVENT_SCAN, three_minutes_ago))
+        already_detected = db.cursor.fetchone()
         if not already_detected:
-            ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (src_mac, src_ip, now, ng.EVENT_SCAN))
-            logger.info('Detected network scan by %s [%s]', src_ip, src_mac)
+            db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (src_mac, src_ip, now, EVENT_SCAN))
+            debugger.info("Detected network scan by %s [%s]", src_ip, src_mac)
     if scans:
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.connection.commit()
+        db.lock.release()
 
-def detect_anomalies():
-    logger.debug('entering detect_anomalies()')
+def detect_anomalies(debugger, db, timeout):
+    debugger.debug("entering detect_anomalies()")
     now = datetime.datetime.now()
-    stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.active_timeout)
+    stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
     # Multiple MAC's with the same IP.
-    ng.database_instance.cursor.execute("SELECT COUNT(*) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1", (ng.BROADCAST,))
-    duplicates = ng.database_instance.cursor.fetchall()
+    db.cursor.execute("SELECT COUNT(*) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1", (BROADCAST,))
+    duplicates = db.cursor.fetchall()
     if duplicates:
-        ng.database_lock.acquire()
+        db.lock.acquire()
     for duplicate in duplicates:
         count, ip = duplicate
-        ng.database_instance.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1;", (ip,))
-        details = ng.database_instance.cursor.fetchall()
+        db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1;", (ip,))
+        details = db.cursor.fetchall()
         for detail in details:
             ip, mac, sid, did = detail
-            ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, ng.EVENT_DUPLICATE_IP, stale))
-            already_detected = ng.database_instance.cursor.fetchone()
+            db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
+            already_detected = db.cursor.fetchone()
             if not already_detected:
-                ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (mac, ip, now, ng.EVENT_DUPLICATE_IP))
-                logger.info('Detected multiple MACs with same IP %s [%s]', ip, mac)
+                db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, EVENT_DUPLICATE_IP))
+                debugger.info("Detected multiple MACs with same IP %s [%s]", ip, mac)
     if duplicates:
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.connection.commit()
+        db.lock.release()
 
     # Multiple IP's with the same MAC.
-    ng.database_instance.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (ng.BROADCAST,))
-    duplicates = ng.database_instance.cursor.fetchall()
+    db.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (BROADCAST,))
+    duplicates = db.cursor.fetchall()
     if duplicates:
-        ng.database_lock.acquire()
+        db.lock.acquire()
     for duplicate in duplicates:
         count, mac = duplicate
-        ng.database_instance.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1;", (mac,))
-        details = ng.database_instance.cursor.fetchall()
+        db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1;", (mac,))
+        details = db.cursor.fetchall()
         for detail in details:
             ip, mac, sid, did = detail
-            ng.database_instance.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, ng.EVENT_DUPLICATE_MAC, stale))
-            already_detected = ng.database_instance.cursor.fetchone()
+            db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
+            already_detected = db.cursor.fetchone()
             if not already_detected:
-                ng.database_instance.cursor.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)', (mac, ip, now, ng.EVENT_DUPLICATE_MAC))
-                logger.info('Detected multiple IPs with same MAC %s [%s]', ip, mac)
+                db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, EVENT_DUPLICATE_MAC))
+                debugger.info("Detected multiple IPs with same MAC %s [%s]", ip, mac)
     if duplicates:
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.connection.commit()
+        db.lock.release()
 
-def send_notifications():
-    logger.debug('entering send_notifications()')
+def send_notifications(debugger, db, notify):
+    debugger.debug("entering send_notifications()")
 
-    if not ng.notification_instance.enabled:
-        logger.debug('notifications disabled')
+    if not notify.enabled:
+        debugger.debug("notifications disabled")
         return False
 
-    if not ng.notification_instance.alerts:
-        logger.debug('no notification alerts configured')
+    if not notify.alerts:
+        debugger.debug("no notification alerts configured")
         return False
 
     import ntfy
     timer = Timer()
 
     day = datetime.datetime.now() - datetime.timedelta(days=1)
-    ng.database_instance.cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ('+ ','.join('?'*len(ng.notification_instance.alerts)) + ')', ng.notification_instance.alerts)
+    db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notify.alerts)) + ")", notify.alerts)
 
-    rows = ng.database_instance.cursor.fetchall()
+    rows = db.cursor.fetchall()
     if rows:
-        ng.database_lock.acquire()
+        db.lock.acquire()
 
     counter = 0
     for row in rows:
@@ -890,53 +798,53 @@ def send_notifications():
         # wiretap process to work if needed, avoiding potential timeout.
         counter = counter + 1
         if (counter > MAXPROCESS):
-            logger.debug("updated 100 events, releasing/regrabbing lock")
-            ng.database_instance.connection.commit()
-            ng.database_lock.release()
+            debugger.debug("updated 100 events, releasing/regrabbing lock")
+            db.connection.commit()
+            db.lock.release()
             if (timer.elapsed() > MAXSECONDS):
                 # We've been processing notifications too long, quit for now and come back later.
-                logger.debug("processing notifications >%d seconds, quitting for now", MAXSECONDS)
+                debugger.debug("processing notifications >%d seconds, quitting for now", MAXSECONDS)
                 return
             counter = 0
-            ng.database_lock.acquire()
+            db.lock.acquire()
 
-        logger.debug('processing event %d for %s [%s] at %s', eid, ip, mac, timestamp)
+        debugger.debug("processing event %d for %s [%s] at %s", eid, ip, mac, timestamp)
 
         # only send notifications for configured events
-        if event in ng.notification_instance.alerts:
-            logger.info('event %s [%d] in %s, generating notification alert', event, eid, ng.notification_instance.alerts)
+        if event in notify.alerts:
+            debugger.info("event %s [%d] in %s, generating notification alert", event, eid, notify.alerts)
             firstSeen = first_seen(ip, mac)
             lastSeen = first_seen_recently(ip, mac)
             previouslySeen = previously_seen(ip, mac)
             title = """Netgrasp alert: %s""" % (event)
             body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(mac, ip), ip, mac, pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstSeen))
             ntfy.notify(body, title)
-            ng.database_instance.cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (processed + 8, eid))
+            notify.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
         else:
-            logger.debug('event %s [%d] NOT in %s', event, eid, ng.notification_instance.alerts)
+            debugger.debug("event %s [%d] NOT in %s", event, eid, notify.alerts)
     if rows:
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.connection.commit()
+        db.lock.release()
 
-def send_email_alerts():
-    logger.debug('entering send_email_alerts()')
+def send_email_alerts(debugger, db, email):
+    debugger.debug("entering send_email_alerts()")
 
-    if not ng.email_instance.enabled:
-        logger.debug('email disabled')
+    if not email.enabled:
+        debugger.debug("email disabled")
         return False
 
-    if not ng.email_instance.alerts:
-        logger.debug('no email alerts configured')
+    if not email.alerts:
+        debugger.debug("no email alerts configured")
         return False
 
     day = datetime.datetime.now() - datetime.timedelta(days=1)
 
     timer = Timer()
 
-    ng.database_instance.cursor.execute('SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)');
-    rows = ng.database_instance.cursor.fetchall()
+    db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)");
+    rows = db.cursor.fetchall()
     if rows:
-        ng.database_lock.acquire()
+        db.lock.acquire()
 
     counter = 0
     for row in rows:
@@ -945,28 +853,28 @@ def send_email_alerts():
         # wiretap process to work if needed, avoiding potential timeout.
         counter = counter + 1
         if (counter > MAXPROCESS):
-            logger.debug("updated 100 events, releasing/regrabbing lock")
-            ng.database_instance.connection.commit()
-            ng.database_lock.release()
+            debugger.debug("updated 100 events, releasing/regrabbing lock")
+            db.connection.commit()
+            db.lock.release()
             if (timer.elapsed() > MAXSECONDS):
                 # We've been processing alerts too long, quit for now and come back later.
-                logger.debug("processing email alerts >%d seconds, quitting for now", MAXSECONDS)
+                debugger.debug("processing email alerts >%d seconds, quitting for now", (MAXSECONDS,))
                 return
             counter = 0
-            ng.database_lock.acquire()
+            db.lock.acquire()
 
-        logger.debug('processing event %d for %s [%s] at %s', eid, ip, mac, timestamp)
+        debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
         alerted = True
         # only send emails for configured events
-        if event in ng.email_instance.alerts:
-            logger.info('event %s [%d] in %s, generating notification email', event, eid, ng.email_instance.alerts)
+        if event in email.alerts:
+            debugger.info("event %s [%d] in %s, generating notification email", (event, eid, email.alerts))
             # get more information about this entry ...
-            ng.database_instance.cursor.execute('SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC', (mac, ip))
-            info = ng.database_instance.cursor.fetchone()
+            db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
+            info = db.cursor.fetchone()
             if not info:
-                ng.database_instance.connection.commit()
-                ng.database_lock.release()
-                logger.warning("Event for ip %s [%s] that we haven't seen", ip, mac)
+                db.connection.commit()
+                db.lock.release()
+                logger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
                 return
             active, self, vendor, vendor_customname, hostname, host_customname = info
             firstSeen = first_seen(ip, mac)
@@ -976,89 +884,89 @@ def send_email_alerts():
             lastRequested = last_requested(ip, mac)
             subject = """Netgrasp alert: %s""" % (event)
             body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty_date(firstSeen), pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstRequested), pretty_date(lastRequested), active, self)
-            ng.database_instance.cursor.execute('SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?', (mac, day))
-            results = ng.database_instance.cursor.fetchall()
+            db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
+            results = db.cursor.fetchall()
             if results:
                 body += """\nIn the last day, this device talked to:"""
             for peer in results:
                 body += """\n - %s (%s)""" % (peer[0], name_ip(peer[1], peer[0]))
-            ng.email_instance.MailSend(subject, 'iso-8859-1', (body, 'us-ascii'))
+            email.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
         else:
-            logger.debug('event %s [%d] NOT in %s', event, eid, ng.email_instance.alerts)
+            debugger.debug("event %s [%d] NOT in %s", (event, eid, email.alerts))
         if alerted:
-            ng.database_instance.cursor.execute('UPDATE event SET processed = ? WHERE eid = ?', (processed + 1, eid))
+            db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 1, eid))
 
     if rows:
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.connection.commit()
+        db.lock.release()
 
 # Finds new MAC addresses and assigns them a name.
-def identify_macs():
-    logger.debug('entering identify_macs()')
+def identify_macs(debugger, db):
+    debugger.debug("entering identify_macs()")
     import re
     import httplib
 
-    ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL')
-    rows = ng.database_instance.cursor.fetchall()
+    db.cursor.execute("SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL")
+    rows = db.cursor.fetchall()
     for row in rows:
         raw_mac, ip = row
         if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", raw_mac.lower()):
             mac = raw_mac
         else:
             mac = []
-            pieces = raw_mac.split(':')
+            pieces = raw_mac.split(":")
             if not pieces:
-                pieces = row_mac.split('-')
+                pieces = row_mac.split("-")
             for piece in pieces:
                 if len(piece) == 1:
-                    piece = '0'+piece
+                    piece = "0"+piece
                 mac.append(piece)
             mac = ":".join(mac)
-        logger.debug('Looking up vendor for %s [%s]', ip, raw_mac)
-        http = httplib.HTTPConnection('api.macvendors.com', 80)
+        debugger.debug("Looking up vendor for %s [%s]", ip, raw_mac)
+        http = httplib.HTTPConnection("api.macvendors.com", 80)
         url = """/%s""" % mac
         http.request("GET", url)
         response = http.getresponse()
-        ng.database_lock.acquire()
-        if response.status == 200 and response.reason == 'OK':
+        ng.db.lock.acquire()
+        if response.status == 200 and response.reason == "OK":
             vendor = response.read()
-            logger.info('Identified %s [%s] as %s', ip, raw_mac, vendor)
-            ng.database_instance.cursor.execute('INSERT INTO vendor (mac, vendor) VALUES (?, ?)', (raw_mac, vendor))
+            debugger.info("Identified %s [%s] as %s", ip, raw_mac, vendor)
+            db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, ?)", (raw_mac, vendor))
         else:
-            logger.info('Failed identify vendor for [%s]', raw_mac)
-            ng.database_instance.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+            debugger.info("Failed identify vendor for [%s]", raw_mac)
+            db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
+        db.connection.commit()
+        db.lock.release()
 
-    ng.database_instance.cursor.execute('SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL')
-    rows = ng.database_instance.cursor.fetchall()
+    db.cursor.execute("SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL")
+    rows = db.cursor.fetchall()
     for row in rows:
         mac, ip = row
         hostname = dns_lookup(ip)
-        ng.database_lock.acquire()
-        ng.database_instance.cursor.execute('INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)', (mac, ip, hostname))
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+        db.lock.acquire()
+        db.cursor.execute("INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)", (mac, ip, hostname))
+        db.connection.commit()
+        db.lock.release()
 
 def dns_lookup(ip):
-    logger.debug('entering gethostbyaddr(%s)', ip)
+    debugger.debug("entering gethostbyaddr(%s)", (ip,))
     try:
         hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
-        logger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", hostname, aliaslist, ipaddrlist)
+        debugger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", (hostname, aliaslist, ipaddrlist))
     except Exception as e:
-        logger.debug('gethostbyaddr failed: %s', e)
-        hostname = 'unknown'
-        logger.debug("hostname(%s)", hostname)
+        debugger.debug("gethostbyaddr failed: %s", (e,))
+        hostname = "unknown"
+        debugger.debug("hostname(%s)", (hostname,))
     return hostname
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
-    logger.debug('entering name_ip(%s, %s)', mac, ip)
+    debugger.debug('entering name_ip(%s, %s)', (mac, ip))
     if (mac == ng.BROADCAST):
-        ng.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
+        db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
     else:
-        ng.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
-    detail = ng.database_instance.cursor.fetchone()
+        db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
+    detail = db.cursor.fetchone()
     if not detail:
         return detail
     if detail[2]:
@@ -1073,38 +981,38 @@ def name_ip(mac, ip):
         return detail[0]
 
 # Generates daily and weekly email digests.
-def send_email_digests():
-    logger.debug('entering send_email_digests()')
+def send_email_digests(debugger, db, email):
+    debugger.debug("entering send_email_digests()")
 
-    if not ng.email_instance.enabled:
+    if not email.enabled:
         return False
 
-    if not ng.email_instance.digest:
-        logger.debug('no digests configured')
+    if not email.digest:
+        debugger.debug("no digests configured")
         return False
 
     timer = Timer()
     now = datetime.datetime.now()
 
-    digests = ['daily', 'weekly']
+    digests = ["daily", "weekly"]
     for digest in digests:
-        if (digest == 'daily'):
-            timestamp_string = 'daily_digest_timestamp'
+        if (digest == "daily"):
+            timestamp_string = "daily_digest_timestamp"
             future_digest_timestamp = now + datetime.timedelta(days=1)
             time_period = now - datetime.timedelta(days=1)
-            time_period_description = '24 hours'
+            time_period_description = "24 hours"
             previous_time_period = now - datetime.timedelta(days=2)
-        elif (digest == 'weekly'):
-            timestamp_string = 'weekly_digest_timestamp'
+        elif (digest == "weekly"):
+            timestamp_string = "weekly_digest_timestamp"
             future_digest_timestamp = now + datetime.timedelta(weeks=1)
             time_period = now - datetime.timedelta(weeks=1)
-            time_period_description = '7 days'
+            time_period_description = "7 days"
             previous_time_period = now - datetime.timedelta(weeks=2)
 
-        next_digest_timestamp = ng.get_state(timestamp_string, '', True)
+        next_digest_timestamp = db.get_state(timestamp_string, "", True)
         if not next_digest_timestamp:
             # first time here, schedule a digest for appropriate time in future
-            ng.set_state(timestamp_string, future_digest_timestamp)
+            db.set_state(timestamp_string, future_digest_timestamp)
             next_digest_timestamp = future_digest_timestamp
 
         if now < next_digest_timestamp:
@@ -1112,24 +1020,24 @@ def send_email_digests():
             continue
 
         # time to send a digest
-        logger.info('Sending %s digest', digest)
-        ng.set_state(timestamp_string, future_digest_timestamp)
+        debugger.info("Sending %s digest", (digest,))
+        db.set_state(timestamp_string, future_digest_timestamp)
 
-        if (digest == 'daily'):
-            # ng.PROCESSED_DAILY_DIGEST  = 2
-            ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
-            requested = ng.database_instance.cursor.fetchall()
-            ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
-            seen = ng.database_instance.cursor.fetchall()
-        elif (digest == 'weekly'):
-            # ng.PROCESSED_WEEKLY_DIGEST = 4
-            ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
-            requested = ng.database_instance.cursor.fetchall()
-            ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
-            seen = ng.database_instance.cursor.fetchall()
+        if (digest == "daily"):
+            # PROCESSED_DAILY_DIGEST  = 2
+            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+            requested = db.cursor.fetchall()
+            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+            seen = db.cursor.fetchall()
+        elif (digest == "weekly"):
+            # PROCESSED_WEEKLY_DIGEST = 4
+            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+            requested = db.cursor.fetchall()
+            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+            seen = db.cursor.fetchall()
 
-        ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
-        seen_previous = ng.database_instance.cursor.fetchall()
+        db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
+        seen_previous = db.cursor.fetchall()
 
         new = set(seen) - set(seen_previous)
         gone = set(seen_previous) - set(seen)
@@ -1139,8 +1047,8 @@ def send_email_digests():
         noisy = []
         some_new = False
         for ip in seen:
-            ng.database_instance.cursor.execute('SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?', (ip[1], time_period, now))
-            requests = ng.database_instance.cursor.fetchone()
+            db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip[1], time_period, now))
+            requests = db.cursor.fetchone()
             if (requests[0] > 10):
                 noisy.append((ip[0], ip[1], requests[0], name_ip(ip[0], ip[1])))
             if ip in new:
@@ -1165,36 +1073,35 @@ def send_email_digests():
             for ip in gone:
                 body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
 
-        if (digest == 'daily'):
+        if (digest == "daily"):
             body += "\n\nActive devices per hour during the past day:"
             range = 24
             while (range > 0):
                 lower = now - datetime.timedelta(hours=range)
                 range = range - 1
                 upper = now - datetime.timedelta(hours=range)
-                ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
-                distinct = ng.database_instance.cursor.fetchall()
+                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                distinct = db.cursor.fetchall()
                 body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
-        elif (digest == 'weekly'):
+        elif (digest == "weekly"):
             body += "\n\nActive devices per day during the past week:"
             range = 7
             while (range > 0):
                 lower = now - datetime.timedelta(days=range)
                 range = range - 1
                 upper = now - datetime.timedelta(days=range)
-                logger.debug("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>='%s' AND timestamp<'%s'", lower, upper)
-                ng.database_instance.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
-                distinct = ng.database_instance.cursor.fetchall()
+                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                distinct = db.cursor.fetchall()
                 body += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
 
-        if (digest == 'daily'):
-            ng.database_instance.cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)', (time_period, now))
-            alerted = ng.PROCESSED_DAILY_DIGEST
-        elif (digest == 'weekly'):
-            ng.database_instance.cursor.execute('SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)', (time_period, now))
-            alerted = ng.PROCESSED_WEEKLY_DIGEST
-        rows = ng.database_instance.cursor.fetchall()
-        ng.database_lock.acquire()
+        if (digest == "daily"):
+            db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)", (time_period, now))
+            alerted = PROCESSED_DAILY_DIGEST
+        elif (digest == "weekly"):
+            db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)", (time_period, now))
+            alerted = PROCESSED_WEEKLY_DIGEST
+        rows = db.cursor.fetchall()
+        db.lock.acquire()
         counter = 0
         for row in rows:
             eid, processed = row
@@ -1202,32 +1109,32 @@ def send_email_digests():
             # wiretap process to work if needed, avoiding potential timeout.
             counter = counter + 1
             if (counter > MAXPROCESS):
-                logger.debug("updated 100 events, releasing/regrabbing lock")
-                ng.database_instance.connection.commit()
-                ng.database_lock.release()
+                debugger.debug("updated 100 events, releasing/regrabbing lock")
+                db.connection.commit()
+                db.lock.release()
                 if (timer.elapsed() > MAXSECONDS):
                     # We've been processing events for too long, quit for now and come back later.
-                    logger.debug("processing events >%d seconds, quitting for now", MAXSECONDS)
+                    debugger.debug("processing events >%d seconds, quitting for now", (MAXSECONDS,))
                     return
                 counter = 0
-                ng.database_lock.acquire()
-            ng.database_instance.cursor.execute('UPDATE event SET processed=? WHERE eid=?', (processed + alerted, eid))
-        ng.database_instance.connection.commit()
-        ng.database_lock.release()
+                db.lock.acquire()
+            db.cursor.execute("UPDATE event SET processed=? WHERE eid=?", (processed + alerted, eid))
+        db.connection.commit()
+        db.lock.release()
 
-        logger.info('Sending %s digest', digest)
-        ng.email_instance.MailSend(subject, 'iso-8859-1', (body, 'us-ascii'))
+        debugger.info("Sending %s digest", (digest,))
+        email.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
 
-def garbage_collection():
-    logger.debug('entering garbage_collection()')
+def garbage_collection(debugger, db, config):
+    debugger.debug("entering garbage_collection()")
 
-    if not ng.config_instance.GetBoolean('Database', 'gcenabled', True, False):
-        logger.debug('garbage collection disabled')
+    if not config.GetBoolean("Database", "gcenabled", True, False):
+        debugger.debug("garbage collection disabled")
 
     garbage_collection_string = "garbage collection"
 
     now = datetime.datetime.now()
-    next_garbage_collection = ng.get_state(garbage_collection_string, '', True)
+    next_garbage_collection = db.get_state(garbage_collection_string, "", True)
 
     if not next_garbage_collection:
         # perform first garbage collection now
@@ -1237,26 +1144,26 @@ def garbage_collection():
         # it's not yet time to send this digest
         return False
 
-    logger.info("performing garbage collection")
+    debugger.info("performing garbage collection")
     # schedule next garbage collection
-    ng.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
+    db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
-    oldest_arplog = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_arplog', 60 * 60 * 24 * 7 * 2, False))
-    oldest_event = now - datetime.timedelta(seconds=ng.config_instance.GetInt('Database', 'oldest_event', 60 * 60 * 24 * 7 * 2, False))
+    oldest_arplog = now - datetime.timedelta(seconds=config.GetInt("Database", "oldest_arplog", 60 * 60 * 24 * 7 * 2, False))
+    oldest_event = now - datetime.timedelta(seconds=config.GetInt("Database", "oldest_event", 60 * 60 * 24 * 7 * 2, False))
 
-    ng.database_lock.acquire()
+    db.lock.acquire()
     # Purge old arplog entries.
-    ng.database_instance.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (oldest_arplog,))
-    arplog_count = ng.database_instance.cursor.fetchone()
-    ng.database_instance.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (oldest_arplog,))
+    db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (oldest_arplog,))
+    arplog_count = db.cursor.fetchone()
+    db.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (oldest_arplog,))
     # Purge old event entries.
-    ng.database_instance.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (oldest_event,))
-    event_count = ng.database_instance.cursor.fetchone()
-    ng.database_instance.cursor.execute("DELETE FROM event WHERE timestamp < ?", (oldest_event,))
-    ng.database_instance.connection.commit()
-    ng.database_lock.release()
-    logger.debug("deleted %d arplog entries older than %s", arplog_count[0], oldest_arplog)
-    logger.debug("deleted %d event entries older than %s", event_count[0], oldest_event)
+    db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (oldest_event,))
+    event_count = db.cursor.fetchone()
+    db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (oldest_event,))
+    db.connection.commit()
+    db.lock.release()
+    debugger.debug("deleted %d arplog entries older than %s", (arplog_count[0], oldest_arplog))
+    debugger.debug("deleted %d event entries older than %s", (event_count[0], oldest_event))
 
 
 #################

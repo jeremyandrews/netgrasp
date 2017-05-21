@@ -88,3 +88,10 @@ class Config:
                 self.debugger.error('ignoring invalid email address (%s)', (email,))
         return self._GetValue(section, option, addresses, default, required, secret)
 
+# Perform simplistic email address validation.
+def valid_email_address(address):
+    from email.utils import parseaddr
+    if not '@' in parseaddr(address)[1]:
+        return False
+    else:
+        return True
