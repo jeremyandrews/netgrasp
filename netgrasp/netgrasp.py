@@ -1,6 +1,7 @@
 from utils import debug
 from utils import exclusive_lock
 from config import config
+from notify import notify
 import db
 
 import logging
@@ -11,10 +12,8 @@ import os
 
 #import fcntl
 #import signal
-#import multiprocessing
 #import ConfigParser
 #import io
-#import grp
 #import struct
 #import socket
 #import datetime
@@ -151,11 +150,12 @@ class Netgrasp:
                 sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (ng.whoami()))
 
     # Drop root permissions when no longer needed.
-    def drop_root(self):
+    def drop_root(self, ng):
+        import grp
         os.setgroups([])
-        os.setgid(grp.getgrnam(self.config_instance.GetText('Security', 'group', ng.DEFAULT_GROUP, False)).gr_gid)
-        os.setuid(pwd.getpwnam(self.config_instance.GetText('Security', 'user', ng.DEFAULT_USER, False)).pw_uid)
-        logger.info('running as user %s',  self.whoami())
+        os.setgid(grp.getgrnam(self.config.GetText('Security', 'group', DEFAULT_GROUP, False)).gr_gid)
+        os.setuid(pwd.getpwnam(self.config.GetText('Security', 'user', DEFAULT_USER, False)).pw_uid)
+        ng.debugger.info('running as user %s',  (self.debugger.whoami(),))
 
     def set_state(self, key, value, secret = False):
         self.database_lock.acquire()
@@ -213,18 +213,19 @@ MAXPROCESS = 100
 MAXSECONDS = 5
 
 # This is our main program loop.
-def main(*pcap):
-    logger.info('main process running as user %s',  ng.whoami())
+def main(ng, *pcap):
+    import multiprocessing
+    ng.debugger.info("main process running as user %s", (ng.debugger.whoami(),))
 
     if pcap:
         # We have daemonized and are not running as root.
         pc = pcap[0]
-        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', ng.DEFAULT_DBLOCK, False))
+        ng.database_lock = ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False))
     else:
         # We are running in the foreground as root.
         pcap = get_pcap()
         pc = pcap[0]
-        ng.drop_root()
+        ng.drop_root(ng)
         ng.database_lock = multiprocessing.Lock()
 
     # At this point we should no longer have/need root privileges.
@@ -236,11 +237,10 @@ def main(*pcap):
     child.start()
 
     try:
-        ng.database_instance = ng.Database()
+        ng.database_instance = Database()
     except Exception as e:
-        logger.critical("%s", e)
-        logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, ng.whoami())
-        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""" % (ng.database_filename, ng.whoami()))
+        ng.debugger.critical("%s", (e,))
+        ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
     logger.info('opened %s as user %s', ng.database_filename, ng.whoami());
     ng.database_instance.cursor = ng.database_instance.connection.cursor()
     # http://www.sqlite.org/wal.html
@@ -249,8 +249,8 @@ def main(*pcap):
     create_database()
     update_database()
 
-    ng.active_timeout = ng.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
-    ng.delay = ng.config_instance.GetInt('Listen', 'delay', 15, False)
+    ng.active_timeout = ng.config.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
+    ng.delay = ng.config.GetInt('Listen', 'delay', 15, False)
     if (ng.delay > 30):
         ng.delay = 30
     elif (ng.delay < 1):
@@ -301,35 +301,29 @@ def valid_email_address(address):
 
 def get_pcap():
     import sys
-    logger.info('entering get_pcap() as user %s',  ng.whoami())
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
 
     try:
         import pcap
     except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
+        print """fatal exception: %s""" % e
         sys.exit("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
 
     devices = pcap.findalldevs()
-    logger.info('identified devices: %s', devices)
     if len(devices) <= 0:
-      logger.critical('no available devices (are you in a jail?), exiting')
       sys.exit("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
 
-    interface = ng.config_instance.GetText('Listen', 'interface', devices[0], False)
+    #interface = ng.config_instance.GetText('Listen', 'interface', devices[0], False)
+    interface = 'en0'
     local_net, local_mask = pcap.lookupnet(interface)
 
     try:
         pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
         pc.setfilter('arp')
-        logger.debug("pcap: %s", pc)
     except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to invoke pcap, exiting")
         sys.exit("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
-    logger.warning('listening for arp traffic on %s: %s/%s', interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
+    #logger.warning('listening for arp traffic on %s: %s/%s', interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
     return [pc]
 
 # Child process: wiretap, uses pcap to sniff arp packets.
@@ -339,7 +333,7 @@ def wiretap(pc, child_conn):
     if ng.daemonize:
         # We use a lock file when daemonized, as this allows netgraspctl to coordinate
         # with the daemon. Over-write the master-process handler with our own.
-        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', ng.DEFAULT_DBLOCK, False))
+        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False))
 
     try:
         import dpkt
@@ -357,7 +351,7 @@ def wiretap(pc, child_conn):
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     try:
-        ng.database_instance = ng.Database()
+        ng.database_instance = Database()
     except Exception as e:
         logger.critical("%s", e)
         logger.critical("failed to open or create %s (as user %s), exiting", ng.database_filename, ng.whoami())
@@ -1264,23 +1258,6 @@ def garbage_collection():
     logger.debug("deleted %d arplog entries older than %s", arplog_count[0], oldest_arplog)
     logger.debug("deleted %d event entries older than %s", event_count[0], oldest_event)
 
-if __name__ == '__main__':
-
-    ng.notification_instance = ng.Notification()
-
-    ng.database_filename = ng.config_instance.GetText('Database', 'filename')
-
-    if ng.daemonize:
-        pidfile = ng.config_instance.GetText('Logging', 'pidfile', ng.DEFAULT_PIDFILE, False)
-        username = ng.config_instance.GetText('Security', 'user', ng.DEFAULT_USER, False)
-        groupname = ng.config_instance.GetText('Security', 'group', ng.DEFAULT_GROUP, False)
-        try:
-            daemon = Daemonize(app="netgrasp", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
-            daemon.start()
-        except Exception as e:
-            sys.exit("""Failed to daemonize: %s, exiting""" % e)
-    else:
-        main()
 
 #################
 #################
@@ -1295,12 +1272,12 @@ def start(ng):
         ng.debugger = debug.Debugger()
     else:
         ng.debugger = debug.Debugger(ng.verbose, logger, debug.FILE)
-    ng.config_instance = config.Config(ng.debugger)
+    ng.config = config.Config(ng.debugger)
 
     # Start logger, reading relevant configuration.
     if ng.daemonize:
         try:
-            handler = logging.FileHandler(ng.config_instance.GetText('Logging', 'filename', DEFAULT_LOGFILE))
+            handler = logging.FileHandler(ng.config.GetText('Logging', 'filename', DEFAULT_LOGFILE))
         except Exception as e:
             ng.debugger.critical("Fatal exception setting up log handler: %s", (e,))
     else:
@@ -1313,8 +1290,8 @@ def start(ng):
         ng.debugger.setLevel(logging.DEBUG)
         ng.debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
     else:
-        logger.setLevel(ng.config_instance.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
-    ng.debugger.info('loaded configuration file: %s', ng.config_instance.found)
+        logger.setLevel(ng.config.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
+    ng.debugger.info('loaded configuration file: %s', ng.config.found)
 
     if not ng.daemonize:
         ng.debugger.warning("Output forced to stderr, started with --foreground flag.")
@@ -1328,20 +1305,34 @@ def start(ng):
         import sqlite3
     except Exception as e:
         ng.debugger.error("fatal exception: %s", e)
-        ng.debugger.critical("failed to import sqlite3, try 'pip install sqlite3', exiting")
-    ng.debugger.info('successfuly imported sqlite3')
+        ng.debugger.critical("failed to import sqlite3 (as user %s), try 'pip install sqlite3', exiting", (ng.debugger.whoami()))
+    ng.debugger.info("successfuly imported sqlite3")
     try:
         import dpkt
     except Exception as e:
         ng.debugger.error("fatal exception: %s", e)
-        ng.debugger.critical("failed to import dpkt, try 'pip install dpkt', exiting")
-    ng.debugger.info('successfuly imported dpkt')
+        ng.debugger.critical("failed to import dpkt (as user %s), try 'pip install dpkt', exiting", (ng.debugger.whoami()))
+    ng.debugger.info("successfuly imported dpkt")
     if ng.daemonize:
         try:
             import daemonize
         except Exception as e:
             ng.debugger.error("fatal exception: %s", e)
-            ng.debugger.critical("failed to import daemonize, try 'pip install daemonize', exiting")
-        ng.debugger.info('successfuly imported daemonize')
+            ng.debugger.critical("failed to import daemonize (as user %s), try 'pip install daemonize', exiting", (ng.debugger.whoami()))
+        ng.debugger.info("successfuly imported daemonize")
 
+    ng.notify = notify.Notify(ng.debugger, ng.config)
 
+    ng.database_filename = ng.config.GetText('Database', 'filename')
+
+    if ng.daemonize:
+        pidfile = ng.config.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
+        username = ng.config.GetText('Security', 'user', DEFAULT_USER, False)
+        groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
+        try:
+            daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
+            daemon.start()
+        except Exception as e:
+            ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))
+    else:
+        main(ng)
