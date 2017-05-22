@@ -42,7 +42,11 @@ class Debugger:
                 self.log(message, args, logging.CRITICAL)
                 self.fatal("fatal error, no logger provided, exiting")
             if args:
-                self.logger.log(level, message, *args)
+                try:
+                    self.logger.log(level, message, *args)
+                except Exception as e:
+                    debugger_instance.error("log FIXME: %s, %s", (message, args))
+                    debugger_instance.error("log FIXME: %s", (e,))
             else:
                 self.logger.log(level, message)
 

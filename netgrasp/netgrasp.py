@@ -1,6 +1,7 @@
 from utils import debug
 from utils import exclusive_lock
 from utils import email
+from utils import simple_timer
 from config import config
 from notify import notify
 from database import database
@@ -11,14 +12,6 @@ import pwd
 import sys
 import os
 import datetime
-
-#import fcntl
-#import signal
-#import ConfigParser
-#import io
-#import struct
-#from email.utils import parseaddr
-
 import time
 
 netgrasp_instance = None
@@ -26,18 +19,8 @@ netgrasp_instance = None
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
 ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan']
+EVENT_REQUESTED_FIRST, EVENT_REQUESTED, EVENT_SEEN_FIRST, EVENT_SEEN_FIRST_RECENT, EVENT_SEEN, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_STALE, EVENT_SCAN = ALERT_TYPES
 DIGEST_TYPES = ['daily', 'weekly']
-
-EVENT_SEEN              = 'seen'
-EVENT_SEEN_FIRST        = 'first_seen'
-EVENT_SEEN_FIRST_RECENT = 'first_seen_recently'
-EVENT_CHANGED_IP        = 'changed_ip'
-EVENT_REQUESTED         = 'requested'
-EVENT_REQUESTED_FIRST   = 'first_requested'
-EVENT_STALE             = 'stale'
-EVENT_SCAN              = 'network_scan'
-EVENT_DUPLICATE_IP      = 'duplicate_ip'
-EVENT_DUPLICATE_MAC     = 'duplicate_mac'
 
 PROCESSED_ALERT         = 1
 PROCESSED_DAILY_DIGEST  = 2
@@ -70,13 +53,6 @@ class Netgrasp:
         os.setgid(grp.getgrnam(self.config.GetText('Security', 'group', DEFAULT_GROUP, False)).gr_gid)
         os.setuid(pwd.getpwnam(self.config.GetText('Security', 'user', DEFAULT_USER, False)).pw_uid)
         ng.debugger.info('running as user %s',  (self.debugger.whoami(),))
-
-class Timer:
-    def __init__(self):
-        self.start = time.time()
-
-    def elapsed(self):
-        return time.time() - self.start
 
 # Simple, short text string used for heartbeat.
 HEARTBEAT = 'nghb'
@@ -198,7 +174,7 @@ def get_pcap():
     return [pc]
 
 # Child process: wiretap, uses pcap to sniff arp packets.
-def wiretap(pc, child_conn, database_lock):
+def wiretap(pc, child_conn, _database_lock):
     import sys
 
     debugger = debug.debugger_instance
@@ -206,7 +182,7 @@ def wiretap(pc, child_conn, database_lock):
     if netgrasp_instance.daemonize:
         # We use a lock file when daemonized, as this allows netgraspctl to coordinate
         # with the daemon. Over-write the master-process handler with our own.
-        database_lock = ExclusiveFileLock(config.config_instance.GetText("Database", "lockfile", DEFAULT_DBLOCK, False))
+        _database_lock = ExclusiveFileLock(config.config_instance.GetText("Database", "lockfile", DEFAULT_DBLOCK, False))
 
     try:
         import dpkt
@@ -231,6 +207,8 @@ def wiretap(pc, child_conn, database_lock):
         debugger.critical("failed to open or create %s (as user %s), exiting", (database_filename, logger.whoami()))
     debugger.info("opened %s as user %s", (database_filename, debugger.whoami()));
     db.cursor = db.connection.cursor()
+    db.lock = _database_lock
+    database.database_instance = db
 
     run = True
     last_heartbeat = datetime.datetime.now()
@@ -260,25 +238,28 @@ def wiretap(pc, child_conn, database_lock):
     debugger.critical("No heartbeats from main process for >1 minute, exiting.")
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
-    debugger.debug('entering ip_seen(%s, %s, %s, %s, %d)', src_ip, src_mac, dst_ip, dst_mac, request)
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
+    debugger.debug("entering ip_seen(%s, %s, %s, %s, %d)", (src_ip, src_mac, dst_ip, dst_mac, request))
     now = datetime.datetime.now()
 
-    ng.db.database_lock.acquire()
-    ng.db.cursor.execute('INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)', (src_mac, src_ip, dst_mac, dst_ip, request, now))
-    ng.db.connection.commit()
-    ng.db.database_lock.release()
-    debugger.debug('inserted into arplog')
+    db.lock.acquire()
+    db.cursor.execute("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)", (src_mac, src_ip, dst_mac, dst_ip, request, now))
+    db.connection.commit()
+    db.lock.release()
+    debugger.debug("inserted into arplog")
 
     # @TODO Research and see if we should be treating these another way.
-    if (src_ip == '0.0.0.0' or src_mac == ng.BROADCAST):
-        debugger.info('Ignoring IP source of %s [%s], dst %s [%s]', src_ip, src_mac, dst_ip, dst_mac);
+    if (src_ip == "0.0.0.0" or src_mac == BROADCAST):
+        debugger.info("Ignoring IP source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac));
         return False
 
     # Check if we've seen this IP, MAC pair before.
     active, lastSeen, lastRequested, counter, sid, did, changed_ip = [False, False, False, 0, 0, 0, False]
-    debugger.debug('ip_seen query 1')
-    ng.db.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, src_mac))
-    result = ng.db.cursor.fetchone()
+    debugger.debug("ip_seen query 1")
+    db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, src_mac))
+    result = db.cursor.fetchone()
     if result:
         active, lastSeen, lastRequested, counter, sid, did = result
 
@@ -287,123 +268,130 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         # In the event of the same IP and a different hostname, we treat this like a different device
         # (though it's likely a vm, jail, or alias). @TODO Revisit this.
         hostname = dns_lookup(src_ip)
-        debugger.debug('ip_seen query 2')
-        ng.db.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
-        result = ng.db.cursor.fetchone()
+        debugger.debug("ip_seen query 2")
+        db.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
+        result = db.cursor.fetchone()
         if result:
             active, lastSeen, lastRequested, counter, sid, did = result
             changed_ip = True
 
     if not result:
         # Check if we've seen this IP be requested before.
-        debugger.debug('ip_seen query 3')
-        ng.db.cursor.execute('SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1', (src_ip, ng.BROADCAST))
-        result = ng.db.cursor.fetchone()
+        debugger.debug("ip_seen query 3")
+        db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, BROADCAST))
+        result = db.cursor.fetchone()
         if result:
             active, lastSeen, lastRequested, counter, sid, did = result
 
-    ng.db.database_lock.acquire()
-    log_event(src_ip, src_mac, ng.EVENT_SEEN)
+    db.lock.acquire()
+    log_event(src_ip, src_mac, EVENT_SEEN)
     if changed_ip:
-        log_event(src_ip, src_mac, ng.EVENT_CHANGED_IP)
-        debugger.info('[%d] (%s) has a new ip [%s]', did, src_mac, src_ip)
+        log_event(src_ip, src_mac, EVENT_CHANGED_IP)
+        debugger.info("[%s] (%s) has a new ip [%s]", (did, src_mac, src_ip))
     if active:
         if lastSeen:
             # has been active recently
-            debugger.debug('%s (%s) is active', src_ip, src_mac)
-            ng.db.cursor.execute('UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, counter + 1, sid))
+            debugger.debug("%s (%s) is active", (src_ip, src_mac))
+            db.cursor.execute("UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, counter + 1, sid))
         else:
             # has not been active recently, but was requested recently
             if first_seen(src_ip, src_mac):
                 # First time we've seen IP since it was stale.
-                log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
+                log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                 lastSeen = last_seen(src_ip, src_mac)
                 if lastSeen:
                     timeSince = datetime.datetime.now() - lastSeen
-                    debugger.info('[%d] %s (%s) is active again (after %s)', did, src_ip, src_mac, timeSince)
+                    debugger.info("[%s] %s (%s) is active again (after %s)", (did, src_ip, src_mac, timeSince))
                 else:
                     logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_ip, src_mac)))
             else:
                 # First time we've actively seen this IP.
-                log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
-                log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-                debugger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
+                log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
+                log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
+                debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
 
             # @TODO properly handle multiple active occurences of the same IP
-            ng.db.cursor.execute('UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?', (src_ip, src_mac, now, now, counter + 1, sid))
+            db.cursor.execute("UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, now, counter + 1, sid))
     else:
         if did:
             # First time we've seen this IP recently.
-            log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-            debugger.info('[%d] %s (%s) is active, first time seeing recently', did, src_ip, src_mac)
+            log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
+            debugger.info("[%s] %s (%s) is active, first time seeing recently", (did, src_ip, src_mac))
         else:
             # First time we've seen this IP.
-            ng.db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
-            row = fetchone()
+            db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
+            row = db.cursor.fetchone()
             if row:
-                did = row
+                did = row[0]
             else:
                 did = 1
-            log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST)
-            log_event(src_ip, src_mac, ng.EVENT_SEEN_FIRST_RECENT)
-            debugger.info('[%d] %s (%s) is active, first time seeing', did, src_ip, src_mac)
+            if not did:
+                debugg.debug('Did was None, setting to 1')
+                did = 1
+            log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
+            log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
+            debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
         # BUG HERE - one of these variables isn't available?
-        ng.db.cursor.execute('INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)', (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
-    ng.db.connection.commit()
-    ng.db.database_lock.release()
+        db.cursor.execute("INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
+    db.connection.commit()
+    db.lock.release()
 
 def ip_request(ip, mac, src_ip, src_mac):
-    debugger.debug('entering ip_request(%s, %s, %s, %s)', ip, mac, src_ip, src_mac)
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
+    debugger.debug("entering ip_request(%s, %s, %s, %s)", (ip, mac, src_ip, src_mac))
     now = datetime.datetime.now()
 
     if ((ip == src_ip) or (mac == src_mac)):
-        debugger.debug('requesting self, ignoring')
+        debugger.debug("requesting self, ignoring")
         return
 
     active = False
     lastRequested = False
-    ng.db.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, mac))
-    requested = ng.db.cursor.fetchone()
+    db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1", (ip, mac))
+    requested = db.cursor.fetchone()
     if requested:
         active = requested[0]
         lastRequested = requested[1]
         sid = requested[2]
     else:
-        if (mac == ng.BROADCAST):
+        if (mac == BROADCAST):
             # Maybe we already have seen a request for this address
-            ng.db.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1', (ip, ng.BROADCAST))
-            requested = ng.db.cursor.fetchone()
+            db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1", (ip, BROADCAST))
+            requested = db.cursor.fetchone()
             if requested:
                 active = requested[0]
                 lastRequested = requested[1]
                 sid = requested[2]
             else:
                 # Maybe the IP has been seen already
-                ng.db.cursor.execute('SELECT active, lastRequested, sid FROM seen WHERE ip=? AND active=1', (ip,))
-                requested = ng.db.cursor.fetchone()
+                db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE ip=? AND active=1", (ip,))
+                requested = db.cursor.fetchone()
                 if requested:
                     active = requested[0]
                     lastRequested = requested[1]
                     sid = requested[2]
 
-    ng.database_lock.acquire()
-    log_event(ip, mac, ng.EVENT_REQUESTED)
+    db.lock.acquire()
+    log_event(ip, mac, EVENT_REQUESTED)
     if active:
         # Update:
-        ng.db.cursor.execute('UPDATE seen set lastRequested=? WHERE sid=?', (now, sid))
-        debugger.debug('%s (%s) requested', ip, mac)
+        db.cursor.execute("UPDATE seen set lastRequested=? WHERE sid=?", (now, sid))
+        debugger.debug("%s (%s) requested", (ip, mac))
     else:
         # First time we've seen a request for this IP.
-        log_event(ip, mac, ng.EVENT_REQUESTED_FIRST)
-        ng.db.cursor.execute("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)", (mac, ip, now, now, ip_is_mine(ip)))
-        debugger.info('%s (%s) requested, first time seeing', ip, mac)
-    ng.db.connection.commit()
-    ng.database_lock.release()
+        log_event(ip, mac, EVENT_REQUESTED_FIRST)
+        db.cursor.execute("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)", (mac, ip, now, now, ip_is_mine(ip)))
+        debugger.info("%s (%s) requested, first time seeing", (ip, mac))
+    db.connection.commit()
+    db.lock.release()
 
 # Assumes we already have the database lock.
 def log_event(ip, mac, event):
+    debug.debugger_instance.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
     now = datetime.datetime.now()
-    ng.db.connection.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)', (mac, ip, now, 0, event))
+    database.database_instance.connection.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)', (mac, ip, now, 0, event))
 
 def ip_is_mine(ip):
     import socket
@@ -530,24 +518,33 @@ def update_database(db, debugger):
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
     import socket
+    import struct
+    import dpkt
 
     debugger = debug.debugger_instance
 
+    packet = dpkt.ethernet.Ethernet(data)
     try:
-        packet = dpkt.ethernet.Ethernet(data)
         src_ip = socket.inet_ntoa(packet.data.spa)
         src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
         dst_ip = socket.inet_ntoa(packet.data.tpa)
         dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
-        if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-            debugger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+    except Exception as e:
+        debugger.error("received_arp 1 FIXME: %s", (e,))
+
+    if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
+        try:
+            debugger.debug('ARP request from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
             ip_request(dst_ip, dst_mac, src_ip, src_mac)
-        elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+        except Exception as e:
+            debugger.error("received_arp 2 FIXME: %s", (e,))
+    elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+        try:
+            debugger.debug('ARP reply from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
-            debugger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
-    except Exception as e:
-        debugger.Error("FIXME: %s", (e,))
+        except Exception as e:
+            debugger.error("received_arp 3 FIXME: %s", (e,))
 
 def pretty_date(time):
     if not time:
@@ -585,15 +582,18 @@ def pretty_date(time):
 
 # Determine appropriate device id for IP, MAC pair.
 def get_did(ip, mac):
-    ng.database.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, mac))
-    did = ng.database.cursor.fetchone()
+    debug.debugger_instance.debug("entering get_did(%s, %s)", (ip, mac))
+    db = database.datanase_instance()
+
+    db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, mac))
+    did = db.cursor.fetchone()
     if not did:
         hostname = dns_lookup(ip)
-        ng.database.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
-        did = ng.database.cursor.fetchone()
+        db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
+        did = db.cursor.fetchone()
     if not did:
-        ng.database.cursor.execute('SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1', (ip, ng.BROADCAST,))
-        did = ng.database.cursor.fetchone()
+        db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
+        did = db.cursor.fetchone()
 
     if did:
         return did[0]
@@ -601,54 +601,72 @@ def get_did(ip, mac):
         return False
 
 def first_seen(ip, mac):
+    debug.debugger_instance.debug("entering first_seen(%s, %s)", (ip, mac))
+    db = database.datanase_instance()
+
     did = get_did(ip, mac)
-    ng.database.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1', (did,))
-    active = ng.database.cursor.fetchone()
+    db.cursor.execute("SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1", (did,))
+    active = db.cursor.fetchone()
     if active:
         return active[0]
     else:
         return False
 
 def first_seen_recently(ip, mac):
+    debug.debugger_instance.debug("entering last_seen_recently(%s, %s)", (ip, mac))
+    db = database.datanase_instance()
+
     did = get_did(ip, mac)
-    ng.database.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
-    recent = ng.database.cursor.fetchone()
+    db.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
+    recent = db.cursor.fetchone()
     if recent:
         return recent[0]
     else:
         return False
 
 def last_seen(ip, mac):
+    debug.debugger_instance.debug("entering last_seen(%s, %s)", (ip, mac))
+    db = database.datanase_instance()
+
     did = get_did(ip, mac)
-    ng.database.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
-    active = ng.database.cursor.fetchone()
+    db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
+    active = db.cursor.fetchone()
     if active:
         return active[0]
     else:
         return False
 
 def previously_seen(ip, mac):
+    debug.debugger_instance.debug("entering previously_seen(%s, %s)", (ip, mac))
+    db = database.datanase_instance()
+
     did = get_did(ip, mac)
-    ng.database.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
-    previous = ng.database.cursor.fetchone()
+    db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
+    previous = db.cursor.fetchone()
     if previous:
         return previous[0]
     else:
         return False
 
 def first_requested(ip, mac):
+    debug.debugger_instance.debug("entering first_requested(%s, %s)", (ip, mac))
+    db = database.datanase_instance()
+
     did = get_did(ip, mac)
-    ng.database.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
-    active = ng.database.cursor.fetchone()
+    db.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
+    active = db.cursor.fetchone()
     if active:
         return active[0]
     else:
         return False
 
 def last_requested(ip, mac):
+    debug.debugger_instance.debug("entering last_requested(%s, %s)", (ip, mac))
+    db = database.datanase_instance()
+
     did = get_did(ip, mac)
-    ng.database.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
-    last = ng.database.cursor.fetchone()
+    db.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
+    last = db.cursor.fetchone()
     if last:
         return last[0]
     else:
@@ -671,7 +689,7 @@ def detect_stale_ips(debugger, db, timeout):
         else:
             timeActive = "unknown"
         log_event(ip, mac, EVENT_STALE)
-        debugger.info("%s [%s] is no longer active (was active for %s)", ip, mac, timeActive)
+        debugger.info("%s [%s] is no longer active (was active for %s)", (ip, mac, timeActive))
         db.cursor.execute("UPDATE seen SET active = 0 WHERE sid=?", (sid,))
 
     if rows:
@@ -693,7 +711,7 @@ def detect_netscans(debugger, db):
         already_detected = db.cursor.fetchone()
         if not already_detected:
             db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (src_mac, src_ip, now, EVENT_SCAN))
-            debugger.info("Detected network scan by %s [%s]", src_ip, src_mac)
+            debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
     if scans:
         db.connection.commit()
         db.lock.release()
@@ -718,7 +736,7 @@ def detect_anomalies(debugger, db, timeout):
             already_detected = db.cursor.fetchone()
             if not already_detected:
                 db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, EVENT_DUPLICATE_IP))
-                debugger.info("Detected multiple MACs with same IP %s [%s]", ip, mac)
+                debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
     if duplicates:
         db.connection.commit()
         db.lock.release()
@@ -738,7 +756,7 @@ def detect_anomalies(debugger, db, timeout):
             already_detected = db.cursor.fetchone()
             if not already_detected:
                 db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, EVENT_DUPLICATE_MAC))
-                debugger.info("Detected multiple IPs with same MAC %s [%s]", ip, mac)
+                debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
     if duplicates:
         db.connection.commit()
         db.lock.release()
@@ -755,7 +773,7 @@ def send_notifications(debugger, db, notify):
         return False
 
     import ntfy
-    timer = Timer()
+    timer = simple_timer.Timer()
 
     day = datetime.datetime.now() - datetime.timedelta(days=1)
     db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notify.alerts)) + ")", notify.alerts)
@@ -776,16 +794,16 @@ def send_notifications(debugger, db, notify):
             db.lock.release()
             if (timer.elapsed() > MAXSECONDS):
                 # We've been processing notifications too long, quit for now and come back later.
-                debugger.debug("processing notifications >%d seconds, quitting for now", MAXSECONDS)
+                debugger.debug("processing notifications >%d seconds, quitting for now", (MAXSECONDS,))
                 return
             counter = 0
             db.lock.acquire()
 
-        debugger.debug("processing event %d for %s [%s] at %s", eid, ip, mac, timestamp)
+        debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
 
         # only send notifications for configured events
         if event in notify.alerts:
-            debugger.info("event %s [%d] in %s, generating notification alert", event, eid, notify.alerts)
+            debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notify.alerts))
             firstSeen = first_seen(ip, mac)
             lastSeen = first_seen_recently(ip, mac)
             previouslySeen = previously_seen(ip, mac)
@@ -794,7 +812,7 @@ def send_notifications(debugger, db, notify):
             ntfy.notify(body, title)
             notify.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
         else:
-            debugger.debug("event %s [%d] NOT in %s", event, eid, notify.alerts)
+            debugger.debug("event %s [%d] NOT in %s", (event, eid, notify.alerts))
     if rows:
         db.connection.commit()
         db.lock.release()
@@ -812,7 +830,7 @@ def send_email_alerts(debugger, db, email):
 
     day = datetime.datetime.now() - datetime.timedelta(days=1)
 
-    timer = Timer()
+    timer = simple_timer.Timer()
 
     db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)");
     rows = db.cursor.fetchall()
@@ -895,7 +913,7 @@ def identify_macs(debugger, db):
                     piece = "0"+piece
                 mac.append(piece)
             mac = ":".join(mac)
-        debugger.debug("Looking up vendor for %s [%s]", ip, raw_mac)
+        debugger.debug("Looking up vendor for %s [%s]", (ip, raw_mac))
         http = httplib.HTTPConnection("api.macvendors.com", 80)
         url = """/%s""" % mac
         http.request("GET", url)
@@ -903,10 +921,10 @@ def identify_macs(debugger, db):
         ng.db.lock.acquire()
         if response.status == 200 and response.reason == "OK":
             vendor = response.read()
-            debugger.info("Identified %s [%s] as %s", ip, raw_mac, vendor)
+            debugger.info("Identified %s [%s] as %s", (ip, raw_mac, vendor))
             db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, ?)", (raw_mac, vendor))
         else:
-            debugger.info("Failed identify vendor for [%s]", raw_mac)
+            debugger.info("Failed identify vendor for [%s]", (raw_mac,))
             db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
         db.connection.commit()
         db.lock.release()
@@ -923,6 +941,9 @@ def identify_macs(debugger, db):
 
 def dns_lookup(ip):
     import socket
+
+    debugger = debug.debugger_instance
+
     debugger.debug("entering gethostbyaddr(%s)", (ip,))
     try:
         hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
@@ -935,8 +956,10 @@ def dns_lookup(ip):
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
-    debugger.debug('entering name_ip(%s, %s)', (mac, ip))
-    if (mac == ng.BROADCAST):
+    debugger = debug.debugger_instance
+
+    debugger.debug("entering name_ip(%s, %s)", (mac, ip))
+    if (mac == BROADCAST):
         db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
     else:
         db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
@@ -945,7 +968,7 @@ def name_ip(mac, ip):
         return detail
     if detail[2]:
         return detail[2]
-    elif detail[3] and (detail[3] != 'unknown'):
+    elif detail[3] and (detail[3] != "unknown"):
         return detail[3]
     elif detail[4]:
         return detail[4]
@@ -965,7 +988,7 @@ def send_email_digests(debugger, db, email):
         debugger.debug("no digests configured")
         return False
 
-    timer = Timer()
+    timer = simple_timer.Timer()
     now = datetime.datetime.now()
 
     digests = ["daily", "weekly"]
@@ -1178,7 +1201,7 @@ def _init(verbose, daemonize):
         debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
     else:
         logger.setLevel(configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
-    debugger.info('loaded configuration file: %s', configuration.found)
+    debugger.info('loaded configuration file: %s', (configuration.found,))
 
     if not daemonize:
         debugger.warning("Output forced to stderr, started with --foreground flag.")
@@ -1193,25 +1216,25 @@ def start():
     keep_fds=[ng.debugger.handler.stream.fileno()]
 
     if os.getuid() != 0:
-        ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", ng.debugger.whoami())
+        ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
 
     try:
         import sqlite3
     except Exception as e:
-        ng.debugger.error("fatal exception: %s", e)
+        ng.debugger.error("fatal exception: %s", (e,))
         ng.debugger.critical("failed to import sqlite3 (as user %s), try 'pip install sqlite3', exiting", (ng.debugger.whoami()))
     ng.debugger.info("successfuly imported sqlite3")
     try:
         import dpkt
     except Exception as e:
-        ng.debugger.error("fatal exception: %s", e)
+        ng.debugger.error("fatal exception: %s", (e,))
         ng.debugger.critical("failed to import dpkt (as user %s), try 'pip install dpkt', exiting", (ng.debugger.whoami()))
     ng.debugger.info("successfuly imported dpkt")
     if ng.daemonize:
         try:
             import daemonize
         except Exception as e:
-            ng.debugger.error("fatal exception: %s", e)
+            ng.debugger.error("fatal exception: %s", (e,))
             ng.debugger.critical("failed to import daemonize (as user %s), try 'pip install daemonize', exiting", (ng.debugger.whoami()))
         ng.debugger.info("successfuly imported daemonize")
 
