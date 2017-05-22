@@ -3,6 +3,8 @@ from netgrasp.utils import debug
 import ConfigParser
 import sys
 
+config_instance = None
+
 class Config:
     def __init__(self, debugger):
         self.parser = ConfigParser.ConfigParser()

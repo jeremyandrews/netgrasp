@@ -22,6 +22,8 @@ CRITICAL = (logging.CRITICAL, ALWAYS, FATAL)
 PRINT    = 0
 FILE     = 1
 
+debugger_instance = None
+
 # mode: PRINT or FILE
 class Debugger:
     def __init__(self, verbose = False, logger = None, mode = PRINT, level = logging.CRITICAL):

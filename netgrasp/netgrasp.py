@@ -3,7 +3,7 @@ from utils import exclusive_lock
 from utils import email
 from config import config
 from notify import notify
-from db import db
+from database import database
 
 import logging
 import logging.handlers
@@ -17,10 +17,11 @@ import datetime
 #import ConfigParser
 #import io
 #import struct
-#import socket
 #from email.utils import parseaddr
 
 import time
+
+netgrasp_instance = None
 
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
@@ -62,28 +63,6 @@ class Netgrasp:
         else:
             self.config = DEFAULT_CONFIG
 
-    class Notification:
-        def __init__(self):
-            self.enabled = ng.config_instance.GetBoolean('Notifications', 'enabled', False, False)
-            if not self.enabled:
-                logger.warning('notifications are disabled')
-                return
-
-            self.alerts = []
-            alerts = ng.config_instance.GetTextList('Notifications', 'alerts', None, False)
-            for alert in alerts:
-                if alert in ng.ALERT_TYPES:
-                    self.alerts.append(alert)
-                else:
-                    logger.warn("ignoring unrecognized alert type (%s), supported types: %s", alert, ng.ALERT_TYPES)
-
-            try:
-                import ntfy
-            except Exception as e:
-                logger.critical("fatal exception: %s", e)
-                logger.critical("failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts, exiting.", ng.whoami())
-                sys.exit("""Fatal error: failed to import ntfy (as user %s), try: 'pip install ntfy' or disable [Notification] alerts.""" % (ng.whoami()))
-
     # Drop root permissions when no longer needed.
     def drop_root(self, ng):
         import grp
@@ -91,23 +70,6 @@ class Netgrasp:
         os.setgid(grp.getgrnam(self.config.GetText('Security', 'group', DEFAULT_GROUP, False)).gr_gid)
         os.setuid(pwd.getpwnam(self.config.GetText('Security', 'user', DEFAULT_USER, False)).pw_uid)
         ng.debugger.info('running as user %s',  (self.debugger.whoami(),))
-
-class ExclusiveFileLock:
-    def __init__(self, lockfile):
-        self.lockfile = lockfile
-        # Create the lockfile if it doesn't already exist.
-        self.handle = open(lockfile, 'w')
-
-    # Acquire exclusive, blocking lock.
-    def acquire(self):
-        fcntl.flock(self.handle, fcntl.LOCK_EX)
-
-    # Release exclusive, blocking lock.
-    def release(self):
-        fcntl.flock(self.handle, fcntl.LOCK_UN)
-
-    def __del__(self):
-        self.handle.close()
 
 class Timer:
     def __init__(self):
@@ -143,12 +105,13 @@ def main(ng, *pcap):
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
     parent_conn, child_conn = multiprocessing.Pipe()
-    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[pc, child_conn])
+    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[pc, child_conn, ng._database_lock])
     child.daemon = True
     child.start()
 
     try:
-        ng.db = db.DB(ng.database_filename, ng.debugger)
+        ng.db = database.Database(ng.database_filename, ng.debugger)
+        database.database_instance = ng.db
     except Exception as e:
         ng.debugger.critical("%s", (e,))
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
@@ -209,69 +172,71 @@ def main(ng, *pcap):
 
 def get_pcap():
     import sys
+    import socket
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
 
     try:
         import pcap
     except Exception as e:
-        print """fatal exception: %s""" % e
-        sys.exit("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
+        debug.debugger.error("fatal exception: %s", (e,))
+        debug.debugger.critical("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
 
     devices = pcap.findalldevs()
     if len(devices) <= 0:
-      sys.exit("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
+      debug.debugger.critical("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
 
-    #interface = ng.config_instance.GetText('Listen', 'interface', devices[0], False)
-    interface = 'en0'
+    interface = config.config_instance.GetText('Listen', 'interface', devices[0], False)
     local_net, local_mask = pcap.lookupnet(interface)
 
     try:
         pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
         pc.setfilter('arp')
     except Exception as e:
-        sys.exit("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
+        debug.debugger.critical("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
-    #logger.warning('listening for arp traffic on %s: %s/%s', interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask))
+    debug.debugger_instance.warning("listening for arp traffic on %s: %s/%s", (interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask)))
     return [pc]
 
 # Child process: wiretap, uses pcap to sniff arp packets.
-def wiretap(pc, child_conn):
+def wiretap(pc, child_conn, database_lock):
     import sys
 
-    if ng.daemonize:
+    debugger = debug.debugger_instance
+
+    if netgrasp_instance.daemonize:
         # We use a lock file when daemonized, as this allows netgraspctl to coordinate
         # with the daemon. Over-write the master-process handler with our own.
-        ng.database_lock = ExclusiveFileLock(ng.config_instance.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False))
+        database_lock = ExclusiveFileLock(config.config_instance.GetText("Database", "lockfile", DEFAULT_DBLOCK, False))
 
     try:
         import dpkt
     except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
-        sys.exit("Fatal error: failed to import dpkt, try: 'pip install dpkt', exiting")
+        debugger.error("fatal exception: %s", (e,))
+        debugger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
     try:
+
         import pcap
     except Exception as e:
-        logger.critical("fatal exception: %s", e)
-        logger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
-        sys.exit("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
+        debugger.error("fatal exception: %s", (e,))
+        debugger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
 
-    assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
+    assert (os.getuid() != 0) and (os.getgid() != 0), "Failed to drop root privileges, aborting."
+
+    database_filename = config.config_instance.GetText("Database", "filename")
 
     try:
-        ng.db = db.DB(ng.database_filename, ng.debugger)
+        db = database.Database(database_filename, debugger)
     except Exception as e:
-        logger.critical("%s", (e))
-        logger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
-        sys.exit("""Fatal error: failed to open or create database file %s (as user %s).""" % (ng.database_filename, ng.whoami()))
-    debugger.info('opened %s as user %s', ng.database_filename, ng.whoami());
-    ng.db.cursor = ng.db.connection.cursor()
+        debugger.error("%s", (e,))
+        debugger.critical("failed to open or create %s (as user %s), exiting", (database_filename, logger.whoami()))
+    debugger.info("opened %s as user %s", (database_filename, debugger.whoami()));
+    db.cursor = db.connection.cursor()
 
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
         now = datetime.datetime.now()
-        debugger.debug('[%d] top of while loop: %s', run, now)
+        debugger.debug("[%d] top of while loop: %s", (run, now))
 
         child_conn.send(HEARTBEAT)
 
@@ -282,7 +247,7 @@ def wiretap(pc, child_conn):
                 heartbeat = True
         # It's possible to receive multiple heartbeats, but many or one is the same to us.
         if heartbeat:
-            debugger.debug('received heartbeat from main process')
+            debugger.debug("received heartbeat from main process")
             last_heartbeat = now
 
         # Wait an arp packet, then loop again.
@@ -292,7 +257,7 @@ def wiretap(pc, child_conn):
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
         if (now >= time_to_exit):
             run = False
-    logger.critical('No heartbeats from main process for >1 minute, exiting.')
+    debugger.critical("No heartbeats from main process for >1 minute, exiting.")
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     debugger.debug('entering ip_seen(%s, %s, %s, %s, %d)', src_ip, src_mac, dst_ip, dst_mac, request)
@@ -441,6 +406,7 @@ def log_event(ip, mac, event):
     ng.db.connection.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)', (mac, ip, now, 0, event))
 
 def ip_is_mine(ip):
+    import socket
     return (ip == socket.gethostbyname(socket.gethostname()))
 
 # Database definitions.
@@ -563,18 +529,25 @@ def update_database(db, debugger):
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
-    packet = dpkt.ethernet.Ethernet(data)
-    src_ip = socket.inet_ntoa(packet.data.spa)
-    src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
-    dst_ip = socket.inet_ntoa(packet.data.tpa)
-    dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
-    if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-        debugger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
-        ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
-        ip_request(dst_ip, dst_mac, src_ip, src_mac)
-    elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-        ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
-        debugger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+    import socket
+
+    debugger = debug.debugger_instance
+
+    try:
+        packet = dpkt.ethernet.Ethernet(data)
+        src_ip = socket.inet_ntoa(packet.data.spa)
+        src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
+        dst_ip = socket.inet_ntoa(packet.data.tpa)
+        dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
+        if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
+            debugger.debug('ARP request from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+            ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
+            ip_request(dst_ip, dst_mac, src_ip, src_mac)
+        elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+            ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
+            debugger.debug('ARP reply from %s (%s) to %s (%s)', src_ip, src_mac, dst_ip, dst_mac)
+    except Exception as e:
+        debugger.Error("FIXME: %s", (e,))
 
 def pretty_date(time):
     if not time:
@@ -949,6 +922,7 @@ def identify_macs(debugger, db):
         db.lock.release()
 
 def dns_lookup(ip):
+    import socket
     debugger.debug("entering gethostbyaddr(%s)", (ip,))
     try:
         hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
@@ -1170,40 +1144,53 @@ def garbage_collection(debugger, db, config):
 #################
 #################
 
-def start(ng):
+def _init(verbose, daemonize):
+    import logging
+
     # Get a logger and config parser.
     logger = logging.getLogger(__name__)
     formatter = logging.Formatter(DEFAULT_LOGFORMAT)
+
     if os.getuid() != 0:
         # We're going to fail, so write to stderr.
-        ng.debugger = debug.Debugger()
+        debugger = debug.Debugger()
     else:
-        ng.debugger = debug.Debugger(ng.verbose, logger, debug.FILE)
-    ng.config = config.Config(ng.debugger)
+        debugger = debug.Debugger(verbose, logger, debug.FILE)
+    configuration = config.Config(debugger)
+
+    debug.debugger_instance = debugger
+    config.config_instance = configuration
 
     # Start logger, reading relevant configuration.
-    if ng.daemonize:
+    if daemonize:
         try:
-            handler = logging.FileHandler(ng.config.GetText('Logging', 'filename', DEFAULT_LOGFILE))
+            debugger.handler = logging.FileHandler(configuration.GetText('Logging', 'filename', DEFAULT_LOGFILE))
         except Exception as e:
-            ng.debugger.critical("Fatal exception setting up log handler: %s", (e,))
+            debugger.critical("Fatal exception setting up log handler: %s", (e,))
     else:
-        handler = logging.StreamHandler()
+        debugger.handler = logging.StreamHandler()
 
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    debugger.handler.setFormatter(formatter)
+    logger.addHandler(debugger.handler)
 
-    if ng.verbose:
-        ng.debugger.setLevel(logging.DEBUG)
-        ng.debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
+    if verbose:
+        debugger.setLevel(logging.DEBUG)
+        debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
     else:
-        logger.setLevel(ng.config.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
-    ng.debugger.info('loaded configuration file: %s', ng.config.found)
+        logger.setLevel(configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
+    debugger.info('loaded configuration file: %s', configuration.found)
 
-    if not ng.daemonize:
-        ng.debugger.warning("Output forced to stderr, started with --foreground flag.")
+    if not daemonize:
+        debugger.warning("Output forced to stderr, started with --foreground flag.")
 
-    keep_fds=[handler.stream.fileno()]
+    return (debugger, configuration)
+    
+
+def start():
+    ng = netgrasp_instance
+    ng.debugger, ng.config = _init(ng.verbose, ng.daemonize)
+
+    keep_fds=[ng.debugger.handler.stream.fileno()]
 
     if os.getuid() != 0:
         ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", ng.debugger.whoami())
@@ -1237,7 +1224,7 @@ def start(ng):
         username = ng.config.GetText('Security', 'user', DEFAULT_USER, False)
         groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
         try:
-            daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=logger, verbose=True)
+            daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=debugger.logger, verbose=True)
             daemon.start()
         except Exception as e:
             ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))

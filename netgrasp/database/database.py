@@ -1,6 +1,8 @@
 from netgrasp.utils import debug
 
-class DB:
+database_instance = None
+
+class Database:
     def __init__(self, filename, debugger):
         self.file = filename
         self.debugger = debugger
