@@ -62,14 +62,18 @@ MAXPROCESS = 100
 MAXSECONDS = 5
 
 # This is our main program loop.
-def main(ng, *pcap):
+def main(*pcap):
+    import netgrasp
     import multiprocessing
+
+    ng = netgrasp.netgrasp_instance
+
     ng.debugger.info("main process running as user %s", (ng.debugger.whoami(),))
 
     if pcap:
         # We have daemonized and are not running as root.
         pc = pcap[0]
-        ng._database_lock = ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False))
+        ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False))
     else:
         # We are running in the foreground as root.
         pcap = get_pcap()
@@ -80,10 +84,12 @@ def main(ng, *pcap):
     # At this point we should no longer have/need root privileges.
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
+    ng.debugger.info("initiating wiretap process")
     parent_conn, child_conn = multiprocessing.Pipe()
-    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[pc, child_conn, ng._database_lock])
+    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[pc, child_conn])
     child.daemon = True
     child.start()
+    ng.debugger.info("initiated wiretap process")
 
     try:
         ng.db = database.Database(ng.database_filename, ng.debugger)
@@ -130,19 +136,63 @@ def main(ng, *pcap):
             ng.debugger.debug("received heartbeat from wiretap process")
             last_heartbeat = now
 
+        ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
+        time.sleep(ng.delay)
         try:
-            ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
-            time.sleep(ng.delay)
             identify_macs()
+        except Exception as e:
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME identify_macs(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
+        try:
             detect_stale_ips(ng.active_timeout)
+        except Exception as e:
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME detect_stale_ips(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
+        try:
             detect_netscans()
+        except Exception as e:
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME detect_netscans(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
+        try:
             detect_anomalies(ng.active_timeout)
+        except Exception as e:
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME detect_anomalies(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
+        try:
             send_notifications()
+        except Exception as e:
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME send_notifications(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
+        try:
             send_email_alerts()
+        except Exception as e:
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME send_email_alerts(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
+        try:
             send_email_digests()
+        except Exception as e:
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME send_email_digests(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+
+        try:
             garbage_collection(ng.garbage_collection, ng.oldest_arplog, ng.oldest_event)
         except Exception as e:
-            ng.debugger.error("FIXME: %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            ng.debugger.error("FIXME garbage_collection(): %s", (e,))
+            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
         # If we haven't heard from the wiretap process in >1 minute, exit.
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
@@ -178,47 +228,45 @@ def get_pcap():
     return [pc]
 
 # Child process: wiretap, uses pcap to sniff arp packets.
-def wiretap(pc, child_conn, _database_lock):
+def wiretap(pc, child_conn):
     import sys
-
-    debugger = debug.debugger_instance
 
     if netgrasp_instance.daemonize:
         # We use a lock file when daemonized, as this allows netgraspctl to coordinate
         # with the daemon. Over-write the master-process handler with our own.
-        _database_lock = ExclusiveFileLock(config.config_instance.GetText("Database", "lockfile", DEFAULT_DBLOCK, False))
+        netgrasp_instance._database_lock = ExclusiveFileLock(config.config_instance.GetText("Database", "lockfile", DEFAULT_DBLOCK, False))
 
     try:
         import dpkt
     except Exception as e:
-        debugger.error("fatal exception: %s", (e,))
-        debugger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
+        netgrasp_instance.debugger.error("fatal exception: %s", (e,))
+        netgrasp_instance.debugger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
     try:
 
         import pcap
     except Exception as e:
-        debugger.error("fatal exception: %s", (e,))
-        debugger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
+        netgrasp_instance.debugger.error("fatal exception: %s", (e,))
+        netgrasp_instance.debugger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
 
     assert (os.getuid() != 0) and (os.getgid() != 0), "Failed to drop root privileges, aborting."
 
     database_filename = config.config_instance.GetText("Database", "filename")
 
     try:
-        db = database.Database(database_filename, debugger)
+        db = database.Database(database_filename, netgrasp_instance.debugger)
     except Exception as e:
-        debugger.error("%s", (e,))
-        debugger.critical("failed to open or create %s (as user %s), exiting", (database_filename, logger.whoami()))
-    debugger.info("opened %s as user %s", (database_filename, debugger.whoami()));
+        netgrasp_instance.debugger.error("%s", (e,))
+        netgrasp_instance.debugger.critical("failed to open or create %s (as user %s), exiting", (database_filename, logger.whoami()))
+    netgrasp_instance.debugger.info("opened %s as user %s", (database_filename, netgrasp_instance.debugger.whoami()));
     db.cursor = db.connection.cursor()
-    db.lock = _database_lock
+    db.lock = netgrasp_instance._database_lock
     database.database_instance = db
 
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
         now = datetime.datetime.now()
-        debugger.debug("[%d] top of while loop: %s", (run, now))
+        netgrasp_instance.debugger.debug("[%d] top of while loop: %s", (run, now))
 
         child_conn.send(HEARTBEAT)
 
@@ -229,7 +277,7 @@ def wiretap(pc, child_conn, _database_lock):
                 heartbeat = True
         # It's possible to receive multiple heartbeats, but many or one is the same to us.
         if heartbeat:
-            debugger.debug("received heartbeat from main process")
+            netgrasp_instance.debugger.debug("received heartbeat from main process")
             last_heartbeat = now
 
         # Wait an arp packet, then loop again.
@@ -239,13 +287,16 @@ def wiretap(pc, child_conn, _database_lock):
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
         if (now >= time_to_exit):
             run = False
-    debugger.critical("No heartbeats from main process for >1 minute, exiting.")
+    netgrasp_instance.debugger.critical("No heartbeats from main process for >1 minute, exiting.")
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
+    import datetime
+
     debugger = debug.debugger_instance
     db = database.database_instance
 
     debugger.debug("entering ip_seen(%s, %s, %s, %s, %d)", (src_ip, src_mac, dst_ip, dst_mac, request))
+
     now = datetime.datetime.now()
 
     db.lock.acquire()
@@ -341,6 +392,8 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     db.lock.release()
 
 def ip_request(ip, mac, src_ip, src_mac):
+    import datetime
+
     debugger = debug.debugger_instance
     db = database.database_instance
 
@@ -353,29 +406,23 @@ def ip_request(ip, mac, src_ip, src_mac):
 
     active = False
     lastRequested = False
-    db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1", (ip, mac))
+    db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, mac))
     requested = db.cursor.fetchone()
     if requested:
-        active = requested[0]
-        lastRequested = requested[1]
-        sid = requested[2]
+        active, lastRequested, sid, did = requested
     else:
         if (mac == BROADCAST):
             # Maybe we already have seen a request for this address
-            db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE ip=? AND mac=? AND active=1", (ip, BROADCAST))
+            db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, BROADCAST))
             requested = db.cursor.fetchone()
             if requested:
-                active = requested[0]
-                lastRequested = requested[1]
-                sid = requested[2]
+                active, lastRequested, sid, did = requested
             else:
                 # Maybe the IP has been seen already
-                db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE ip=? AND active=1", (ip,))
+                db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND active=1", (ip,))
                 requested = db.cursor.fetchone()
                 if requested:
-                    active = requested[0]
-                    lastRequested = requested[1]
-                    sid = requested[2]
+                    active, lastRequested, sid, did = requested
 
     db.lock.acquire()
     log_event(ip, mac, EVENT_REQUESTED)
@@ -386,13 +433,15 @@ def ip_request(ip, mac, src_ip, src_mac):
     else:
         # First time we've seen a request for this IP.
         log_event(ip, mac, EVENT_REQUESTED_FIRST)
-        db.cursor.execute("INSERT INTO seen (mac, ip, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, 1, 1, ?)", (mac, ip, now, now, ip_is_mine(ip)))
+        db.cursor.execute("INSERT INTO seen (mac, ip, did, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (mac, ip, get_did(ip, mac), now, now, ip_is_mine(ip)))
         debugger.info("%s (%s) requested, first time seeing", (ip, mac))
     db.connection.commit()
     db.lock.release()
 
 # Assumes we already have the database lock.
 def log_event(ip, mac, event):
+    import datetime
+
     db = database.database_instance
     debugger = debug.debugger_instance
     debugger.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
@@ -536,7 +585,9 @@ def received_arp(hdr, data, child_conn):
         dst_ip = socket.inet_ntoa(packet.data.tpa)
         dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
     except Exception as e:
-        debugger.error("received_arp 1 FIXME: %s", (e,))
+        debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+        debugger.error("FIXME received_arp() 1: %s", (e,))
+        debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
     if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
         try:
@@ -544,15 +595,21 @@ def received_arp(hdr, data, child_conn):
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
             ip_request(dst_ip, dst_mac, src_ip, src_mac)
         except Exception as e:
-            debugger.error("received_arp 2 FIXME: %s", (e,))
+            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            debugger.error("FIXME received_arp() 2: %s", (e,))
+            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
     elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
         try:
             debugger.debug('ARP reply from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
         except Exception as e:
-            debugger.error("received_arp 3 FIXME: %s", (e,))
+            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+            debugger.error("FIXME received_arp() 3: %s", (e,))
+            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
 def pretty_date(time):
+    import datetime
+
     if not time:
         return "never"
     now = datetime.datetime.now()
@@ -594,18 +651,33 @@ def get_did(ip, mac):
 
     db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, mac))
     did = db.cursor.fetchone()
+    if did:
+        did = did[0]
     if not did:
         hostname = dns_lookup(ip)
-        db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (src_mac, hostname))
+        db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (mac, hostname))
         did = db.cursor.fetchone()
+        if did:
+            did = did[0]
+
     if not did:
         db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
         did = db.cursor.fetchone()
+        if did:
+            did = did[0]
 
     if did:
-        return did[0]
+        debugger.debug("matched did for %s [%s]: %d", (ip, mac, did))
+        return did
     else:
-        return False
+        db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
+        did = db.cursor.fetchone()
+        if did:
+            did = did[0]
+        if not did:
+            did = 1
+        debugger.debug("no matching did for %s [%s], new: %d", (ip, mac, did))
+        return did
 
 def first_seen(ip, mac):
     debugger = debug.debugger_instance
@@ -616,7 +688,10 @@ def first_seen(ip, mac):
     db.cursor.execute("SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1", (did,))
     active = db.cursor.fetchone()
     if active:
-        return active[0]
+        active = active[0]
+
+    if active:
+        return active
     else:
         return False
 
@@ -629,7 +704,10 @@ def first_seen_recently(ip, mac):
     db.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
     recent = db.cursor.fetchone()
     if recent:
-        return recent[0]
+        recent = recent[0]
+
+    if recent:
+        return recent
     else:
         return False
 
@@ -979,7 +1057,7 @@ def dns_lookup(ip):
 
     debugger = debug.debugger_instance
 
-    debugger.debug("entering gethostbyaddr(%s)", (ip,))
+    debugger.debug("entering dns_lookup(%s)", (ip,))
     try:
         hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
         debugger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", (hostname, aliaslist, ipaddrlist))
@@ -1288,9 +1366,9 @@ def start():
         username = ng.config.GetText('Security', 'user', DEFAULT_USER, False)
         groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
         try:
-            daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=debugger.logger, verbose=True)
+            daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
             daemon.start()
         except Exception as e:
             ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))
     else:
-        main(ng)
+        main()
