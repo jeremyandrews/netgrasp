@@ -1,5 +1,7 @@
 from netgrasp.utils import debug
 
+email_instance = None
+
 class Email:
     def __init__(self, config, debugger):
         from netgrasp import netgrasp
@@ -57,10 +59,13 @@ class Email:
             else:
                 debugger.warn("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
 
-    def MailSend(self, email, subject, encoding, body):
+    def MailSend(self, subject, encoding, body):
         import pyzmail
-        payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(email.email_from, email.email_to, subject, encoding, body)
-        ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, email.email_hostname, email.email_port, email.email_mode, email.email_username, email.email_password)
+
+        debugger = debug.debugger_instance
+
+        payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(self.email_from, self.email_to, subject, encoding, body)
+        ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, self.email_hostname, self.email_port, self.email_mode, self.email_username, self.email_password)
         if isinstance(ret, dict):
             if ret:
                 failed_recipients = ", ".join(ret.keys())

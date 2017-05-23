@@ -1,4 +1,16 @@
+# Ignore netgrasp-specific files
+.database_lock
+*.db
+*.log
+*.pid
+
+# Ignore editor swap files
 *.swp
 *.swo
-.database_lock
+
+# Ignore compiled Python files
 *.pyc
+
+# Ignore sqlite-related files
+*shm
+*wal

@@ -107,7 +107,7 @@ def main(ng, *pcap):
     elif (ng.delay < 1):
         ng.delay = 1
 
-    ng.email = email.Email(ng.config, ng.debugger)
+    email.email_instance = email.Email(ng.config, ng.debugger)
 
     run = True
     last_heartbeat = datetime.datetime.now()
@@ -129,14 +129,14 @@ def main(ng, *pcap):
         try:
             ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
             time.sleep(ng.delay)
-            identify_macs(ng.debugger, ng.db)
-            detect_stale_ips(ng.debugger, ng.db, ng.active_timeout)
-            detect_netscans(ng.debugger, ng.db)
-            detect_anomalies(ng.debugger, ng.db, ng.active_timeout)
-            send_notifications(ng.debugger, ng.db, ng.notify)
-            send_email_alerts(ng.debugger, ng.db, ng.email)
-            send_email_digests(ng.debugger, ng.db, ng.email)
-            garbage_collection(ng.debugger, ng.db, ng.config)
+            identify_macs()
+            detect_stale_ips(ng.active_timeout)
+            detect_netscans()
+            detect_anomalies(ng.active_timeout)
+            send_notifications(ng.notify)
+            send_email_alerts()
+            send_email_digests()
+            garbage_collection(ng.config)
         except Exception as e:
             ng.debugger.error("FIXME: %s", (e,))
 
@@ -286,8 +286,8 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     db.lock.acquire()
     log_event(src_ip, src_mac, EVENT_SEEN)
     if changed_ip:
-        log_event(src_ip, src_mac, EVENT_CHANGED_IP)
         debugger.info("[%s] (%s) has a new ip [%s]", (did, src_mac, src_ip))
+        log_event(src_ip, src_mac, EVENT_CHANGED_IP)
     if active:
         if lastSeen:
             # has been active recently
@@ -326,7 +326,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
             else:
                 did = 1
             if not did:
-                debugg.debug('Did was None, setting to 1')
+                debugger.debug('Did was None, setting to 1')
                 did = 1
             log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
             log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
@@ -389,9 +389,11 @@ def ip_request(ip, mac, src_ip, src_mac):
 
 # Assumes we already have the database lock.
 def log_event(ip, mac, event):
-    debug.debugger_instance.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
+    db = database.database_instance
+    debugger = debug.debugger_instance
+    debugger.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
     now = datetime.datetime.now()
-    database.database_instance.connection.execute('INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)', (mac, ip, now, 0, event))
+    db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
 
 def ip_is_mine(ip):
     import socket
@@ -582,8 +584,9 @@ def pretty_date(time):
 
 # Determine appropriate device id for IP, MAC pair.
 def get_did(ip, mac):
-    debug.debugger_instance.debug("entering get_did(%s, %s)", (ip, mac))
-    db = database.datanase_instance()
+    debugger = debug.debugger_instance
+    debugger.debug("entering get_did(%s, %s)", (ip, mac))
+    db = database.database_instance
 
     db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, mac))
     did = db.cursor.fetchone()
@@ -601,8 +604,9 @@ def get_did(ip, mac):
         return False
 
 def first_seen(ip, mac):
-    debug.debugger_instance.debug("entering first_seen(%s, %s)", (ip, mac))
-    db = database.datanase_instance()
+    debugger = debug.debugger_instance
+    debugger.debug("entering first_seen(%s, %s)", (ip, mac))
+    db = database.database_instance
 
     did = get_did(ip, mac)
     db.cursor.execute("SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1", (did,))
@@ -613,8 +617,9 @@ def first_seen(ip, mac):
         return False
 
 def first_seen_recently(ip, mac):
-    debug.debugger_instance.debug("entering last_seen_recently(%s, %s)", (ip, mac))
-    db = database.datanase_instance()
+    debugger = debug.debugger_instance
+    debugger.debug("entering last_seen_recently(%s, %s)", (ip, mac))
+    db = database.database_instance
 
     did = get_did(ip, mac)
     db.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
@@ -625,8 +630,9 @@ def first_seen_recently(ip, mac):
         return False
 
 def last_seen(ip, mac):
-    debug.debugger_instance.debug("entering last_seen(%s, %s)", (ip, mac))
-    db = database.datanase_instance()
+    debugger = debug.debugger_instance
+    debugger.debug("entering last_seen(%s, %s)", (ip, mac))
+    db = database.database_instance
 
     did = get_did(ip, mac)
     db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
@@ -637,8 +643,9 @@ def last_seen(ip, mac):
         return False
 
 def previously_seen(ip, mac):
-    debug.debugger_instance.debug("entering previously_seen(%s, %s)", (ip, mac))
-    db = database.datanase_instance()
+    debugger = debug.debugger_instance
+    debugger.debug("entering previously_seen(%s, %s)", (ip, mac))
+    db = database.database_instance
 
     did = get_did(ip, mac)
     db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
@@ -649,8 +656,9 @@ def previously_seen(ip, mac):
         return False
 
 def first_requested(ip, mac):
-    debug.debugger_instance.debug("entering first_requested(%s, %s)", (ip, mac))
-    db = database.datanase_instance()
+    debugger = debug.debugger_instance
+    debugger.debug("entering first_requested(%s, %s)", (ip, mac))
+    db = database.database_instance
 
     did = get_did(ip, mac)
     db.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
@@ -661,8 +669,9 @@ def first_requested(ip, mac):
         return False
 
 def last_requested(ip, mac):
-    debug.debugger_instance.debug("entering last_requested(%s, %s)", (ip, mac))
-    db = database.datanase_instance()
+    debugger = debug.debugger_instance
+    debugger.debug("entering last_requested(%s, %s)", (ip, mac))
+    db = database.database_instance
 
     did = get_did(ip, mac)
     db.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
@@ -673,7 +682,10 @@ def last_requested(ip, mac):
         return False
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
-def detect_stale_ips(debugger, db, timeout):
+def detect_stale_ips(timeout):
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
     debugger.debug("entering detect_stale_ips()")
     stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
@@ -696,7 +708,10 @@ def detect_stale_ips(debugger, db, timeout):
         db.connection.commit()
         db.lock.release()
 
-def detect_netscans(debugger, db):
+def detect_netscans():
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
     debugger.debug("entering detect_netscans()")
     now = datetime.datetime.now()
 
@@ -716,7 +731,10 @@ def detect_netscans(debugger, db):
         db.connection.commit()
         db.lock.release()
 
-def detect_anomalies(debugger, db, timeout):
+def detect_anomalies(timeout):
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
     debugger.debug("entering detect_anomalies()")
     now = datetime.datetime.now()
     stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
@@ -761,7 +779,10 @@ def detect_anomalies(debugger, db, timeout):
         db.connection.commit()
         db.lock.release()
 
-def send_notifications(debugger, db, notify):
+def send_notifications(notify):
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
     debugger.debug("entering send_notifications()")
 
     if not notify.enabled:
@@ -817,14 +838,18 @@ def send_notifications(debugger, db, notify):
         db.connection.commit()
         db.lock.release()
 
-def send_email_alerts(debugger, db, email):
+def send_email_alerts():
+    debugger = debug.debugger_instance
+    db = database.database_instance
+    emailer = email.email_instance
+
     debugger.debug("entering send_email_alerts()")
 
-    if not email.enabled:
+    if not emailer.enabled:
         debugger.debug("email disabled")
         return False
 
-    if not email.alerts:
+    if not emailer.alerts:
         debugger.debug("no email alerts configured")
         return False
 
@@ -857,8 +882,8 @@ def send_email_alerts(debugger, db, email):
         debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
         alerted = True
         # only send emails for configured events
-        if event in email.alerts:
-            debugger.info("event %s [%d] in %s, generating notification email", (event, eid, email.alerts))
+        if event in emailer.alerts:
+            debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
             # get more information about this entry ...
             db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
             info = db.cursor.fetchone()
@@ -881,9 +906,9 @@ def send_email_alerts(debugger, db, email):
                 body += """\nIn the last day, this device talked to:"""
             for peer in results:
                 body += """\n - %s (%s)""" % (peer[0], name_ip(peer[1], peer[0]))
-            email.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+            emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
         else:
-            debugger.debug("event %s [%d] NOT in %s", (event, eid, email.alerts))
+            debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
         if alerted:
             db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 1, eid))
 
@@ -892,8 +917,12 @@ def send_email_alerts(debugger, db, email):
         db.lock.release()
 
 # Finds new MAC addresses and assigns them a name.
-def identify_macs(debugger, db):
+def identify_macs():
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
     debugger.debug("entering identify_macs()")
+
     import re
     import httplib
 
@@ -918,7 +947,7 @@ def identify_macs(debugger, db):
         url = """/%s""" % mac
         http.request("GET", url)
         response = http.getresponse()
-        ng.db.lock.acquire()
+        db.lock.acquire()
         if response.status == 200 and response.reason == "OK":
             vendor = response.read()
             debugger.info("Identified %s [%s] as %s", (ip, raw_mac, vendor))
@@ -957,6 +986,7 @@ def dns_lookup(ip):
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(mac, ip):
     debugger = debug.debugger_instance
+    db = database.database_instance
 
     debugger.debug("entering name_ip(%s, %s)", (mac, ip))
     if (mac == BROADCAST):
@@ -978,13 +1008,17 @@ def name_ip(mac, ip):
         return detail[0]
 
 # Generates daily and weekly email digests.
-def send_email_digests(debugger, db, email):
+def send_email_digests():
+    debugger = debug.debugger_instance
+    db = database.database_instance
+    emailer = email.email_instance
+
     debugger.debug("entering send_email_digests()")
 
-    if not email.enabled:
+    if not emailer.enabled:
         return False
 
-    if not email.digest:
+    if not emailer.digest:
         debugger.debug("no digests configured")
         return False
 
@@ -1120,7 +1154,7 @@ def send_email_digests(debugger, db, email):
         db.lock.release()
 
         debugger.info("Sending %s digest", (digest,))
-        email.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+        emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
 
 def garbage_collection(debugger, db, config):
     debugger.debug("entering garbage_collection()")
