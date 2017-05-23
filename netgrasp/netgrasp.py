@@ -109,6 +109,10 @@ def main(ng, *pcap):
 
     email.email_instance = email.Email(ng.config, ng.debugger)
 
+    ng.garbage_collection = ng.config.GetBoolean("Database", "gcenabled", True, False)
+    ng.oldest_arplog = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_arplog", 60 * 60 * 24 * 7 * 2, False))
+    ng.oldest_event = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_event", 60 * 60 * 24 * 7 * 2, False))
+
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
@@ -133,10 +137,10 @@ def main(ng, *pcap):
             detect_stale_ips(ng.active_timeout)
             detect_netscans()
             detect_anomalies(ng.active_timeout)
-            send_notifications(ng.notify)
+            send_notifications()
             send_email_alerts()
             send_email_digests()
-            garbage_collection(ng.config)
+            garbage_collection(ng.garbage_collection, ng.oldest_arplog, ng.oldest_event)
         except Exception as e:
             ng.debugger.error("FIXME: %s", (e,))
 
@@ -779,17 +783,18 @@ def detect_anomalies(timeout):
         db.connection.commit()
         db.lock.release()
 
-def send_notifications(notify):
+def send_notifications():
     debugger = debug.debugger_instance
     db = database.database_instance
+    notifier = notify.notify_instance
 
     debugger.debug("entering send_notifications()")
 
-    if not notify.enabled:
+    if not notifier.enabled:
         debugger.debug("notifications disabled")
         return False
 
-    if not notify.alerts:
+    if not notifier.alerts:
         debugger.debug("no notification alerts configured")
         return False
 
@@ -797,13 +802,14 @@ def send_notifications(notify):
     timer = simple_timer.Timer()
 
     day = datetime.datetime.now() - datetime.timedelta(days=1)
-    db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notify.alerts)) + ")", notify.alerts)
+    db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notifier.alerts)) + ")", notifier.alerts)
 
     rows = db.cursor.fetchall()
     if rows:
         db.lock.acquire()
 
     counter = 0
+
     for row in rows:
         eid, mac, ip, timestamp, event, processed = row
         # Give up the lock occasionally while processing a large number of rows, allowing the
@@ -823,17 +829,17 @@ def send_notifications(notify):
         debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
 
         # only send notifications for configured events
-        if event in notify.alerts:
-            debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notify.alerts))
+        if event in notifier.alerts:
+            debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
             firstSeen = first_seen(ip, mac)
             lastSeen = first_seen_recently(ip, mac)
             previouslySeen = previously_seen(ip, mac)
             title = """Netgrasp alert: %s""" % (event)
             body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(mac, ip), ip, mac, pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstSeen))
             ntfy.notify(body, title)
-            notify.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
+            db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
         else:
-            debugger.debug("event %s [%d] NOT in %s", (event, eid, notify.alerts))
+            debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
     if rows:
         db.connection.commit()
         db.lock.release()
@@ -1156,11 +1162,15 @@ def send_email_digests():
         debugger.info("Sending %s digest", (digest,))
         emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
 
-def garbage_collection(debugger, db, config):
+def garbage_collection(enabled, oldest_arplog, oldest_event):
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
     debugger.debug("entering garbage_collection()")
 
-    if not config.GetBoolean("Database", "gcenabled", True, False):
+    if not enabled:
         debugger.debug("garbage collection disabled")
+        return
 
     garbage_collection_string = "garbage collection"
 
@@ -1179,22 +1189,19 @@ def garbage_collection(debugger, db, config):
     # schedule next garbage collection
     db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
-    oldest_arplog = now - datetime.timedelta(seconds=config.GetInt("Database", "oldest_arplog", 60 * 60 * 24 * 7 * 2, False))
-    oldest_event = now - datetime.timedelta(seconds=config.GetInt("Database", "oldest_event", 60 * 60 * 24 * 7 * 2, False))
-
     db.lock.acquire()
     # Purge old arplog entries.
-    db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (oldest_arplog,))
+    db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
     arplog_count = db.cursor.fetchone()
-    db.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (oldest_arplog,))
+    db.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
     # Purge old event entries.
-    db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (oldest_event,))
+    db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (now - oldest_event,))
     event_count = db.cursor.fetchone()
-    db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (oldest_event,))
+    db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (now - oldest_event,))
     db.connection.commit()
     db.lock.release()
-    debugger.debug("deleted %d arplog entries older than %s", (arplog_count[0], oldest_arplog))
-    debugger.debug("deleted %d event entries older than %s", (event_count[0], oldest_event))
+    debugger.debug("deleted %d arplog entries older than %s", (arplog_count[0], now - oldest_arplog))
+    debugger.debug("deleted %d event entries older than %s", (event_count[0], now - oldest_event))
 
 
 #################
@@ -1272,7 +1279,7 @@ def start():
             ng.debugger.critical("failed to import daemonize (as user %s), try 'pip install daemonize', exiting", (ng.debugger.whoami()))
         ng.debugger.info("successfuly imported daemonize")
 
-    ng.notify = notify.Notify(ng.debugger, ng.config)
+    notify.notify_instance = notify.Notify(ng.debugger, ng.config)
 
     ng.database_filename = ng.config.GetText('Database', 'filename')
 
