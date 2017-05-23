@@ -89,7 +89,10 @@ def main(*pcap):
     child = multiprocessing.Process(name="wiretap", target=wiretap, args=[pc, child_conn])
     child.daemon = True
     child.start()
-    ng.debugger.info("initiated wiretap process")
+    if child.is_alive():
+        ng.debugger.debug("initiated wiretap process")
+    else:
+        ng.debugger.debug("wiretap failed to start")
 
     try:
         ng.db = database.Database(ng.database_filename, ng.debugger)
@@ -119,7 +122,12 @@ def main(*pcap):
     ng.oldest_arplog = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_arplog", 60 * 60 * 24 * 7 * 2, False))
     ng.oldest_event = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_event", 60 * 60 * 24 * 7 * 2, False))
 
-    run = True
+    if child.is_alive():
+        run = True
+    else:
+        ng.debugger.error("wiretap process gone away: %d", (child.exitcode,))
+        run = False
+
     last_heartbeat = datetime.datetime.now()
     while run:
         now = datetime.datetime.now()
@@ -194,11 +202,16 @@ def main(*pcap):
             ng.debugger.error("FIXME garbage_collection(): %s", (e,))
             ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
+        if not child.is_alive():
+            ng.debugger.error("wiretap process gone away: %d", (child.exitcode,))
+            run = False
+
         # If we haven't heard from the wiretap process in >1 minute, exit.
         time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
         if (now >= time_to_exit):
             run = False
-    ng.debugger.critical("No heartbeats from wiretap process for >1 minute, exiting.")
+            ng.debugger.error("No heartbeats from wiretap process for >1 minute.")
+    ng.debugger.critical("Exiting")
 
 def get_pcap():
     import sys
@@ -1365,6 +1378,7 @@ def start():
         pidfile = ng.config.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
         username = ng.config.GetText('Security', 'user', DEFAULT_USER, False)
         groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
+        ng.debugger.info("daemonizing app=netgraspd, pidfile=%s, user=%s, group=%s, verbose=True", (pidfile, username, groupname))
         try:
             daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
             daemon.start()
