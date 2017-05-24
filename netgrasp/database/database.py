@@ -41,7 +41,7 @@ class Database:
             return default_value
 
 class SelectQueryBuilder():
-    def __init__(self, table):
+    def __init__(self, table, debugger, verbose):
         self.table = table
         self.select = []
         self.where = []
@@ -49,6 +49,8 @@ class SelectQueryBuilder():
         self.group = []
         self.order = []
         self.leftjoin = []
+        self.debugger = debugger
+        self.verbose = verbose
 
     def _base_table(self, value):
         if isinstance(value, basestring):
@@ -92,20 +94,16 @@ class SelectQueryBuilder():
             query_string += " GROUP BY " + ", ".join(self.group)
         if len(self.order):
             query_string += " ORDER BY " + ", ".join(self.order)
-        if ngs.config_instance.verbose > 1:
-            print "Select query:"
-            print query_string
-        if ngs.config_instance.verbose > 2:
-            print "Query plan:"
-            self.cursor.execute("EXPLAIN QUERY PLAN " + query_string, self.where_args)
-            plans = self.cursor.fetchall()
-            for plan in plans:
-                print " - " + plan[3]
+        self.debugger.debug("Select query: %s", (query_string,))
+        #self.debugger.debug2("Query plan:")
+        #self.cursor.execute("EXPLAIN QUERY PLAN " + query_string, self.where_args)
+        #plans = self.cursor.fetchall()
+        #for plan in plans:
+        #    self.debugger.debug2(" - %s", plan[3])
         return query_string
 
     def db_args(self):
-        if ngs.config_instance.verbose > 1:
-            print 'Select args: ', self.where_args
+        self.debugger.debug("Select args: %s", (self.where_args,))
         return self.where_args
         
         

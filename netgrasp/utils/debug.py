@@ -27,7 +27,11 @@ debugger_instance = None
 # mode: PRINT or FILE
 class Debugger:
     def __init__(self, verbose = False, logger = None, mode = PRINT, level = logging.CRITICAL):
-        self.verbose = verbose
+        if verbose:
+            self.verbose = True
+        else:
+            self.verbose = False
+
         self.logger = logger
         self.mode = mode
         self.level = level
@@ -69,7 +73,8 @@ class Debugger:
 
     def setLevel(self, level):
         self.level = level
-        self.logger.setLevel(level)
+        if self.mode == FILE:
+            self.logger.setLevel(level)
 
     def debug(self, message, args = None):
         self.log(message, args, DEBUG)

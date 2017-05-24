@@ -1,9 +1,14 @@
 #!/usr/bin/env python2
 
-from netgrasp.debug import debug
-from netgrasp.config import config
-from netgrasp.db import db
+from netgrasp.utils import debug
 from netgrasp.utils import exclusive_lock
+from netgrasp.utils import email
+from netgrasp.utils import simple_timer
+from netgrasp.utils import pretty
+from netgrasp.config import config
+from netgrasp.notify import notify
+from netgrasp.database import database
+from netgrasp import netgrasp
 
 import argparse
 import ConfigParser
@@ -16,13 +21,6 @@ import datetime
 import fcntl
 import time
 
-class NetgraspShared:
-    BROADCAST = 'ff:ff:ff:ff:ff:ff'
-
-    DEFAULT_PIDFILE   = "netgraspd.pid"
-    DEFAULT_DBLOCK    = "/tmp/.database_lock"
-    DEFAULT_CONFIG    = ['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf']
-
 # Determine if pid in pidfile is a running process.
 def is_running(pidfile):
     running = False
@@ -31,8 +29,7 @@ def is_running(pidfile):
         pid = int(f.readline())
         f.close()
         if pid > 0:
-            if ngs.config_instance.verbose > 1:
-                print """Found pidfile %s, contained pid %d""" % (pidfile, pid)
+            ng.debugger.info("Found pidfile %s, contained pid %d", (pidfile, pid))
             try:
                 os.kill(pid, 0)
             except OSError as e:
@@ -41,60 +38,7 @@ def is_running(pidfile):
             else:
                 running = pid
     return running
-
-def pretty_date(time):
-    if not time:
-        return "never"
-    now = datetime.datetime.now()
-    diff = now - time
-    second_diff = diff.seconds
-    day_diff = diff.days
-
-    if day_diff < 0:
-        return ''
-
-    if day_diff == 0:
-        if second_diff < 10:
-            return "just now"
-        if second_diff < 60:
-            return str(second_diff) + " seconds ago"
-        if second_diff < 120:
-            return "a minute ago"
-        if second_diff < 3600:
-            return str(second_diff / 60) + " minutes ago"
-        if second_diff < 7200:
-            return "an hour ago"
-        if second_diff < 86400:
-            return str(second_diff / 3600) + " hours ago"
-    if day_diff == 1:
-        return "yesterday"
-    if day_diff < 7:
-        return str(day_diff) + " days ago"
-    if day_diff < 31:
-        return str(day_diff / 7) + " weeks ago"
-    if day_diff < 365:
-        return str(day_diff / 30) + " months ago"
     return str(day_diff / 365) + " years ago"
-
-# Provides a human-friendly name for a mac-ip pair.
-def name_ip(mac, ip):
-    if (mac == ngs.BROADCAST):
-        ngs.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
-    else:
-        ngs.database_instance.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
-    detail = ngs.database_instance.cursor.fetchone()
-    if not detail:
-        return detail
-    if detail[2]:
-        return detail[2]
-    elif detail[3] and (detail[3] != 'unknown'):
-        return detail[3]
-    elif detail[4]:
-        return detail[4]
-    elif detail[5]:
-        return """%s device""" % (detail[5])
-    else:
-        return detail[0]
 
 # Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):
@@ -103,25 +47,23 @@ def truncate_string(string, maxlength, suffix = "..."):
     return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)
 
 def start(args):
-    ngs.is_running = is_running(ngs.pidfile)
-    if ngs.is_running:
-        sys.exit("""Netgrasp is already running with pid %d.""" % ngs.is_running)
-    if args.verbose:
-        print "Starting netgraspd..."
-    sys.exit("Feature not yet implemented. Manually run: 'sudo ./netgraspd -d'")
+    ng.is_running = is_running(ng.pidfile)
+    if ng.is_running:
+        ng.debugger.critical("Netgrasp is already running with pid %d.", (ng.is_running,))
+    ng.debugger.info("Starting netgraspd...")
+    ng.debugger.critical("Feature not yet implemented. Manually run: 'sudo ./netgraspd -d'")
 
 def stop(args):
-    if not ngs.is_running:
-        sys.exit("Netgrasp is not running.")
-    if args.verbose:
-        print "Stopping netgraspd..."
+    if not ng.is_running:
+        ng.debugger.critical("Netgrasp is not running.")
+    ng.debugger.info("Stopping netgraspd...")
     try:
-        os.kill(ngs.is_running, signal.SIGTERM)
+        os.kill(ng.is_running, signal.SIGTERM)
     except OSError as e:
         if e.errno == errno.EPERM:
-            print """Failed (perhaps try with sudo): %s""" % e
+            ng.debugger.critical("Failed (perhaps try with sudo): %s", (e))
         else:
-            print """Failed: %s""" % e
+            ng.debugger.critical("Failed: %s", (e,))
 
 def restart(args):
     stop(args)
@@ -129,31 +71,31 @@ def restart(args):
     start(args)
 
 def status(args):
-    if ngs.is_running:
-        print """Netgrasp is running with pid %d""" % (ngs.is_running)
+    if ng.is_running:
+        ng.debugger.warning("Netgrasp is running with pid %d", (ng.is_running,))
     else:
-        print "Netgrasp is not running."
+        ng.debugger.warning("Netgrasp is not running.")
 
 def list(args):
-    if not ngs.is_running:
-        sys.exit("Netgrasp is not running.")
+    if not ng.is_running:
+        ng.debugger.critical("Netgrasp is not running.")
 
-    ngs.database_filename = ngs.config_instance.GetText('Database', 'filename')
+    ng.database_filename = ng.config.GetText('Database', 'filename')
 
     try:
-        ngs.database_instance = ngs.Database()
+        ng.db = database.Database(ng.database_filename, ng.debugger)
+        database.database_instance = ng.db
     except Exception as e:
-        print e
-        sys.exit("""Failed to open or create database file %s (as user %s), exiting.""" % (ngs.database_filename, ngs.whoami()))
+        ng.debugger.error("%s", (e,))
+        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database_filename, ng.debugger.whoami()))
 
-    if args.verbose:
-        print """Opened %s as user %s""" % (ngs.database_filename, ngs.whoami())
+    ng.debugger.info("Opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
 
-    ngs.database_instance.cursor = ngs.database_instance.connection.cursor()
+    ng.db.cursor = ng.db.connection.cursor()
 
-    if args.type == 'device':
+    if args.type == "device":
         # List devices.
-        query = SelectQueryBuilder("seen")
+        query = database.SelectQueryBuilder("seen", ng.debugger, verbose)
         query.db_select("{%BASE}.mac")
         query.db_select("{%BASE}.ip")
         query.db_select("{%BASE}.lastSeen")
@@ -175,7 +117,7 @@ def list(args):
 
     elif args.type == 'event':
         # List events.
-        query = SelectQueryBuilder('event')
+        query = database.SelectQueryBuilder("event", ng.debugger, verbose)
         query.db_select("{%BASE}.mac")
         query.db_select("{%BASE}.ip")
         query.db_select("{%BASE}.timestamp")
@@ -184,9 +126,9 @@ def list(args):
         if args.all:
             description = "All alerts"
         else:
-            description = 'Recent alerts'
-            ngs.active_timeout = ngs.config_instance.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
-            recent = datetime.datetime.now() - datetime.timedelta(seconds=ngs.active_timeout)
+            description = "Recent alerts"
+            ng.active_timeout = ng.config.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
+            recent = datetime.datetime.now() - datetime.timedelta(seconds=ng.active_timeout)
             query.db_where("{%BASE}.timestamp >= ?", recent)
 
         if (not args.all or args.all == 1):
@@ -201,10 +143,10 @@ def list(args):
 
     if args.mac:
         query.db_where("{%BASE}.mac LIKE ?", "%"+args.mac+"%")
-        if not args.mac == ngs.BROADCAST:
-            query.db_where("{%BASE}.mac != ?", ngs.BROADCAST)
+        if not args.mac == netgrasp.BROADCAST:
+            query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
     else:
-        query.db_where("{%BASE}.mac != ?", ngs.BROADCAST)
+        query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
 
     if args.ip:
         query.db_where("{%BASE}.ip LIKE ?", "%"+args.ip+"%")
@@ -222,41 +164,42 @@ def list(args):
         query.db_leftjoin("host", "({%BASE}.mac = host.mac AND {%BASE}.ip = host.ip)")
         query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+args.custom+"%", "%"+args.custom+"%"], True)
 
-    ngs.database_instance.cursor.execute(query.db_query(), query.db_args())
-    rows = ngs.database_instance.cursor.fetchall()
+    ng.db.cursor.execute(query.db_query(), query.db_args())
+    rows = ng.db.cursor.fetchall()
     if rows:
         print """ %s:""" % description
         print rowFormat.format(*header)
     for row in rows:
         if args.type == 'device':
-            print rowFormat.format(truncate_string(row[1], 15), truncate_string(name_ip(row[0], row[1]), 32), truncate_string(pretty_date(row[2]), 20))
+            print rowFormat.format(truncate_string(row[1], 15), truncate_string(pretty.name_ip(row[1], row[0]), 32), truncate_string(pretty.pretty_date(row[2]), 20))
         else:
-            print rowFormat.format(truncate_string(row[1], 15), truncate_string(name_ip(row[0], row[1]), 22), truncate_string(row[3], 19), truncate_string(pretty_date(row[2]), 16))
+            print rowFormat.format(truncate_string(row[1], 15), truncate_string(pretty.name_ip(row[1], row[0]), 22), truncate_string(row[3], 19), truncate_string(pretty.pretty_date(row[2]), 16))
 
 def identify(args):
-    if not ngs.is_running:
-        sys.exit("Netgrasp is not running.")
+    if not ng.is_running:
+        ng.debugger.critical("Netgrasp is not running.")
 
-    ngs.database_filename = ngs.config_instance.GetText('Database', 'filename')
+    ng.database_filename = ng.config.GetText("Database", "filename")
 
     try:
-        ngs.database_instance = ngs.Database()
+        ng.db = database.Database(ng.database_filename, ng.debugger)
+        database.database_instance = ng.db
     except Exception as e:
-        print e
-        sys.exit("""Failed to open or create database file %s (as user %s), exiting.""" % (ngs.database_filename, ngs.whoami()))
+        ng.debugger.error("%s", (e,))
+        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database_filename, ng.debugger.whoami()))
 
-    if args.verbose:
-        print """Opened %s as user %s""" % (ngs.database_filename, ngs.whoami())
+        ng.debugger.info("Opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
 
-    ngs.database_instance.cursor = ngs.database_instance.connection.cursor()
-    ngs.database_lock = exclusive_lock.ExclusiveFileLock(ngs.config_instance.GetText('Database', 'lockfile', ngs.DEFAULT_DBLOCK, False))
+    ng.db.cursor = ng.db.connection.cursor()
+    ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', netgrasp.DEFAULT_DBLOCK, False))
+    ng.db.lock = ng._database_lock
 
     if not args.set:
         description = "Use --set ID 'CUSTOM NAME' to set a custom name on a device"
         header = ["ID", "IP", "Name", "Last seen"]
         rowFormat = "{:>7}{:>16}{:>34}{:>22}"
 
-        query = SelectQueryBuilder("host")
+        query = database.SelectQueryBuilder("host", ng.debugger, verbose)
         query.db_select("{%BASE}.hid")
         query.db_select("{%BASE}.mac")
         query.db_select("{%BASE}.ip")
@@ -273,8 +216,8 @@ def identify(args):
         if args.mac:
             query.db_where("{%BASE}.mac LIKE ?", "%"+args.mac+"%")
 
-        if not args.all > 2 and not args.mac == ngs.BROADCAST:
-            query.db_where("{%BASE}.mac != ?", ngs.BROADCAST)
+        if not args.all > 2 and not args.mac == netgrasp.BROADCAST:
+            query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
 
         if args.ip:
             query.db_where("{%BASE}.ip LIKE ?", "%"+args.ip+"%")
@@ -290,103 +233,92 @@ def identify(args):
             query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
             query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+args.custom+"%", "%"+args.custom+"%"], True)
 
-        ngs.database_instance.cursor.execute(query.db_query(), query.db_args())
-        rows = ngs.database_instance.cursor.fetchall()
+        ng.db.cursor.execute(query.db_query(), query.db_args())
+        rows = ng.db.cursor.fetchall()
         if rows:
             print """ %s:""" % description
             print rowFormat.format(*header)
         for row in rows:
-            print rowFormat.format(row[0], truncate_string(row[2], 15), truncate_string(name_ip(row[1], row[2]), 32), truncate_string(pretty_date(row[3]), 20))
+            print rowFormat.format(row[0], truncate_string(row[2], 15), truncate_string(pretty.name_ip(row[2], row[1]), 32), truncate_string(pretty.pretty_date(row[3]), 20))
     else:
         if args.verbose > 1:
             print "id:", args.set[0], "| custom name:", args.set[1]
-        ngs.database_instance.cursor.execute("SELECT vendor.vid FROM vendor LEFT JOIN host ON vendor.mac = host.mac WHERE host.hid = ?", (args.set[0],))
-        row = ngs.database_instance.cursor.fetchone()
+        ng.db.cursor.execute("SELECT vendor.vid FROM vendor LEFT JOIN host ON vendor.mac = host.mac WHERE host.hid = ?", (args.set[0],))
+        row = ng.db.cursor.fetchone()
         if row:
-            ngs.database_lock.acquire()
+            ng.db.lock.acquire()
             db_args = [args.set[1]]
             db_args.append(args.set[0])
-            ngs.database_instance.cursor.execute("UPDATE host SET customname = ? WHERE hid = ?", db_args)
-            if args.verbose > 1:
-                print "UPDATE host SET customname = ? WHERE hid = ?", db_args
+            ng.db.cursor.execute("UPDATE host SET customname = ? WHERE hid = ?", db_args)
             db_args = [args.set[1]]
             db_args.append(row[0])
-            ngs.database_instance.cursor.execute("UPDATE vendor SET customname = ? WHERE vid = ?", db_args)
-            if args.verbose > 1:
-                print "UPDATE vendor SET customname = ? WHERE vid = ?", db_args
-            ngs.database_instance.connection.commit()
-            ngs.database_lock.release()
+            ng.db.cursor.execute("UPDATE vendor SET customname = ? WHERE vid = ?", db_args)
+            ng.db.connection.commit()
+            ng.db.lock.release()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-            prog='netgraspctl',
-            description='A passive network observation tool')
+            prog="netgraspctl",
+            description="A passive network observation tool")
     # --verbose -v, verbose
-    parser.add_argument('--verbose', '-v', action='count', help='verbose output')
+    parser.add_argument("--verbose", "-v", action="count", help="verbose output")
     # --config -c, configuration file
-    parser.add_argument('--config', '-c', help='specify custom path for configuration file')
+    parser.add_argument("--config", "-c", help="specify custom path for configuration file")
 
     subparsers = parser.add_subparsers()
 
     # start
-    parser_start = subparsers.add_parser('start', help='start netgraspd')
+    parser_start = subparsers.add_parser("start", help="start netgraspd")
     parser_start.set_defaults(func=start)
 
     # stop
-    parser_stop = subparsers.add_parser('stop', help='stop netgraspd')
+    parser_stop = subparsers.add_parser("stop", help="stop netgraspd")
     parser_stop.set_defaults(func=stop)
 
     # restart
-    parser_restart = subparsers.add_parser('restart', help='restart netgraspd')
+    parser_restart = subparsers.add_parser("restart", help="restart netgraspd")
     parser_restart.set_defaults(func=restart)
 
     # status
-    parser_status = subparsers.add_parser('status', help='netgraspd status')
+    parser_status = subparsers.add_parser("status", help="netgraspd status")
     parser_status.set_defaults(func=status)
 
     # list
-    parser_list = subparsers.add_parser('list', help='list devices')
-    parser_list.add_argument('--type', '-t', choices=['device', 'event'], default='device', help='type of object to list')
-    parser_list.add_argument('--all', '-a', action='count', help='list all devices/events')
-    parser_list.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff)')
-    parser_list.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0)')
-    parser_list.add_argument('--vendor', '-v', help='filter by vendor (ex. -v apple)')
-    parser_list.add_argument('--hostname', '-n', help='filter by hostname (ex. -h localhost)')
-    parser_list.add_argument('--custom', '-c', help='filter by custom name (ex. -i phone)')
+    parser_list = subparsers.add_parser("list", help="list devices")
+    parser_list.add_argument("--type", "-t", choices=["device", "event"], default="device", help="type of object to list")
+    parser_list.add_argument("--all", "-a", action="count", help="list all devices/events")
+    parser_list.add_argument("--mac", "-m", help="filter by mac address (ex. -m ff:ff)")
+    parser_list.add_argument("--ip", "-i", help="filter by ip address (ex. -i 127.0)")
+    parser_list.add_argument("--vendor", "-v", help="filter by vendor (ex. -v apple)")
+    parser_list.add_argument("--hostname", "-n", help="filter by hostname (ex. -h localhost)")
+    parser_list.add_argument("--custom", "-c", help="filter by custom name (ex. -i phone)")
     parser_list.set_defaults(func=list)
 
     # identify (id, -i) ,v,i(ip),m(mac)
-    parser_identify = subparsers.add_parser('identify', help='identify devices')
-    parser_identify.add_argument('--set', '-s', nargs=2, help='set custom name (ex. -s 4 "my iPhone")')
-    parser_identify.add_argument('--all', '-a', action='count', help='list all devices')
-    parser_identify.add_argument('--mac', '-m', help='filter by mac address (ex. -m ff:ff:ff:ff:ff:ff)')
-    parser_identify.add_argument('--ip', '-i', help='filter by ip address (ex. -i 127.0.0.1)')
-    parser_identify.add_argument('--vendor', '-v', help='filter by vendor (ex. -v apple)')
-    parser_identify.add_argument('--hostname', '-n', help='filter by hostname (ex. -h localhost)')
-    parser_identify.add_argument('--custom', '-c', help='filter by custom name (ex. -i iphone)')
+    parser_identify = subparsers.add_parser("identify", help="identify devices")
+    parser_identify.add_argument("--set", "-s", nargs=2, help="set custom name (ex. -s 4 'my iPhone')")
+    parser_identify.add_argument("--all", "-a", action="count", help="list all devices")
+    parser_identify.add_argument("--mac", "-m", help="filter by mac address (ex. -m ff:ff:ff:ff:ff:ff)")
+    parser_identify.add_argument("--ip", "-i", help="filter by ip address (ex. -i 127.0.0.1)")
+    parser_identify.add_argument("--vendor", "-v", help="filter by vendor (ex. -v apple)")
+    parser_identify.add_argument("--hostname", "-n", help="filter by hostname (ex. -h localhost)")
+    parser_identify.add_argument("--custom", "-c", help="filter by custom name (ex. -i iphone)")
     parser_identify.set_defaults(func=identify)
 
     args = parser.parse_args()
 
-    # @TODO import shared class from a common module.
-    ngs = NetgraspShared()
-
-    # Find/load configuration files(s).
     if args.config:
-        configs = args.config
+        config = args.config
     else:
-        configs = ngs.DEFAULT_CONFIG
-    ngs.config_instance = ngs.Config(ConfigParser.ConfigParser(), configs)
-    ngs.config_instance.verbose = args.verbose
-    if not ngs.config_instance.found:
-        sys.exit("""Configuration file not found at the following paths: %s, exiting.""" % (configs))
-    if ngs.config_instance.verbose > 1:
-        print """Loaded configuration file(s): %s""" % (ngs.config_instance.found)
-    if ngs.config_instance.verbose > 2:
-        print args
+        config = netgrasp.DEFAULT_CONFIG
+
+    verbose = args.verbose
+
+    ng = netgrasp.Netgrasp(config, verbose, False)
+    ng.debugger, ng.config = netgrasp._init(verbose, False, debug.PRINT)
 
     # Find/load pidfile.
-    ngs.pidfile = ngs.config_instance.GetText('Logging', 'pidfile', ngs.DEFAULT_PIDFILE, False)
-    ngs.is_running = is_running(ngs.pidfile)
+    ng.pidfile = ng.config.GetText("Logging", "pidfile", netgrasp.DEFAULT_PIDFILE, False)
+    ng.is_running = is_running(ng.pidfile)
 
     args.func(args)

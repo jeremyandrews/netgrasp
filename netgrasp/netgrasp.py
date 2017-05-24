@@ -2,6 +2,7 @@ from utils import debug
 from utils import exclusive_lock
 from utils import email
 from utils import simple_timer
+from utils import pretty
 from config import config
 from notify import notify
 from database import database
@@ -622,42 +623,6 @@ def received_arp(hdr, data, child_conn):
             debugger.error("FIXME received_arp() 3: %s", (e,))
             debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
-def pretty_date(time):
-    import datetime
-
-    if not time:
-        return "never"
-    now = datetime.datetime.now()
-    diff = now - time
-    second_diff = diff.seconds
-    day_diff = diff.days
-
-    if day_diff < 0:
-        return ''
-
-    if day_diff == 0:
-        if second_diff < 10:
-            return "just now"
-        if second_diff < 60:
-            return str(second_diff) + " seconds ago"
-        if second_diff < 120:
-            return "a minute ago"
-        if second_diff < 3600:
-            return str(second_diff / 60) + " minutes ago"
-        if second_diff < 7200:
-            return "an hour ago"
-        if second_diff < 86400:
-            return str(second_diff / 3600) + " hours ago"
-    if day_diff == 1:
-        return "yesterday"
-    if day_diff < 7:
-        return str(day_diff) + " days ago"
-    if day_diff < 31:
-        return str(day_diff / 7) + " weeks ago"
-    if day_diff < 365:
-        return str(day_diff / 30) + " months ago"
-    return str(day_diff / 365) + " years ago"
-
 # Determine appropriate device id for IP, MAC pair.
 def get_did(ip, mac):
     debugger = debug.debugger_instance
@@ -928,7 +893,7 @@ def send_notifications():
             lastSeen = first_seen_recently(ip, mac)
             previouslySeen = previously_seen(ip, mac)
             title = """Netgrasp alert: %s""" % (event)
-            body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (name_ip(mac, ip), ip, mac, pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstSeen))
+            body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstSeen))
             ntfy.notify(body, title)
             db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
         else:
@@ -998,13 +963,13 @@ def send_email_alerts():
             previouslySeen = previously_seen(ip, mac)
             lastRequested = last_requested(ip, mac)
             subject = """Netgrasp alert: %s""" % (event)
-            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty_date(firstSeen), pretty_date(lastSeen), pretty_date(previouslySeen), pretty_date(firstRequested), pretty_date(lastRequested), active, self)
+            body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty.pretty_date(firstSeen), pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstRequested), pretty.pretty_date(lastRequested), active, self)
             db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
             results = db.cursor.fetchall()
             if results:
                 body += """\nIn the last day, this device talked to:"""
             for peer in results:
-                body += """\n - %s (%s)""" % (peer[0], name_ip(peer[1], peer[0]))
+                body += """\n - %s (%s)""" % (peer[0], pretty.name_ip(peer[0], peer[1]))
             emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
         else:
             debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
@@ -1082,30 +1047,6 @@ def dns_lookup(ip):
         debugger.debug("hostname(%s)", (hostname,))
     return hostname
 
-# Provides a human-friendly name for a mac-ip pair.
-def name_ip(mac, ip):
-    debugger = debug.debugger_instance
-    db = database.database_instance
-
-    debugger.debug("entering name_ip(%s, %s)", (mac, ip))
-    if (mac == BROADCAST):
-        db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
-    else:
-        db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
-    detail = db.cursor.fetchone()
-    if not detail:
-        return detail
-    if detail[2]:
-        return detail[2]
-    elif detail[3] and (detail[3] != "unknown"):
-        return detail[3]
-    elif detail[4]:
-        return detail[4]
-    elif detail[5]:
-        return """%s device""" % (detail[5])
-    else:
-        return detail[0]
-
 # Generates daily and weekly email digests.
 def send_email_digests():
     debugger = debug.debugger_instance
@@ -1180,12 +1121,12 @@ def send_email_digests():
             db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip[1], time_period, now))
             requests = db.cursor.fetchone()
             if (requests[0] > 10):
-                noisy.append((ip[0], ip[1], requests[0], name_ip(ip[0], ip[1])))
+                noisy.append((ip[0], ip[1], requests[0], pretty.name_ip(ip[0], ip[1])))
             if ip in new:
-                body += """\n - %s* (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
+                body += """\n - %s* (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
                 some_new = True
             else:
-                body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
+                body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
         if some_new:
             body+= """\n* = not active in the previous %s""" % (time_period_description)
 
@@ -1201,7 +1142,7 @@ def send_email_digests():
         if gone:
             body += """\n\nThe following IPs were not active, but were active the previous %s:""" % (time_period_description)
             for ip in gone:
-                body += """\n - %s (%s)""" % (ip[1], name_ip(ip[0], ip[1]))
+                body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
 
         if (digest == "daily"):
             body += "\n\nActive devices per hour during the past day:"
@@ -1301,18 +1242,18 @@ def garbage_collection(enabled, oldest_arplog, oldest_event):
 #################
 #################
 
-def _init(verbose, daemonize):
+def _init(verbose, daemonize, mode = debug.FILE):
     import logging
 
     # Get a logger and config parser.
     logger = logging.getLogger(__name__)
     formatter = logging.Formatter(DEFAULT_LOGFORMAT)
 
-    if os.getuid() != 0:
+    if mode == debug.FILE and os.getuid() != 0:
         # We're going to fail, so write to stderr.
         debugger = debug.Debugger()
     else:
-        debugger = debug.Debugger(verbose, logger, debug.FILE)
+        debugger = debug.Debugger(verbose, logger, mode)
     configuration = config.Config(debugger)
 
     debug.debugger_instance = debugger
@@ -1325,10 +1266,12 @@ def _init(verbose, daemonize):
         except Exception as e:
             debugger.critical("Fatal exception setting up log handler: %s", (e,))
     else:
-        debugger.handler = logging.StreamHandler()
+        if mode == debug.FILE:
+            debugger.handler = logging.StreamHandler()
 
-    debugger.handler.setFormatter(formatter)
-    logger.addHandler(debugger.handler)
+    if mode == debug.FILE:
+        debugger.handler.setFormatter(formatter)
+        logger.addHandler(debugger.handler)
 
     if verbose:
         debugger.setLevel(logging.DEBUG)
@@ -1376,10 +1319,10 @@ def start():
     ng.database_filename = ng.config.GetText('Database', 'filename')
 
     if ng.daemonize:
-        pidfile = ng.config.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
+        ng.pidfile = ng.config.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
         username = ng.config.GetText('Security', 'user', DEFAULT_USER, False)
         groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
-        ng.debugger.info("daemonizing app=netgraspd, pidfile=%s, user=%s, group=%s, verbose=True", (pidfile, username, groupname))
+        ng.debugger.info("daemonizing app=netgraspd, pidfile=%s, user=%s, group=%s, verbose=True", (ng.pidfile, username, groupname))
         try:
             daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
             daemon.start()
