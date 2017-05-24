@@ -1324,7 +1324,7 @@ def start():
         groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
         ng.debugger.info("daemonizing app=netgraspd, pidfile=%s, user=%s, group=%s, verbose=True", (ng.pidfile, username, groupname))
         try:
-            daemon = daemonize.Daemonize(app="netgraspd", pid=pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
+            daemon = daemonize.Daemonize(app="netgraspd", pid=ng.pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
             daemon.start()
         except Exception as e:
             ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))
