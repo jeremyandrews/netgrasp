@@ -462,6 +462,7 @@ def log_event(ip, mac, event):
     debugger = debug.debugger_instance
     debugger.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
     now = datetime.datetime.now()
+
     db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
 
 def ip_is_mine(ip):
@@ -787,7 +788,7 @@ def detect_netscans():
         db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, EVENT_SCAN, three_minutes_ago))
         already_detected = db.cursor.fetchone()
         if not already_detected:
-            db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (src_mac, src_ip, now, EVENT_SCAN))
+            log_event(ip, mac, EVENT_SCAN)
             debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
     if scans:
         db.connection.commit()
@@ -815,7 +816,7 @@ def detect_anomalies(timeout):
             db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
             already_detected = db.cursor.fetchone()
             if not already_detected:
-                db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, EVENT_DUPLICATE_IP))
+                log_event(ip, mac, EVENT_DUPLICATE_IP)
                 debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
     if duplicates:
         db.connection.commit()
@@ -835,7 +836,7 @@ def detect_anomalies(timeout):
             db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
             already_detected = db.cursor.fetchone()
             if not already_detected:
-                db.cursor.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, 0, ?)", (mac, ip, now, EVENT_DUPLICATE_MAC))
+                log_event(ip, mac, EVENT_DUPLICATE_MAC)
                 debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
     if duplicates:
         db.connection.commit()
