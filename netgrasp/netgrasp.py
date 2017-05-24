@@ -244,10 +244,12 @@ def get_pcap():
 def wiretap(pc, child_conn):
     import sys
 
+    netgrasp_instance.debugger.debug('top of wiretap')
+
     if netgrasp_instance.daemonize:
         # We use a lock file when daemonized, as this allows netgraspctl to coordinate
         # with the daemon. Over-write the master-process handler with our own.
-        netgrasp_instance._database_lock = ExclusiveFileLock(config.config_instance.GetText("Database", "lockfile", DEFAULT_DBLOCK, False))
+        netgrasp_instance._database_lock = exclusive_lock.ExclusiveFileLock(config.config_instance.GetText("Database", "lockfile", DEFAULT_DBLOCK, False))
 
     try:
         import dpkt
@@ -581,7 +583,7 @@ def update_database(db, debugger):
             db.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
             did += 1
         db.connection.commit()
-        db.release()
+        db.lock.lock()
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
@@ -1339,7 +1341,6 @@ def _init(verbose, daemonize):
         debugger.warning("Output forced to stderr, started with --foreground flag.")
 
     return (debugger, configuration)
-    
 
 def start():
     ng = netgrasp_instance
