@@ -1,4 +1,5 @@
 from netgrasp.utils import debug
+from netgrasp.utils import exclusive_lock
 
 database_instance = None
 
@@ -16,10 +17,9 @@ class Database:
         self.connection = sqlite3.connect(filename, detect_types=sqlite3.PARSE_DECLTYPES)
 
     def set_state(self, key, value, secret = False):
-        self.lock.acquire()
-        self.cursor.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
-        self.connection.commit()
-        self.lock.release()
+        with exclusive_lock.ExclusiveFileLock(self.lock, 5, "failed to update state"):
+            self.cursor.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
+            self.connection.commit()
         if secret:
             self.debugger.info("set key[%s] to hidden value", (key,))
         else:
