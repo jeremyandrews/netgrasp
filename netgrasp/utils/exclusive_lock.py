@@ -6,16 +6,11 @@ from netgrasp.utils import debug
 
 class ExclusiveFileLock:
     def __init__(self, lockfile, timeout = 5, timeout_message = None):
-        try:
-            self._lockfile = lockfile
-            self._timeout = timeout
-            self._timeout_message = timeout_message
-            self._fd = None
-            self.debugger = debug.debugger_instance
-        except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        self._lockfile = lockfile
+        self._timeout = timeout
+        self._timeout_message = timeout_message
+        self._fd = None
+        self.debugger = debug.debugger_instance
 
     def __enter__(self):
         try:
