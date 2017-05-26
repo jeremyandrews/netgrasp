@@ -17,28 +17,38 @@ class Database:
         self.connection = sqlite3.connect(filename, detect_types=sqlite3.PARSE_DECLTYPES)
 
     def set_state(self, key, value, secret = False):
-        with exclusive_lock.ExclusiveFileLock(self.lock, 5, "failed to update state"):
-            self.cursor.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
-            self.connection.commit()
-        if secret:
-            self.debugger.info("set key[%s] to hidden value", (key,))
-        else:
-            self.debugger.info("set key[%s] to value[%s]", (key, value))
+        try:
+            with exclusive_lock.ExclusiveFileLock(self.lock, 5, "failed to update state"):
+                self.cursor.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
+                self.connection.commit()
+            if secret:
+                self.debugger.info("set key[%s] to hidden value", (key,))
+            else:
+                self.debugger.info("set key[%s] to value[%s]", (key, value))
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def get_state(self, key, default_value, date = False):
-        self.cursor.execute("SELECT value FROM state WHERE key=?", (key,));
-        value = self.cursor.fetchone();
-        if value:
-            if date:
-                import datetime
-                self.debugger.debug("returning date: %s", (value[0],))
-                return datetime.datetime.strptime(value[0], "%Y-%m-%d %H:%M:%S.%f")
+        try:
+            self.cursor.execute("SELECT value FROM state WHERE key=?", (key,));
+            value = self.cursor.fetchone();
+            if value:
+                if date:
+                    import datetime
+                    self.debugger.debug("returning date: %s", (value[0],))
+                    return datetime.datetime.strptime(value[0], "%Y-%m-%d %H:%M:%S.%f")
+                else:
+                    self.debugger.debug("returning value: %s", (value[0],))
+                    return value[0]
             else:
-                self.debugger.debug("returning value: %s", (value[0],))
-                return value[0]
-        else:
-            self.debugger.debug("returning default value: %s", (default_value,))
-            return default_value
+                self.debugger.debug("returning default value: %s", (default_value,))
+                return default_value
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 class SelectQueryBuilder():
     def __init__(self, table, debugger, verbose):

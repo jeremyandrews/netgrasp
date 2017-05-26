@@ -14,6 +14,7 @@ import sys
 import os
 import datetime
 import time
+import traceback
 
 netgrasp_instance = None
 
@@ -127,87 +128,47 @@ def main(*pcap):
 
     last_heartbeat = datetime.datetime.now()
     while run:
-        now = datetime.datetime.now()
-        ng.debugger.debug("top of master while loop: %s", (now,))
-
-        parent_conn.send(HEARTBEAT)
-        heartbeat = False
-        while parent_conn.poll():
-            message = parent_conn.recv()
-            if (message == HEARTBEAT):
-                heartbeat = True
-        # It's possible to receive multiple heartbeats, but many or one is the same to us.
-        if heartbeat:
-            ng.debugger.debug("received heartbeat from wiretap process")
-            last_heartbeat = now
-
-        ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
-        time.sleep(ng.delay)
         try:
+            now = datetime.datetime.now()
+            ng.debugger.debug("top of master while loop: %s", (now,))
+
+            parent_conn.send(HEARTBEAT)
+            heartbeat = False
+            while parent_conn.poll():
+                message = parent_conn.recv()
+                if (message == HEARTBEAT):
+                    heartbeat = True
+            # It's possible to receive multiple heartbeats, but many or one is the same to us.
+            if heartbeat:
+                ng.debugger.debug("received heartbeat from wiretap process")
+                last_heartbeat = now
+
+            ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
+            time.sleep(ng.delay)
+
             identify_macs()
-        except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME identify_macs(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        try:
             detect_stale_ips(ng.active_timeout)
-        except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME detect_stale_ips(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        try:
             detect_netscans()
-        except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME detect_netscans(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        try:
             detect_anomalies(ng.active_timeout)
-        except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME detect_anomalies(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        try:
             send_notifications()
-        except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME send_notifications(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        try:
             send_email_alerts()
-        except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME send_email_alerts(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        try:
             send_email_digests()
-        except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME send_email_digests(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        try:
             garbage_collection(ng.garbage_collection, ng.oldest_arplog, ng.oldest_event)
+
+
+            if not child.is_alive():
+                ng.debugger.error("wiretap process gone away: %d", (child.exitcode,))
+                run = False
+
+            # If we haven't heard from the wiretap process in >1 minute, exit.
+            time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
+            if (now >= time_to_exit):
+                run = False
+                ng.debugger.error("No heartbeats from wiretap process for >1 minute.")
         except Exception as e:
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            ng.debugger.error("FIXME garbage_collection(): %s", (e,))
-            ng.debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-
-        if not child.is_alive():
-            ng.debugger.error("wiretap process gone away: %d", (child.exitcode,))
-            run = False
-
-        # If we haven't heard from the wiretap process in >1 minute, exit.
-        time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
-        if (now >= time_to_exit):
-            run = False
-            ng.debugger.error("No heartbeats from wiretap process for >1 minute.")
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            ng.debugger.warning("FIXME main while loop line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
     ng.debugger.critical("Exiting")
 
 def get_pcap():
@@ -272,946 +233,1053 @@ def wiretap(pc, child_conn):
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
-        now = datetime.datetime.now()
-        netgrasp_instance.debugger.debug("[%d] top of while loop: %s", (run, now))
+        try:
+            now = datetime.datetime.now()
+            netgrasp_instance.debugger.debug("[%d] top of while loop: %s", (run, now))
 
-        child_conn.send(HEARTBEAT)
+            child_conn.send(HEARTBEAT)
 
-        heartbeat = False
-        while child_conn.poll():
-            message = child_conn.recv()
-            if (message == HEARTBEAT):
-                heartbeat = True
-        # It's possible to receive multiple heartbeats, but many or one is the same to us.
-        if heartbeat:
-            netgrasp_instance.debugger.debug("received heartbeat from main process")
-            last_heartbeat = now
+            heartbeat = False
+            while child_conn.poll():
+                message = child_conn.recv()
+                if (message == HEARTBEAT):
+                    heartbeat = True
+            # It's possible to receive multiple heartbeats, but many or one is the same to us.
+            if heartbeat:
+                netgrasp_instance.debugger.debug("received heartbeat from main process")
+                last_heartbeat = now
 
-        # Wait an arp packet, then loop again.
-        pc.loop(1, received_arp, child_conn)
+            # Wait an arp packet, then loop again.
+            pc.loop(1, received_arp, child_conn)
 
-        # If we haven't heard from the main process in >1 minute, exit.
-        time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
-        if (now >= time_to_exit):
-            run = False
+            # If we haven't heard from the main process in >1 minute, exit.
+            time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
+            if (now >= time_to_exit):
+                run = False
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            ng.debugger.warning("FIXME main while loop line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
     netgrasp_instance.debugger.critical("No heartbeats from main process for >1 minute, exiting.")
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
-    from utils import exclusive_lock
-    import datetime
+    try:
+        from utils import exclusive_lock
+        import datetime
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
-    debugger.debug("entering ip_seen(%s, %s, %s, %s, %d)", (src_ip, src_mac, dst_ip, dst_mac, request))
+        debugger.debug("entering ip_seen(%s, %s, %s, %s, %d)", (src_ip, src_mac, dst_ip, dst_mac, request))
 
-    now = datetime.datetime.now()
+        now = datetime.datetime.now()
 
-    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to insert into arplog"):
-        db.cursor.execute("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)", (src_mac, src_ip, dst_mac, dst_ip, request, now))
-        db.connection.commit()
-        debugger.debug("inserted into arplog")
+        debugger.debug("grabbing lock")
+        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to insert into arplog"):
+            debugger.debug("grabbed lock")
+            db.cursor.execute("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)", (src_mac, src_ip, dst_mac, dst_ip, request, now))
+            db.connection.commit()
+            debugger.debug("inserted into arplog")
 
-    # @TODO Research and see if we should be treating these another way.
-    if (src_ip == "0.0.0.0" or src_mac == BROADCAST):
-        debugger.info("Ignoring IP source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac));
-        return False
+        # @TODO Research and see if we should be treating these another way.
+        if (src_ip == "0.0.0.0" or src_mac == BROADCAST):
+            debugger.info("Ignoring IP source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac));
+            return False
 
-    # Check if we've seen this IP, MAC pair before.
-    active, lastSeen, lastRequested, counter, sid, did, changed_ip = [False, False, False, 0, 0, 0, False]
-    debugger.debug("ip_seen query 1")
-    db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, src_mac))
-    result = db.cursor.fetchone()
-    if result:
-        active, lastSeen, lastRequested, counter, sid, did = result
-
-    if not result:
-        # Check if we've seen this MAC, hostname pair before, it may have gotten assigned a new IP.
-        # In the event of the same IP and a different hostname, we treat this like a different device
-        # (though it's likely a vm, jail, or alias). @TODO Revisit this.
-        hostname = dns_lookup(src_ip)
-        debugger.debug("ip_seen query 2")
-        db.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
-        result = db.cursor.fetchone()
-        if result:
-            active, lastSeen, lastRequested, counter, sid, did = result
-            changed_ip = True
-
-    if not result:
-        # Check if we've seen this IP be requested before.
-        debugger.debug("ip_seen query 3")
-        db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, BROADCAST))
+        # Check if we've seen this IP, MAC pair before.
+        active, lastSeen, lastRequested, counter, sid, did, changed_ip = [False, False, False, 0, 0, 0, False]
+        debugger.debug("ip_seen query 1")
+        db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, src_mac))
         result = db.cursor.fetchone()
         if result:
             active, lastSeen, lastRequested, counter, sid, did = result
 
-    log_event(src_ip, src_mac, EVENT_SEEN)
-    if changed_ip:
-        debugger.info("[%s] (%s) has a new ip [%s]", (did, src_mac, src_ip))
-        log_event(src_ip, src_mac, EVENT_CHANGED_IP)
-    if active:
-        if lastSeen:
-            # has been active recently
-            debugger.debug("%s (%s) is active", (src_ip, src_mac))
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_SEEN):
-                db.cursor.execute("UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, counter + 1, sid))
-                db.connection.commit()
+        if not result:
+            # Check if we've seen this MAC, hostname pair before, it may have gotten assigned a new IP.
+            # In the event of the same IP and a different hostname, we treat this like a different device
+            # (though it's likely a vm, jail, or alias). @TODO Revisit this.
+            hostname = dns_lookup(src_ip)
+            debugger.debug("ip_seen query 2")
+            db.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
+            result = db.cursor.fetchone()
+            if result:
+                active, lastSeen, lastRequested, counter, sid, did = result
+                changed_ip = True
+
+        if not result:
+            # Check if we've seen this IP be requested before.
+            debugger.debug("ip_seen query 3")
+            db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, BROADCAST))
+            result = db.cursor.fetchone()
+            if result:
+                active, lastSeen, lastRequested, counter, sid, did = result
+
+        log_event(src_ip, src_mac, EVENT_SEEN)
+        if changed_ip:
+            debugger.info("[%s] (%s) has a new ip [%s]", (did, src_mac, src_ip))
+            log_event(src_ip, src_mac, EVENT_CHANGED_IP)
+        if active:
+            if lastSeen:
+                # has been active recently
+                debugger.debug("%s (%s) is active", (src_ip, src_mac))
+                with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_SEEN):
+                    db.cursor.execute("UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, counter + 1, sid))
+                    db.connection.commit()
+            else:
+                # has not been active recently, but was requested recently
+                if first_seen(src_ip, src_mac):
+                    # First time we've seen IP since it was stale.
+                    log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
+                    the_event = EVENT_SEEN_FIRST_RECENT
+                    lastSeen = last_seen(src_ip, src_mac)
+                    if lastSeen:
+                        timeSince = datetime.datetime.now() - lastSeen
+                        debugger.info("[%s] %s (%s) is active again (after %s)", (did, src_ip, src_mac, timeSince))
+                    else:
+                        logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_ip, src_mac)))
+                else:
+                    # First time we've actively seen this IP.
+                    log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
+                    log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
+                    the_event = EVENT_SEEN_FIRST
+                    debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
+
+                # @TODO properly handle multiple active occurences of the same IP
+                with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % the_event):
+                    db.cursor.execute("UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, now, counter + 1, sid))
+                    db.connection.commit()
         else:
-            # has not been active recently, but was requested recently
-            if first_seen(src_ip, src_mac):
-                # First time we've seen IP since it was stale.
+            if did:
+                # First time we've seen this IP recently.
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                 the_event = EVENT_SEEN_FIRST_RECENT
-                lastSeen = last_seen(src_ip, src_mac)
-                if lastSeen:
-                    timeSince = datetime.datetime.now() - lastSeen
-                    debugger.info("[%s] %s (%s) is active again (after %s)", (did, src_ip, src_mac, timeSince))
-                else:
-                    logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_ip, src_mac)))
+                debugger.info("[%s] %s (%s) is active, first time seeing recently", (did, src_ip, src_mac))
             else:
-                # First time we've actively seen this IP.
+                # First time we've seen this IP.
+                db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
+                row = db.cursor.fetchone()
+                if row:
+                    did = row[0]
+                else:
+                    did = 1
+                if not did:
+                    debugger.debug('Did was None, setting to 1')
+                    did = 1
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                 the_event = EVENT_SEEN_FIRST
                 debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
-
-            # @TODO properly handle multiple active occurences of the same IP
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % the_event):
-                db.cursor.execute("UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, now, counter + 1, sid))
+                db.cursor.execute("INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
                 db.connection.commit()
-    else:
-        if did:
-            # First time we've seen this IP recently.
-            log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-            the_event = EVENT_SEEN_FIRST_RECENT
-            debugger.info("[%s] %s (%s) is active, first time seeing recently", (did, src_ip, src_mac))
-        else:
-            # First time we've seen this IP.
-            db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
-            row = db.cursor.fetchone()
-            if row:
-                did = row[0]
-            else:
-                did = 1
-            if not did:
-                debugger.debug('Did was None, setting to 1')
-                did = 1
-            log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
-            log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-            the_event = EVENT_SEEN_FIRST
-            debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % the_event):
-            db.cursor.execute("INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
-            db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def ip_request(ip, mac, src_ip, src_mac):
-    from utils import exclusive_lock
-    import datetime
+    try:
+        from utils import exclusive_lock
+        import datetime
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
-    debugger.debug("entering ip_request(%s, %s, %s, %s)", (ip, mac, src_ip, src_mac))
-    now = datetime.datetime.now()
+        debugger.debug("entering ip_request(%s, %s, %s, %s)", (ip, mac, src_ip, src_mac))
+        now = datetime.datetime.now()
 
-    if ((ip == src_ip) or (mac == src_mac)):
-        debugger.debug("requesting self, ignoring")
-        return
+        if ((ip == src_ip) or (mac == src_mac)):
+            debugger.debug("requesting self, ignoring")
+            return
 
-    active = False
-    lastRequested = False
-    db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, mac))
-    requested = db.cursor.fetchone()
-    if requested:
-        active, lastRequested, sid, did = requested
-    else:
-        if (mac == BROADCAST):
-            # Maybe we already have seen a request for this address
-            db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, BROADCAST))
-            requested = db.cursor.fetchone()
-            if requested:
-                active, lastRequested, sid, did = requested
-            else:
-                # Maybe the IP has been seen already
-                db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND active=1", (ip,))
+        active = False
+        lastRequested = False
+        db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, mac))
+        requested = db.cursor.fetchone()
+        if requested:
+            active, lastRequested, sid, did = requested
+        else:
+            if (mac == BROADCAST):
+                # Maybe we already have seen a request for this address
+                db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, BROADCAST))
                 requested = db.cursor.fetchone()
                 if requested:
                     active, lastRequested, sid, did = requested
+                else:
+                    # Maybe the IP has been seen already
+                    db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND active=1", (ip,))
+                    requested = db.cursor.fetchone()
+                    if requested:
+                        active, lastRequested, sid, did = requested
 
-    log_event(ip, mac, EVENT_REQUESTED)
-    if active:
-        # Update:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_REQUESTED):
-            db.cursor.execute("UPDATE seen set lastRequested=? WHERE sid=?", (now, sid))
-            db.connection.commit()
-        debugger.debug("%s (%s) requested", (ip, mac))
-    else:
-        # First time we've seen a request for this IP.
-        log_event(ip, mac, EVENT_REQUESTED_FIRST)
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_REQUESTED_FIRST):
-            db.cursor.execute("INSERT INTO seen (mac, ip, did, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (mac, ip, get_did(ip, mac), now, now, ip_is_mine(ip)))
-            db.connection.commit()
-        debugger.info("%s (%s) requested, first time seeing", (ip, mac))
+        log_event(ip, mac, EVENT_REQUESTED)
+        if active:
+            # Update:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_REQUESTED):
+                db.cursor.execute("UPDATE seen set lastRequested=? WHERE sid=?", (now, sid))
+                db.connection.commit()
+            debugger.debug("%s (%s) requested", (ip, mac))
+        else:
+            # First time we've seen a request for this IP.
+            log_event(ip, mac, EVENT_REQUESTED_FIRST)
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_REQUESTED_FIRST):
+                db.cursor.execute("INSERT INTO seen (mac, ip, did, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (mac, ip, get_did(ip, mac), now, now, ip_is_mine(ip)))
+                db.connection.commit()
+            debugger.info("%s (%s) requested, first time seeing", (ip, mac))
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Assumes we already have the database lock.
 def log_event(ip, mac, event, have_lock = False):
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    db = database.database_instance
-    debugger = debug.debugger_instance
-    debugger.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
+        db = database.database_instance
+        debugger = debug.debugger_instance
+        debugger.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
 
-    now = datetime.datetime.now()
+        now = datetime.datetime.now()
 
-    if have_lock:
-        db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
-    else:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to log event: %s""" % event):
+        if have_lock:
             db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
+        else:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to log event: %s""" % event):
+                db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def ip_is_mine(ip):
-    import socket
-    return (ip == socket.gethostbyname(socket.gethostname()))
+    try:
+        import socket
+        return (ip == socket.gethostbyname(socket.gethostname()))
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Database definitions.
 def create_database(db, debugger):
-    from utils import exclusive_lock
-    debugger.debug('Creating database tables, if not already existing.')
+    try:
+        from utils import exclusive_lock
+        debugger.debug('Creating database tables, if not already existing.')
 
-    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to create tables/indexes"):
-        # Create state table.
-        db.cursor.execute("""
-          CREATE TABLE IF NOT EXISTS state(
-            id INTEGER PRIMARY KEY,
-            key VARCHAR UNIQUE,
-            value TEXT
-          )
-        """)
+        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to create tables/indexes"):
+            # Create state table.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS state(
+                id INTEGER PRIMARY KEY,
+                key VARCHAR UNIQUE,
+                value TEXT
+              )
+            """)
 
-        # Create seen table.
-        db.cursor.execute("""
-          CREATE TABLE IF NOT EXISTS seen(
-            sid INTEGER PRIMARY KEY,
-            did INTEGER,
-            mac TEXT,
-            ip TEXT,
-            interface TEXT,
-            network TEXT,
-            firstSeen TIMESTAMP,
-            firstRequested TIMESTAMP,
-            lastSeen TIMESTAMP,
-            lastRequested TIMESTAMP,
-            counter NUMERIC,
-            active NUMERIC,
-            self NUMERIC
-          )
-        """)
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstSeen ON seen (ip, mac, firstSeen)")
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastSeen ON seen (ip, mac, lastSeen)")
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstRequested ON seen (ip, mac, firstRequested)")
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastRequested ON seen (ip, mac, lastRequested)")
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_lastSeen ON seen (active, lastSeen)")
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_active ON seen (ip, mac, active)")
-        # PRAGMA index_list(seen)
+            # Create seen table.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS seen(
+                sid INTEGER PRIMARY KEY,
+                did INTEGER,
+                mac TEXT,
+                ip TEXT,
+                interface TEXT,
+                network TEXT,
+                firstSeen TIMESTAMP,
+                firstRequested TIMESTAMP,
+                lastSeen TIMESTAMP,
+                lastRequested TIMESTAMP,
+                counter NUMERIC,
+                active NUMERIC,
+                self NUMERIC
+              )
+            """)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstSeen ON seen (ip, mac, firstSeen)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastSeen ON seen (ip, mac, lastSeen)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstRequested ON seen (ip, mac, firstRequested)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastRequested ON seen (ip, mac, lastRequested)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_lastSeen ON seen (active, lastSeen)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_active ON seen (ip, mac, active)")
+            # PRAGMA index_list(seen)
 
-        # Create arplog table.
-        db.cursor.execute("""
-          CREATE TABLE IF NOT EXISTS arplog(
-            aid INTEGER PRIMARY KEY,
-            src_mac TEXT,
-            src_ip TEXT,
-            dst_mac TEXT,
-            dst_ip TEXT,
-            request NUMERIC,
-            interface TEXT,
-            network TEXT,
-            timestamp TIMESTAMP
-          )
-        """)
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
+            # Create arplog table.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS arplog(
+                aid INTEGER PRIMARY KEY,
+                src_mac TEXT,
+                src_ip TEXT,
+                dst_mac TEXT,
+                dst_ip TEXT,
+                request NUMERIC,
+                interface TEXT,
+                network TEXT,
+                timestamp TIMESTAMP
+              )
+            """)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
 
-        # Create event table.
-        db.cursor.execute("""
-          CREATE TABLE IF NOT EXISTS event(
-            eid INTEGER PRIMARY KEY,
-            mac TEXT,
-            ip TEXT,
-            interface TEXT,
-            network TEXT,
-            timestamp TIMESTAMP,
-            processed NUMERIC,
-            event TEXT
-          )
-        """)
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_timestamp_processed ON event (event, timestamp, processed)")
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_processed ON event (timestamp, processed)")
-        # PRAGMA index_list(event)
+            # Create event table.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS event(
+                eid INTEGER PRIMARY KEY,
+                mac TEXT,
+                ip TEXT,
+                interface TEXT,
+                network TEXT,
+                timestamp TIMESTAMP,
+                processed NUMERIC,
+                event TEXT
+              )
+            """)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_event_timestamp_processed ON event (event, timestamp, processed)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_processed ON event (timestamp, processed)")
+            # PRAGMA index_list(event)
 
-        # Create vendor table.
-        db.cursor.execute("""
-          CREATE TABLE IF NOT EXISTS vendor(
-            vid INTEGER PRIMARY KEY,
-            mac TEXT,
-            vendor TEXT,
-            customname TEXT
-          )
-        """)
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac ON vendor (mac)")
+            # Create vendor table.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS vendor(
+                vid INTEGER PRIMARY KEY,
+                mac TEXT,
+                vendor TEXT,
+                customname TEXT
+              )
+            """)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac ON vendor (mac)")
 
-        # Create host table.
-        db.cursor.execute("""
-          CREATE TABLE IF NOT EXISTS host(
-            hid INTEGER PRIMARY KEY,
-            mac TEXT,
-            ip TEXT,
-            hostname TEXT,
-            customname TEXT
-          )
-        """)
-        db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
-        db.connection.commit()
+            # Create host table.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS host(
+                hid INTEGER PRIMARY KEY,
+                mac TEXT,
+                ip TEXT,
+                hostname TEXT,
+                customname TEXT
+              )
+            """)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
+            db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def update_database(db, debugger):
-    from utils import exclusive_lock
-
-    # Update #1: add did column to seen table, populate
     try:
-        db.cursor.execute("SELECT did FROM seen LIMIT 1")
+        from utils import exclusive_lock
+
+        # Update #1: add did column to seen table, populate
+        try:
+            db.cursor.execute("SELECT did FROM seen LIMIT 1")
+        except Exception as e:
+            debugger.debug("%s", (e,))
+            debugger.debug("applying update #1 to database: adding did column to seen, populating")
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to apply database updates"):
+                db.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
+                # Prior to this we assumed a new IP was a new device.
+                db.cursor.execute("SELECT DISTINCT ip, mac FROM seen")
+                rows = db.cursor.fetchall()
+                did = 1
+                for row in rows:
+                    ip, mac = row
+                    db.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
+                    did += 1
+                db.connection.commit()
     except Exception as e:
-        debugger.debug("%s", (e,))
-        debugger.debug("applying update #1 to database: adding did column to seen, populating")
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to apply database updates"):
-            db.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
-            # Prior to this we assumed a new IP was a new device.
-            db.cursor.execute("SELECT DISTINCT ip, mac FROM seen")
-            rows = db.cursor.fetchall()
-            did = 1
-            for row in rows:
-                ip, mac = row
-                db.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
-                did += 1
-            db.connection.commit()
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
-    import socket
-    import struct
-    import dpkt
-
-    debugger = debug.debugger_instance
-
-    packet = dpkt.ethernet.Ethernet(data)
     try:
+        import socket
+        import struct
+        import dpkt
+
+        debugger = debug.debugger_instance
+
+        packet = dpkt.ethernet.Ethernet(data)
         src_ip = socket.inet_ntoa(packet.data.spa)
         src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
         dst_ip = socket.inet_ntoa(packet.data.tpa)
         dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
-    except Exception as e:
-        debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-        debugger.error("FIXME received_arp() 1: %s", (e,))
-        debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
 
-    if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-        try:
+        if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
             debugger.debug('ARP request from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
             ip_request(dst_ip, dst_mac, src_ip, src_mac)
-        except Exception as e:
-            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            debugger.error("FIXME received_arp() 2: %s", (e,))
-            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-    elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-        try:
+        elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
             debugger.debug('ARP reply from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
-        except Exception as e:
-            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
-            debugger.error("FIXME received_arp() 3: %s", (e,))
-            debugger.error("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Determine appropriate device id for IP, MAC pair.
 def get_did(ip, mac):
-    debugger = debug.debugger_instance
-    debugger.debug("entering get_did(%s, %s)", (ip, mac))
-    db = database.database_instance
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering get_did(%s, %s)", (ip, mac))
+        db = database.database_instance
 
-    db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, mac))
-    did = db.cursor.fetchone()
-    if did:
-        did = did[0]
-    if not did:
-        hostname = dns_lookup(ip)
-        db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (mac, hostname))
-        did = db.cursor.fetchone()
-        if did:
-            did = did[0]
-
-    if not did:
-        db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
-        did = db.cursor.fetchone()
-        if did:
-            did = did[0]
-
-    if did:
-        debugger.debug("matched did for %s [%s]: %d", (ip, mac, did))
-        return did
-    else:
-        db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
+        db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, mac))
         did = db.cursor.fetchone()
         if did:
             did = did[0]
         if not did:
-            did = 1
-        debugger.debug("no matching did for %s [%s], new: %d", (ip, mac, did))
-        return did
+            hostname = dns_lookup(ip)
+            db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (mac, hostname))
+            did = db.cursor.fetchone()
+            if did:
+                did = did[0]
+
+        if not did:
+            db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
+            did = db.cursor.fetchone()
+            if did:
+                did = did[0]
+
+        if did:
+            debugger.debug("matched did for %s [%s]: %d", (ip, mac, did))
+            return did
+        else:
+            db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
+            did = db.cursor.fetchone()
+            if did:
+                did = did[0]
+            if not did:
+                did = 1
+            debugger.debug("no matching did for %s [%s], new: %d", (ip, mac, did))
+            return did
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def first_seen(ip, mac):
-    debugger = debug.debugger_instance
-    debugger.debug("entering first_seen(%s, %s)", (ip, mac))
-    db = database.database_instance
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering first_seen(%s, %s)", (ip, mac))
+        db = database.database_instance
 
-    did = get_did(ip, mac)
-    db.cursor.execute("SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1", (did,))
-    active = db.cursor.fetchone()
-    if active:
-        active = active[0]
+        did = get_did(ip, mac)
+        db.cursor.execute("SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1", (did,))
+        active = db.cursor.fetchone()
+        if active:
+            active = active[0]
 
-    if active:
-        return active
-    else:
-        return False
+        if active:
+            return active
+        else:
+            return False
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def first_seen_recently(ip, mac):
-    debugger = debug.debugger_instance
-    debugger.debug("entering last_seen_recently(%s, %s)", (ip, mac))
-    db = database.database_instance
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering last_seen_recently(%s, %s)", (ip, mac))
+        db = database.database_instance
 
-    did = get_did(ip, mac)
-    db.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
-    recent = db.cursor.fetchone()
-    if recent:
-        recent = recent[0]
+        did = get_did(ip, mac)
+        db.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
+        recent = db.cursor.fetchone()
+        if recent:
+            recent = recent[0]
 
-    if recent:
-        return recent
-    else:
-        return False
+        if recent:
+            return recent
+        else:
+            return False
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def last_seen(ip, mac):
-    debugger = debug.debugger_instance
-    debugger.debug("entering last_seen(%s, %s)", (ip, mac))
-    db = database.database_instance
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering last_seen(%s, %s)", (ip, mac))
+        db = database.database_instance
 
-    did = get_did(ip, mac)
-    db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
-    active = db.cursor.fetchone()
-    if active:
-        return active[0]
-    else:
-        return False
+        did = get_did(ip, mac)
+        db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
+        active = db.cursor.fetchone()
+        if active:
+            return active[0]
+        else:
+            return False
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def previously_seen(ip, mac):
-    debugger = debug.debugger_instance
-    debugger.debug("entering previously_seen(%s, %s)", (ip, mac))
-    db = database.database_instance
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering previously_seen(%s, %s)", (ip, mac))
+        db = database.database_instance
 
-    did = get_did(ip, mac)
-    db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
-    previous = db.cursor.fetchone()
-    if previous:
-        return previous[0]
-    else:
-        return False
+        did = get_did(ip, mac)
+        db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
+        previous = db.cursor.fetchone()
+        if previous:
+            return previous[0]
+        else:
+            return False
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def first_requested(ip, mac):
-    debugger = debug.debugger_instance
-    debugger.debug("entering first_requested(%s, %s)", (ip, mac))
-    db = database.database_instance
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering first_requested(%s, %s)", (ip, mac))
+        db = database.database_instance
 
-    did = get_did(ip, mac)
-    db.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
-    active = db.cursor.fetchone()
-    if active:
-        return active[0]
-    else:
-        return False
+        did = get_did(ip, mac)
+        db.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
+        active = db.cursor.fetchone()
+        if active:
+            return active[0]
+        else:
+            return False
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def last_requested(ip, mac):
-    debugger = debug.debugger_instance
-    debugger.debug("entering last_requested(%s, %s)", (ip, mac))
-    db = database.database_instance
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering last_requested(%s, %s)", (ip, mac))
+        db = database.database_instance
 
-    did = get_did(ip, mac)
-    db.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
-    last = db.cursor.fetchone()
-    if last:
-        return last[0]
-    else:
-        return False
+        did = get_did(ip, mac)
+        db.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
+        last = db.cursor.fetchone()
+        if last:
+            return last[0]
+        else:
+            return False
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips(timeout):
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
-    debugger.debug("entering detect_stale_ips()")
-    stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
+        debugger.debug("entering detect_stale_ips()")
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
-    db.cursor.execute("SELECT sid, mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?", (stale,))
-    rows = db.cursor.fetchall()
-    if rows:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to mark devices stale"):
-            for row in rows:
-                sid, mac, ip, firstSeen, lastSeen = row
-                if (firstSeen and lastSeen):
-                    timeActive = lastSeen - firstSeen
-                else:
-                    timeActive = "unknown"
-                log_event(ip, mac, EVENT_STALE, True)
-                debugger.info("%s [%s] is no longer active (was active for %s)", (ip, mac, timeActive))
-                db.cursor.execute("UPDATE seen SET active = 0 WHERE sid=?", (sid,))
-            db.connection.commit()
+        db.cursor.execute("SELECT sid, mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?", (stale,))
+        rows = db.cursor.fetchall()
+        if rows:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to mark devices stale"):
+                for row in rows:
+                    sid, mac, ip, firstSeen, lastSeen = row
+                    if (firstSeen and lastSeen):
+                        timeActive = lastSeen - firstSeen
+                    else:
+                        timeActive = "unknown"
+                    log_event(ip, mac, EVENT_STALE, True)
+                    debugger.info("%s [%s] is no longer active (was active for %s)", (ip, mac, timeActive))
+                    db.cursor.execute("UPDATE seen SET active = 0 WHERE sid=?", (sid,))
+                db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def detect_netscans():
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
-    debugger.debug("entering detect_netscans()")
-    now = datetime.datetime.now()
+        debugger.debug("entering detect_netscans()")
+        now = datetime.datetime.now()
 
-    three_minutes_ago = now - datetime.timedelta(minutes=3)
-    db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50", (three_minutes_ago,))
-    scans = db.cursor.fetchall()
-    if scans:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag netscan(s)"):
-            for scan in scans:
-                count, src_mac, src_ip = scan
-                db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, EVENT_SCAN, three_minutes_ago))
-                already_detected = db.cursor.fetchone()
-                if not already_detected:
-                    log_event(ip, mac, EVENT_SCAN, True)
-                    debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
-            db.connection.commit()
+        three_minutes_ago = now - datetime.timedelta(minutes=3)
+        db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50", (three_minutes_ago,))
+        scans = db.cursor.fetchall()
+        if scans:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag netscan(s)"):
+                for scan in scans:
+                    count, src_mac, src_ip = scan
+                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, EVENT_SCAN, three_minutes_ago))
+                    already_detected = db.cursor.fetchone()
+                    if not already_detected:
+                        log_event(src_ip, src_mac, EVENT_SCAN, True)
+                        debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
+                db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def detect_anomalies(timeout):
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
-    debugger.debug("entering detect_anomalies()")
-    now = datetime.datetime.now()
-    stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
+        debugger.debug("entering detect_anomalies()")
+        now = datetime.datetime.now()
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
-    # Multiple MACs with the same IP.
-    db.cursor.execute("SELECT COUNT(*) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1", (BROADCAST,))
-    duplicates = db.cursor.fetchall()
-    if duplicates:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag multiple MACs with same IP"):
-            for duplicate in duplicates:
-                count, ip = duplicate
-                db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1;", (ip,))
-                details = db.cursor.fetchall()
-                for detail in details:
-                    ip, mac, sid, did = detail
-                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
-                    already_detected = db.cursor.fetchone()
-                    if not already_detected:
-                        log_event(ip, mac, EVENT_DUPLICATE_IP, True)
-                        debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
-            db.connection.commit()
+        # Multiple MACs with the same IP.
+        db.cursor.execute("SELECT COUNT(*) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1", (BROADCAST,))
+        duplicates = db.cursor.fetchall()
+        if duplicates:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag multiple MACs with same IP"):
+                for duplicate in duplicates:
+                    count, ip = duplicate
+                    db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1;", (ip,))
+                    details = db.cursor.fetchall()
+                    for detail in details:
+                        ip, mac, sid, did = detail
+                        db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
+                        already_detected = db.cursor.fetchone()
+                        if not already_detected:
+                            log_event(ip, mac, EVENT_DUPLICATE_IP, True)
+                            debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
+                db.connection.commit()
 
-    # Multiple IPs with the same MAC.
-    db.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (BROADCAST,))
-    duplicates = db.cursor.fetchall()
-    if duplicates:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag multiple IPs with same MAC"):
-            for duplicate in duplicates:
-                count, mac = duplicate
-                db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1;", (mac,))
-                details = db.cursor.fetchall()
-                for detail in details:
-                    ip, mac, sid, did = detail
-                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
-                    already_detected = db.cursor.fetchone()
-                    if not already_detected:
-                        log_event(ip, mac, EVENT_DUPLICATE_MAC, True)
-                        debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
-            db.connection.commit()
+        # Multiple IPs with the same MAC.
+        db.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (BROADCAST,))
+        duplicates = db.cursor.fetchall()
+        if duplicates:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag multiple IPs with same MAC"):
+                for duplicate in duplicates:
+                    count, mac = duplicate
+                    db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1;", (mac,))
+                    details = db.cursor.fetchall()
+                    for detail in details:
+                        ip, mac, sid, did = detail
+                        db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
+                        already_detected = db.cursor.fetchone()
+                        if not already_detected:
+                            log_event(ip, mac, EVENT_DUPLICATE_MAC, True)
+                            debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
+                db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def send_notifications():
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
-    notifier = notify.notify_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
+        notifier = notify.notify_instance
 
-    debugger.debug("entering send_notifications()")
+        debugger.debug("entering send_notifications()")
 
-    if not notifier.enabled:
-        debugger.debug("notifications disabled")
-        return False
+        if not notifier.enabled:
+            debugger.debug("notifications disabled")
+            return False
 
-    if not notifier.alerts:
-        debugger.debug("no notification alerts configured")
-        return False
+        if not notifier.alerts:
+            debugger.debug("no notification alerts configured")
+            return False
 
-    import ntfy
-    timer = simple_timer.Timer()
+        import ntfy
+        timer = simple_timer.Timer()
 
-    day = datetime.datetime.now() - datetime.timedelta(days=1)
-    db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notifier.alerts)) + ")", notifier.alerts)
+        day = datetime.datetime.now() - datetime.timedelta(days=1)
+        db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notifier.alerts)) + ")", notifier.alerts)
 
-    rows = db.cursor.fetchall()
-    if rows:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to process notifications"):
-            counter = 0
-            for row in rows:
-                if (timer.elapsed() > MAXSECONDS):
-                    # We've been processing notifications too long, quit for now and come back later.
-                    debugger.debug("processing notifications >%d seconds, quitting for now", (MAXSECONDS,))
-                    db.connection.commit()
-                    return
-
-                eid, mac, ip, timestamp, event, processed = row
-                debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
-
-                # only send notifications for configured events
-                if event in notifier.alerts:
-                    debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
-                    firstSeen = first_seen(ip, mac)
-                    lastSeen = first_seen_recently(ip, mac)
-                    previouslySeen = previously_seen(ip, mac)
-                    title = """Netgrasp alert: %s""" % (event)
-                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstSeen))
-                    ntfy.notify(body, title)
-                    db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
-                else:
-                    debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
-            db.connection.commit()
-
-def send_email_alerts():
-    from utils import exclusive_lock
-
-    debugger = debug.debugger_instance
-    db = database.database_instance
-    emailer = email.email_instance
-
-    debugger.debug("entering send_email_alerts()")
-
-    if not emailer.enabled:
-        debugger.debug("email disabled")
-        return False
-
-    if not emailer.alerts:
-        debugger.debug("no email alerts configured")
-        return False
-
-    day = datetime.datetime.now() - datetime.timedelta(days=1)
-
-    timer = simple_timer.Timer()
-
-    db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)");
-    rows = db.cursor.fetchall()
-    if rows:
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to process notifications"):
-            for row in rows:
-                if (timer.elapsed() > MAXSECONDS):
-                    # We've been processing alerts too long, quit for now and come back later.
-                    db.connection.commit()
-                    debugger.debug("processing email alerts >%d seconds, quitting for now", (MAXSECONDS,))
-                    return
-
-                eid, mac, ip, timestamp, event, processed = row
-                debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
-                alerted = True
-
-                # only send emails for configured events
-                if event in emailer.alerts:
-                    debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
-                    # get more information about this entry ...
-                    db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
-                    info = db.cursor.fetchone()
-                    if not info:
-                        logger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
+        rows = db.cursor.fetchall()
+        if rows:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to process notifications"):
+                counter = 0
+                for row in rows:
+                    if (timer.elapsed() > MAXSECONDS):
+                        # We've been processing notifications too long, quit for now and come back later.
+                        debugger.debug("processing notifications >%d seconds, quitting for now", (MAXSECONDS,))
                         db.connection.commit()
                         return
-                    active, self, vendor, vendor_customname, hostname, host_customname = info
-                    firstSeen = first_seen(ip, mac)
-                    firstRequested = first_requested(ip, mac)
-                    lastSeen = last_seen(ip, mac)
-                    previouslySeen = previously_seen(ip, mac)
-                    lastRequested = last_requested(ip, mac)
-                    subject = """Netgrasp alert: %s""" % (event)
-                    body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty.pretty_date(firstSeen), pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstRequested), pretty.pretty_date(lastRequested), active, self)
-                    db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
-                    results = db.cursor.fetchall()
-                    if results:
-                        body += """\nIn the last day, this device talked to:"""
-                    for peer in results:
-                        body += """\n - %s (%s)""" % (peer[0], pretty.name_ip(peer[0], peer[1]))
-                    emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
-                else:
-                    debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
-                if alerted:
-                    db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 1, eid))
-            db.connection.commit()
+
+                    eid, mac, ip, timestamp, event, processed = row
+                    debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
+
+                    # only send notifications for configured events
+                    if event in notifier.alerts:
+                        debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
+                        firstSeen = first_seen(ip, mac)
+                        lastSeen = first_seen_recently(ip, mac)
+                        previouslySeen = previously_seen(ip, mac)
+                        title = """Netgrasp alert: %s""" % (event)
+                        body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstSeen))
+                        ntfy.notify(body, title)
+                        db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
+                    else:
+                        debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
+                db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+
+def send_email_alerts():
+    try:
+        from utils import exclusive_lock
+
+        debugger = debug.debugger_instance
+        db = database.database_instance
+        emailer = email.email_instance
+
+        debugger.debug("entering send_email_alerts()")
+
+        if not emailer.enabled:
+            debugger.debug("email disabled")
+            return False
+
+        if not emailer.alerts:
+            debugger.debug("no email alerts configured")
+            return False
+
+        day = datetime.datetime.now() - datetime.timedelta(days=1)
+
+        timer = simple_timer.Timer()
+
+        db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)");
+        rows = db.cursor.fetchall()
+        if rows:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to process notifications"):
+                for row in rows:
+                    if (timer.elapsed() > MAXSECONDS):
+                        # We've been processing alerts too long, quit for now and come back later.
+                        db.connection.commit()
+                        debugger.debug("processing email alerts >%d seconds, quitting for now", (MAXSECONDS,))
+                        return
+
+                    eid, mac, ip, timestamp, event, processed = row
+                    debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
+                    alerted = True
+
+                    # only send emails for configured events
+                    if event in emailer.alerts:
+                        debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
+                        # get more information about this entry ...
+                        db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
+                        info = db.cursor.fetchone()
+                        if not info:
+                            logger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
+                            db.connection.commit()
+                            return
+                        active, self, vendor, vendor_customname, hostname, host_customname = info
+                        firstSeen = first_seen(ip, mac)
+                        firstRequested = first_requested(ip, mac)
+                        lastSeen = last_seen(ip, mac)
+                        previouslySeen = previously_seen(ip, mac)
+                        lastRequested = last_requested(ip, mac)
+                        subject = """Netgrasp alert: %s""" % (event)
+                        body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty.pretty_date(firstSeen), pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstRequested), pretty.pretty_date(lastRequested), active, self)
+                        db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
+                        results = db.cursor.fetchall()
+                        if results:
+                            body += """\nIn the last day, this device talked to:"""
+                        for peer in results:
+                            body += """\n - %s (%s)""" % (peer[0], pretty.name_ip(peer[0], peer[1]))
+                        emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+                    else:
+                        debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
+                    if alerted:
+                        db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 1, eid))
+                db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Finds new MAC addresses and assigns them a name.
 def identify_macs():
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
-    debugger.debug("entering identify_macs()")
+        debugger.debug("entering identify_macs()")
 
-    import re
-    import httplib
+        import re
+        import httplib
 
-    db.cursor.execute("SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL")
-    rows = db.cursor.fetchall()
-    for row in rows:
-        raw_mac, ip = row
-        if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", raw_mac.lower()):
-            mac = raw_mac
-        else:
-            mac = []
-            pieces = raw_mac.split(":")
-            if not pieces:
-                pieces = row_mac.split("-")
-            for piece in pieces:
-                if len(piece) == 1:
-                    piece = "0"+piece
-                mac.append(piece)
-            mac = ":".join(mac)
-        debugger.debug("Looking up vendor for %s [%s]", (ip, raw_mac))
-        http = httplib.HTTPConnection("api.macvendors.com", 80)
-        url = """/%s""" % mac
-        http.request("GET", url)
-        response = http.getresponse()
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to update vendor"):
-            if response.status == 200 and response.reason == "OK":
-                vendor = response.read()
-                debugger.info("Identified %s [%s] as %s", (ip, raw_mac, vendor))
-                db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, ?)", (raw_mac, vendor))
+        db.cursor.execute("SELECT s.mac, s.ip FROM seen s LEFT JOIN vendor v ON s.mac = v.mac WHERE s.active = 1 AND v.mac IS NULL")
+        rows = db.cursor.fetchall()
+        for row in rows:
+            raw_mac, ip = row
+            if re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", raw_mac.lower()):
+                mac = raw_mac
             else:
-                debugger.info("Failed identify vendor for [%s]", (raw_mac,))
-                db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
-            db.connection.commit()
+                mac = []
+                pieces = raw_mac.split(":")
+                if not pieces:
+                    pieces = row_mac.split("-")
+                for piece in pieces:
+                    if len(piece) == 1:
+                        piece = "0"+piece
+                    mac.append(piece)
+                mac = ":".join(mac)
+            debugger.debug("Looking up vendor for %s [%s]", (ip, raw_mac))
+            http = httplib.HTTPConnection("api.macvendors.com", 80)
+            url = """/%s""" % mac
+            http.request("GET", url)
+            response = http.getresponse()
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to update vendor"):
+                if response.status == 200 and response.reason == "OK":
+                    vendor = response.read()
+                    debugger.info("Identified %s [%s] as %s", (ip, raw_mac, vendor))
+                    db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, ?)", (raw_mac, vendor))
+                else:
+                    debugger.info("Failed identify vendor for [%s]", (raw_mac,))
+                    db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
+                db.connection.commit()
 
-    db.cursor.execute("SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL")
-    rows = db.cursor.fetchall()
-    for row in rows:
-        mac, ip = row
-        hostname = dns_lookup(ip)
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to update host"):
-            db.cursor.execute("INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)", (mac, ip, hostname))
-            db.connection.commit()
+        db.cursor.execute("SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL")
+        rows = db.cursor.fetchall()
+        for row in rows:
+            mac, ip = row
+            hostname = dns_lookup(ip)
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to update host"):
+                db.cursor.execute("INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)", (mac, ip, hostname))
+                db.connection.commit()
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def dns_lookup(ip):
-    import socket
-
-    debugger = debug.debugger_instance
-
-    debugger.debug("entering dns_lookup(%s)", (ip,))
     try:
-        hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
-        debugger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", (hostname, aliaslist, ipaddrlist))
+        import socket
+
+        debugger = debug.debugger_instance
+
+        debugger.debug("entering dns_lookup(%s)", (ip,))
+        try:
+            hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
+            debugger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", (hostname, aliaslist, ipaddrlist))
+        except Exception as e:
+            debugger.debug("gethostbyaddr failed: %s", (e,))
+            hostname = "unknown"
+            debugger.debug("hostname(%s)", (hostname,))
+        return hostname
     except Exception as e:
-        debugger.debug("gethostbyaddr failed: %s", (e,))
-        hostname = "unknown"
-        debugger.debug("hostname(%s)", (hostname,))
-    return hostname
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Generates daily and weekly email digests.
 def send_email_digests():
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
-    emailer = email.email_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
+        emailer = email.email_instance
 
-    debugger.debug("entering send_email_digests()")
+        debugger.debug("entering send_email_digests()")
 
-    if not emailer.enabled:
-        return False
+        if not emailer.enabled:
+            return False
 
-    if not emailer.digest:
-        debugger.debug("no digests configured")
-        return False
+        if not emailer.digest:
+            debugger.debug("no digests configured")
+            return False
 
-    timer = simple_timer.Timer()
-    now = datetime.datetime.now()
+        timer = simple_timer.Timer()
+        now = datetime.datetime.now()
 
-    digests = ["daily", "weekly"]
-    for digest in digests:
-        if (digest == "daily"):
-            timestamp_string = "daily_digest_timestamp"
-            future_digest_timestamp = now + datetime.timedelta(days=1)
-            time_period = now - datetime.timedelta(days=1)
-            time_period_description = "24 hours"
-            previous_time_period = now - datetime.timedelta(days=2)
-        elif (digest == "weekly"):
-            timestamp_string = "weekly_digest_timestamp"
-            future_digest_timestamp = now + datetime.timedelta(weeks=1)
-            time_period = now - datetime.timedelta(weeks=1)
-            time_period_description = "7 days"
-            previous_time_period = now - datetime.timedelta(weeks=2)
+        digests = ["daily", "weekly"]
+        for digest in digests:
+            if (digest == "daily"):
+                timestamp_string = "daily_digest_timestamp"
+                future_digest_timestamp = now + datetime.timedelta(days=1)
+                time_period = now - datetime.timedelta(days=1)
+                time_period_description = "24 hours"
+                previous_time_period = now - datetime.timedelta(days=2)
+            elif (digest == "weekly"):
+                timestamp_string = "weekly_digest_timestamp"
+                future_digest_timestamp = now + datetime.timedelta(weeks=1)
+                time_period = now - datetime.timedelta(weeks=1)
+                time_period_description = "7 days"
+                previous_time_period = now - datetime.timedelta(weeks=2)
 
-        next_digest_timestamp = db.get_state(timestamp_string, "", True)
-        if not next_digest_timestamp:
-            # first time here, schedule a digest for appropriate time in future
+            next_digest_timestamp = db.get_state(timestamp_string, "", True)
+            if not next_digest_timestamp:
+                # first time here, schedule a digest for appropriate time in future
+                db.set_state(timestamp_string, future_digest_timestamp)
+                next_digest_timestamp = future_digest_timestamp
+
+            if now < next_digest_timestamp:
+                # it's not yet time to send this digest
+                continue
+
+            # time to send a digest
+            debugger.info("Sending %s digest", (digest,))
             db.set_state(timestamp_string, future_digest_timestamp)
-            next_digest_timestamp = future_digest_timestamp
 
-        if now < next_digest_timestamp:
-            # it's not yet time to send this digest
-            continue
+            if (digest == "daily"):
+                # PROCESSED_DAILY_DIGEST  = 2
+                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+                requested = db.cursor.fetchall()
+                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+                seen = db.cursor.fetchall()
+            elif (digest == "weekly"):
+                # PROCESSED_WEEKLY_DIGEST = 4
+                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+                requested = db.cursor.fetchall()
+                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+                seen = db.cursor.fetchall()
 
-        # time to send a digest
-        debugger.info("Sending %s digest", (digest,))
-        db.set_state(timestamp_string, future_digest_timestamp)
+            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
+            seen_previous = db.cursor.fetchall()
 
-        if (digest == "daily"):
-            # PROCESSED_DAILY_DIGEST  = 2
-            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
-            requested = db.cursor.fetchall()
-            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
-            seen = db.cursor.fetchall()
-        elif (digest == "weekly"):
-            # PROCESSED_WEEKLY_DIGEST = 4
-            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
-            requested = db.cursor.fetchall()
-            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
-            seen = db.cursor.fetchall()
+            new = set(seen) - set(seen_previous)
+            gone = set(seen_previous) - set(seen)
 
-        db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
-        seen_previous = db.cursor.fetchall()
+            subject = """Netgrasp %s digest""" % (digest)
+            body = """In the past %s, %d IPs were active:""" % (time_period_description, len(seen))
+            noisy = []
+            some_new = False
+            for ip in seen:
+                db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip[1], time_period, now))
+                requests = db.cursor.fetchone()
+                if (requests[0] > 10):
+                    noisy.append((ip[0], ip[1], requests[0], pretty.name_ip(ip[0], ip[1])))
+                if ip in new:
+                    body += """\n - %s* (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
+                    some_new = True
+                else:
+                    body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
+            if some_new:
+                body+= """\n* = not active in the previous %s""" % (time_period_description)
 
-        new = set(seen) - set(seen_previous)
-        gone = set(seen_previous) - set(seen)
+            body += """\n\n%d unique IPs requested.""" % (len(requested),)
 
-        subject = """Netgrasp %s digest""" % (digest)
-        body = """In the past %s, %d IPs were active:""" % (time_period_description, len(seen))
-        noisy = []
-        some_new = False
-        for ip in seen:
-            db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip[1], time_period, now))
-            requests = db.cursor.fetchone()
-            if (requests[0] > 10):
-                noisy.append((ip[0], ip[1], requests[0], pretty.name_ip(ip[0], ip[1])))
-            if ip in new:
-                body += """\n - %s* (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
-                some_new = True
-            else:
-                body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
-        if some_new:
-            body+= """\n* = not active in the previous %s""" % (time_period_description)
+            if noisy:
+                body += """\n\nThe following devices requested 10 or more IPs on the network:"""
+                for noise in noisy:
+                    body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], noise[3], noise[2])
+                    if (noise[2] > 50):
+                        body += " (network scan?)"
 
-        body += """\n\n%d unique IPs requested.""" % (len(requested),)
+            if gone:
+                body += """\n\nThe following IPs were not active, but were active the previous %s:""" % (time_period_description)
+                for ip in gone:
+                    body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
 
-        if noisy:
-            body += """\n\nThe following devices requested 10 or more IPs on the network:"""
-            for noise in noisy:
-                body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], noise[3], noise[2])
-                if (noise[2] > 50):
-                    body += " (network scan?)"
+            if (digest == "daily"):
+                body += "\n\nActive devices per hour during the past day:"
+                range = 24
+                while (range > 0):
+                    lower = now - datetime.timedelta(hours=range)
+                    range = range - 1
+                    upper = now - datetime.timedelta(hours=range)
+                    db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                    distinct = db.cursor.fetchall()
+                    body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
+            elif (digest == "weekly"):
+                body += "\n\nActive devices per day during the past week:"
+                range = 7
+                while (range > 0):
+                    lower = now - datetime.timedelta(days=range)
+                    range = range - 1
+                    upper = now - datetime.timedelta(days=range)
+                    db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                    distinct = db.cursor.fetchall()
+                    body += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
 
-        if gone:
-            body += """\n\nThe following IPs were not active, but were active the previous %s:""" % (time_period_description)
-            for ip in gone:
-                body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
+            if (digest == "daily"):
+                db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)", (time_period, now))
+                alerted = PROCESSED_DAILY_DIGEST
+            elif (digest == "weekly"):
+                db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)", (time_period, now))
+                alerted = PROCESSED_WEEKLY_DIGEST
+            rows = db.cursor.fetchall()
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to send weekly digest"):
+                for row in rows:
+                    if (timer.elapsed() > MAXSECONDS):
+                        # We've been processing events for too long, abort.
+                        # @TODO Batch process digests.
+                        debugger.debug("processing events >%d seconds, aborting digest", (MAXSECONDS,))
+                        return
 
-        if (digest == "daily"):
-            body += "\n\nActive devices per hour during the past day:"
-            range = 24
-            while (range > 0):
-                lower = now - datetime.timedelta(hours=range)
-                range = range - 1
-                upper = now - datetime.timedelta(hours=range)
-                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
-                distinct = db.cursor.fetchall()
-                body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
-        elif (digest == "weekly"):
-            body += "\n\nActive devices per day during the past week:"
-            range = 7
-            while (range > 0):
-                lower = now - datetime.timedelta(days=range)
-                range = range - 1
-                upper = now - datetime.timedelta(days=range)
-                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
-                distinct = db.cursor.fetchall()
-                body += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
+                    eid, processed = row
+                    db.cursor.execute("UPDATE event SET processed=? WHERE eid=?", (processed + alerted, eid))
+                    db.connection.commit()
 
-        if (digest == "daily"):
-            db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)", (time_period, now))
-            alerted = PROCESSED_DAILY_DIGEST
-        elif (digest == "weekly"):
-            db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)", (time_period, now))
-            alerted = PROCESSED_WEEKLY_DIGEST
-        rows = db.cursor.fetchall()
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to send weekly digest"):
-            for row in rows:
-                if (timer.elapsed() > MAXSECONDS):
-                    # We've been processing events for too long, abort.
-                    # @TODO Batch process digests.
-                    debugger.debug("processing events >%d seconds, aborting digest", (MAXSECONDS,))
-                    return
-
-                eid, processed = row
-                db.cursor.execute("UPDATE event SET processed=? WHERE eid=?", (processed + alerted, eid))
-                db.connection.commit()
-
-        debugger.info("Sending %s digest", (digest,))
-        emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+            debugger.info("Sending %s digest", (digest,))
+            emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def garbage_collection(enabled, oldest_arplog, oldest_event):
-    from utils import exclusive_lock
+    try:
+        from utils import exclusive_lock
 
-    debugger = debug.debugger_instance
-    db = database.database_instance
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
-    debugger.debug("entering garbage_collection()")
+        debugger.debug("entering garbage_collection()")
 
-    if not enabled:
-        debugger.debug("garbage collection disabled")
-        return
+        if not enabled:
+            debugger.debug("garbage collection disabled")
+            return
 
-    garbage_collection_string = "garbage collection"
+        garbage_collection_string = "garbage collection"
 
-    now = datetime.datetime.now()
-    next_garbage_collection = db.get_state(garbage_collection_string, "", True)
+        now = datetime.datetime.now()
+        next_garbage_collection = db.get_state(garbage_collection_string, "", True)
 
-    if not next_garbage_collection:
-        # perform first garbage collection now
-        next_garbage_collection = now
+        if not next_garbage_collection:
+            # perform first garbage collection now
+            next_garbage_collection = now
 
-    if now < next_garbage_collection:
-        # it's not yet time to send this digest
-        return False
+        if now < next_garbage_collection:
+            # it's not yet time to send this digest
+            return False
 
-    debugger.info("performing garbage collection")
-    # schedule next garbage collection
-    db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
+        debugger.info("performing garbage collection")
+        # schedule next garbage collection
+        db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
-    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to perform garbage collection"):
-        # Purge old arplog entries.
-        db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
-        arplog_count = db.cursor.fetchone()
-        db.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
-        # Purge old event entries.
-        db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (now - oldest_event,))
-        event_count = db.cursor.fetchone()
-        db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (now - oldest_event,))
-        db.connection.commit()
+        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to perform garbage collection"):
+            # Purge old arplog entries.
+            db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
+            arplog_count = db.cursor.fetchone()
+            db.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
+            # Purge old event entries.
+            db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (now - oldest_event,))
+            event_count = db.cursor.fetchone()
+            db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (now - oldest_event,))
+            db.connection.commit()
 
-    debugger.debug("deleted %d arplog entries older than %s", (arplog_count[0], now - oldest_arplog))
-    debugger.debug("deleted %d event entries older than %s", (event_count[0], now - oldest_event))
+        debugger.debug("deleted %d arplog entries older than %s", (arplog_count[0], now - oldest_arplog))
+        debugger.debug("deleted %d event entries older than %s", (event_count[0], now - oldest_event))
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 
 #################
@@ -1219,47 +1287,52 @@ def garbage_collection(enabled, oldest_arplog, oldest_event):
 #################
 
 def _init(verbose, daemonize, mode = debug.FILE):
-    import logging
+    try:
+        import logging
 
-    # Get a logger and config parser.
-    logger = logging.getLogger(__name__)
-    formatter = logging.Formatter(DEFAULT_LOGFORMAT)
+        # Get a logger and config parser.
+        logger = logging.getLogger(__name__)
+        formatter = logging.Formatter(DEFAULT_LOGFORMAT)
 
-    if mode == debug.FILE and os.getuid() != 0:
-        # We're going to fail, so write to stderr.
-        debugger = debug.Debugger()
-    else:
-        debugger = debug.Debugger(verbose, logger, mode)
-    configuration = config.Config(debugger)
+        if mode == debug.FILE and os.getuid() != 0:
+            # We're going to fail, so write to stderr.
+            debugger = debug.Debugger()
+        else:
+            debugger = debug.Debugger(verbose, logger, mode)
+        configuration = config.Config(debugger)
 
-    debug.debugger_instance = debugger
-    config.config_instance = configuration
+        debug.debugger_instance = debugger
+        config.config_instance = configuration
 
-    # Start logger, reading relevant configuration.
-    if daemonize:
-        try:
-            debugger.handler = logging.FileHandler(configuration.GetText('Logging', 'filename', DEFAULT_LOGFILE))
-        except Exception as e:
-            debugger.critical("Fatal exception setting up log handler: %s", (e,))
-    else:
+        # Start logger, reading relevant configuration.
+        if daemonize:
+            try:
+                debugger.handler = logging.FileHandler(configuration.GetText('Logging', 'filename', DEFAULT_LOGFILE))
+            except Exception as e:
+                debugger.critical("Fatal exception setting up log handler: %s", (e,))
+        else:
+            if mode == debug.FILE:
+                debugger.handler = logging.StreamHandler()
+
         if mode == debug.FILE:
-            debugger.handler = logging.StreamHandler()
+            debugger.handler.setFormatter(formatter)
+            logger.addHandler(debugger.handler)
 
-    if mode == debug.FILE:
-        debugger.handler.setFormatter(formatter)
-        logger.addHandler(debugger.handler)
+        if verbose:
+            debugger.setLevel(logging.DEBUG)
+            debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
+        else:
+            logger.setLevel(configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
+        debugger.info('loaded configuration file: %s', (configuration.found,))
 
-    if verbose:
-        debugger.setLevel(logging.DEBUG)
-        debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
-    else:
-        logger.setLevel(configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
-    debugger.info('loaded configuration file: %s', (configuration.found,))
+        if not daemonize:
+            debugger.warning("Output forced to stderr, started with --foreground flag.")
 
-    if not daemonize:
-        debugger.warning("Output forced to stderr, started with --foreground flag.")
-
-    return (debugger, configuration)
+        return (debugger, configuration)
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def start():
     ng = netgrasp_instance

@@ -36,64 +36,94 @@ class Config:
         return value
 
     def GetText(self, section, option, default = None, required = True, secret = False):
-        if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-            value = self.parser.get(section, option)
-        else:
-            value = None
-        return self._GetValue(section, option, value, default, required, secret)
+        try:
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.get(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def GetInt(self, section, option, default = None, required = True, secret = False):
-        if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-            value = self.parser.getint(section, option)
-        else:
-            value = None
-        return self._GetValue(section, option, value, default, required, secret)
+        try:
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.getint(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def GetBoolean(self, section, option, default = None, required = True, secret = False):
-        if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-            value = self.parser.getboolean(section, option)
-        else:
-            value = None
-        return self._GetValue(section, option, value, default, required, secret)
+        try:
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                value = self.parser.getboolean(section, option)
+            else:
+                value = None
+            return self._GetValue(section, option, value, default, required, secret)
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def GetTextList(self, section, option, default = None, required = True, secret = False, quiet = False):
-        if (self.parser.has_section(section) and self.parser.has_option(section, option)):
-            text = self.parser.get(section, option)
-            values = text.split(',')
-            textlist = []
-            for value in values:
-                textlist.append(value.strip())
-        else:
-            textlist = None
-        if quiet:
-            return textlist
-        else:
-            return self._GetValue(section, option, textlist, default, required, secret)
+        try:
+            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+                text = self.parser.get(section, option)
+                values = text.split(',')
+                textlist = []
+                for value in values:
+                    textlist.append(value.strip())
+            else:
+                textlist = None
+            if quiet:
+                return textlist
+            else:
+                return self._GetValue(section, option, textlist, default, required, secret)
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def GetEmailList(self, section, option, default = None, required = True, secret = False):
-        emails = self.GetTextList(section, option, default, required, secret, True)
-        addresses = []
-        for email in emails:
-            pieces = email.split('|')
-            if len(pieces) == 2:
-                name, address = pieces
-                if valid_email_address(address):
-                    addresses.append((name.strip(), address.strip()))
-                else:
-                    self.debugger.error('ignoring invalid email address (%s)', (address,))
-            elif len(pieces) == 1:
-                if valid_email_address(email):
-                    addresses.append(email)
+        try:
+            emails = self.GetTextList(section, option, default, required, secret, True)
+            addresses = []
+            for email in emails:
+                pieces = email.split('|')
+                if len(pieces) == 2:
+                    name, address = pieces
+                    if valid_email_address(address):
+                        addresses.append((name.strip(), address.strip()))
+                    else:
+                        self.debugger.error('ignoring invalid email address (%s)', (address,))
+                elif len(pieces) == 1:
+                    if valid_email_address(email):
+                        addresses.append(email)
+                    else:
+                        self.debugger.error('ignoring invalid email address (%s)', (email,))
                 else:
                     self.debugger.error('ignoring invalid email address (%s)', (email,))
-            else:
-                self.debugger.error('ignoring invalid email address (%s)', (email,))
-        return self._GetValue(section, option, addresses, default, required, secret)
+            return self._GetValue(section, option, addresses, default, required, secret)
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Perform simplistic email address validation.
 def valid_email_address(address):
-    from email.utils import parseaddr
-    if not '@' in parseaddr(address)[1]:
-        return False
-    else:
-        return True
+    try:
+        from email.utils import parseaddr
+        if not '@' in parseaddr(address)[1]:
+            return False
+        else:
+            return True
+    except Exception as e:
+        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        print fname, exc_tb.tb_lineno, e
+        self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))

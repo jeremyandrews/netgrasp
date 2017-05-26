@@ -60,18 +60,22 @@ class Email:
                 debugger.warn("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
 
     def MailSend(self, subject, encoding, body):
-        import pyzmail
+        try:
+            import pyzmail
 
-        debugger = debug.debugger_instance
+            debugger = debug.debugger_instance
 
-        payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(self.email_from, self.email_to, subject, encoding, body)
-        ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, self.email_hostname, self.email_port, self.email_mode, self.email_username, self.email_password)
-        if isinstance(ret, dict):
-            if ret:
-                failed_recipients = ", ".join(ret.keys())
-                debugger.warning("failed to send email, failed receipients: %s", (failed_recipients,))
+            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(self.email_from, self.email_to, subject, encoding, body)
+            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, self.email_hostname, self.email_port, self.email_mode, self.email_username, self.email_password)
+            if isinstance(ret, dict):
+                if ret:
+                    failed_recipients = ", ".join(ret.keys())
+                    debugger.warning("failed to send email, failed receipients: %s", (failed_recipients,))
+                else:
+                    debugger.debug("email sent: %s", (ret,))
             else:
-                debugger.debug("email sent: %s", (ret,))
-        else:
-            debugger.warning("email error: %s", (ret,))
-        
+                debugger.warning("email error: %s", (ret,))
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))

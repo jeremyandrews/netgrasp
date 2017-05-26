@@ -14,34 +14,44 @@ class ExclusiveFileLock:
         self.debugger = debug.debugger_instance
 
     def __enter__(self):
-        self._fd = os.open(self._lockfile, os.O_CREAT)
-        started = time.time()
-        while True:
-            try:
-                fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # We got the lock.
-                return
-            except (OSError, IOError) as ex:
-                if ex.errno != errno.EAGAIN:
-                    # Resource temporarily unavailable.
-                    if self._timeout_message:
-                        self.debugger.warning("LOCK UNAVAILABLE: %s", self._timeout_message)
-                    raise
-                elif self._timeout is not Non and time.time() > (start + self._timeout):
-                    # Exceeded timeout.
-                    if self._timeout_message:
-                        self.debugger.warning("LOCK TIMEOUT: %s", self._timeout_message)
-                    raise
-            # Briefly wait before trying the lock again.
-            time.sleep(0.1)
+        try:
+            self._fd = os.open(self._lockfile, os.O_CREAT)
+            started = time.time()
+            while True:
+                try:
+                    fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    # We got the lock.
+                    return
+                except (OSError, IOError) as ex:
+                    if ex.errno != errno.EAGAIN:
+                        # Resource temporarily unavailable.
+                        if self._timeout_message:
+                            self.debugger.warning("LOCK UNAVAILABLE: %s", self._timeout_message)
+                        raise
+                    elif self._timeout is not None and time.time() > (started + self._timeout):
+                        # Exceeded timeout.
+                        if self._timeout_message:
+                            self.debugger.warning("LOCK TIMEOUT: %s", self._timeout_message)
+                        raise
+                # Briefly wait before trying the lock again.
+                time.sleep(0.1)
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def __exit__(self, *args):
-        fcntl.flock(self._fd, fcntl.LOCK_UN)
-        os.close(self._fd)
-        self._fd = None
-
         try:
-            # Remove the lockfile if we can.
-            os.unlink(self._path)
-        except:
-            pass
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
+            os.close(self._fd)
+            self._fd = None
+
+            try:
+                # Remove the lockfile if we can.
+                os.unlink(self._path)
+            except:
+                pass
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))

@@ -39,31 +39,32 @@ class Debugger:
             self.logger.setLevel(self.level)
 
     def log(self, message, args, severity):
-        level, verbose, fatal = severity
-        if self.mode == FILE:
-            if not self.logger:
-                self.mode = PRINT
-                self.log(message, args, logging.CRITICAL)
-                self.fatal("fatal error, no logger provided, exiting")
-            if args:
-                try:
-                    self.logger.log(level, message, *args)
-                except Exception as e:
-                    debugger_instance.error("log FIXME: %s, %s", (message, args))
-                    debugger_instance.error("log FIXME: %s", (e,))
-            else:
-                self.logger.log(level, message)
-
-        if fatal:
-            # if writing to file we log and then print message, otherwise just print
-            self.fatal(message, args)
-
-        if self.mode == PRINT:
-            if self.verbose and verbose >= self.verbose:
+        try:
+            level, verbose, fatal = severity
+            if self.mode == FILE:
+                if not self.logger:
+                    self.mode = PRINT
+                    self.log(message, args, logging.CRITICAL)
+                    self.fatal("fatal error, no logger provided, exiting")
                 if args:
-                    print message % args
+                    self.logger.log(level, message, *args)
                 else:
-                    print message
+                    self.logger.log(level, message)
+
+            if fatal:
+                # if writing to file we log and then print message, otherwise just print
+                self.fatal(message, args)
+
+            if self.mode == PRINT:
+                if self.verbose and verbose >= self.verbose:
+                    if args:
+                        print message % args
+                    else:
+                        print message
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.logger.warning("FIXME line[%s] %s: %s", exc_tb.tb_lineno, fname, e)
 
     # Determine who we are, for pretty logging.
     def whoami(self):
