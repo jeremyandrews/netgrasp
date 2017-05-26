@@ -10,16 +10,18 @@ the devices using your network.
 Installation
 ============
 Run:
-  `sudo ./setup.py install`
+  sudo ./setup.py install
 
 To start netgrasp:
-  `sudo netgraspctl start`
+  sudo netgraspctl start
 
 To stop netgrasp:
-  `sudo netgraspctl stop`
+  sudo netgraspctl stop
 
 Finally, to control netgrasp:
 
-* `netgraspctl -h`
-* `netgraspctl list -h`
-* `netgraspctl identify -h`
+ * netgraspctl -h
+ * netgraspctl list -h
+ * netgraspctl identify -h
+
+For more information, review docs/README.md
