@@ -2,16 +2,20 @@ import fcntl
 import os
 import errno
 import time
-
 from netgrasp.utils import debug
 
 class ExclusiveFileLock:
     def __init__(self, lockfile, timeout = 5, timeout_message = None):
-        self._lockfile = lockfile
-        self._timeout = timeout
-        self._timeout_message = timeout_message
-        self._fd = None
-        self.debugger = debug.debugger_instance
+        try:
+            self._lockfile = lockfile
+            self._timeout = timeout
+            self._timeout_message = timeout_message
+            self._fd = None
+            self.debugger = debug.debugger_instance
+        except Exception as e:
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print fname, exc_tb.tb_lineno, e
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def __enter__(self):
         try:
@@ -26,19 +30,19 @@ class ExclusiveFileLock:
                     if ex.errno != errno.EAGAIN:
                         # Resource temporarily unavailable.
                         if self._timeout_message:
-                            self.debugger.warning("LOCK UNAVAILABLE: %s", self._timeout_message)
+                            self.debugger.warning("LOCK UNAVAILABLE: %s", (self._timeout_message,))
                         raise
                     elif self._timeout is not None and time.time() > (started + self._timeout):
                         # Exceeded timeout.
                         if self._timeout_message:
-                            self.debugger.warning("LOCK TIMEOUT: %s", self._timeout_message)
+                            self.debugger.warning("LOCK TIMEOUT: %s", (self._timeout_message,))
                         raise
                 # Briefly wait before trying the lock again.
-                time.sleep(0.1)
+                time.sleep(0.05)
         except Exception as e:
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             print fname, exc_tb.tb_lineno, e
-            ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
     def __exit__(self, *args):
         try:
@@ -54,4 +58,4 @@ class ExclusiveFileLock:
         except Exception as e:
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             print fname, exc_tb.tb_lineno, e
-            ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
