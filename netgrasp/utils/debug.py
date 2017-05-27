@@ -64,7 +64,7 @@ class Debugger:
         except Exception as e:
             self.logger.dump_exception("debugger FIXME")
 
-    def dump_exception(self, message = None):
+    def dump_exception(self, message = None, is_error = True):
         import os
         import sys
 
@@ -72,14 +72,23 @@ class Debugger:
 
         if exc_type:
             if message:
-                print """%s: %s [%s]""" % (message, exc_value, exc_traceback.tb_lineno)
-                self.error("%s: %s [%s]", (message, exc_value, exc_traceback.tb_lineno))
+                if is_error:
+                    print """%s: %s [%s]""" % (message, exc_value, exc_traceback.tb_lineno)
+                    self.error("%s: %s [%s]", (message, exc_value, exc_traceback.tb_lineno))
+                else:
+                    self.info("%s: %s [%s]", (message, exc_value, exc_traceback.tb_lineno))
             else:
-                print """%s [%s]""" % (exc_value, exc_traceback.tb_lineno)
-                self.error("%s [%s]", (exc_value, exc_traceback.tb_lineno))
+                if is_error:
+                    print """%s [%s]""" % (exc_value, exc_traceback.tb_lineno)
+                    self.error("%s [%s]", (exc_value, exc_traceback.tb_lineno))
+                else:
+                    self.info("%s [%s]", (exc_value, exc_traceback.tb_lineno))
         elif message:
-            print """%s""" % message
-            self.error("%s", (message,))
+            if is_error:
+                print """%s""" % message
+                self.error("%s", (message,))
+            else:
+                self.info("%s", (message,))
 
     # Determine who we are, for pretty logging.
     def whoami(self):

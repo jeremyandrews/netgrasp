@@ -35,7 +35,7 @@ class ExclusiveFileLock:
                 # Briefly wait before trying the lock again.
                 time.sleep(0.05)
         except Exception as e:
-            self.debugger.dump_exception("ExclusiveFileLock.__enter__() FIXME")
+            self.debugger.dump_exception("ExclusiveFileLock.__enter__()", False)
 
     def __exit__(self, *args):
         try:
@@ -49,4 +49,4 @@ class ExclusiveFileLock:
             except:
                 pass
         except Exception as e:
-            self.debugger.dump_exception("ExclusiveFileLock.__exit__() FIXME")
+            self.debugger.dump_exception("ExclusiveFileLock.__exit__()", False)
