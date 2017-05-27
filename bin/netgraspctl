@@ -51,7 +51,22 @@ def start(args):
     if ng.is_running:
         ng.debugger.critical("Netgrasp is already running with pid %d.", (ng.is_running,))
     ng.debugger.info("Starting netgraspd...")
-    ng.debugger.critical("Feature not yet implemented. Manually run: 'sudo ./netgraspd -d'")
+
+    if args.verbose:
+        verbose = args.verbose
+    else:
+        verbose = False
+
+    if args.foreground:
+        daemonize = False
+    else:
+        daemonize = True
+
+    # Re-instantiate Netgrasp with proper parameters
+    daemon_ng = netgrasp.Netgrasp(config, verbose, daemonize)
+    daemon_ng.args = args
+    netgrasp.netgrasp_instance = daemon_ng
+    netgrasp.start()
 
 def stop(args):
     if not ng.is_running:
@@ -269,6 +284,8 @@ if __name__ == "__main__":
 
     # start
     parser_start = subparsers.add_parser("start", help="start netgraspd")
+    parser_start.add_argument("--verbose", "-v", action="count", help="verbose logging")
+    parser_start.add_argument("--foreground", "-f", action="count", help="don't daemonize, run in the foreground")
     parser_start.set_defaults(func=start)
 
     # stop
