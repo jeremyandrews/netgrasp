@@ -72,9 +72,14 @@ class Debugger:
 
         if exc_type:
             if message:
-                self.error("%s: type(%s) value(%s) traceback(%s)", (exc_type, exc_value, exc_traceback))
+                print """%s: %s [%s]""" % (message, exc_value, exc_traceback.tb_lineno)
+                self.error("%s: %s [%s]", (message, exc_value, exc_traceback.tb_lineno))
             else:
-                self.error("type(%s) value(%s) traceback(%s)", (message, exc_type, exc_value, exc_traceback))
+                print """%s [%s]""" % (exc_value, exc_traceback.tb_lineno)
+                self.error("%s [%s]", (exc_value, exc_traceback.tb_lineno))
+        elif message:
+            print """%s""" % message
+            self.error("%s", (message,))
 
     # Determine who we are, for pretty logging.
     def whoami(self):

@@ -164,7 +164,7 @@ def main(*pcap):
             time_to_exit = last_heartbeat + datetime.timedelta(minutes=3)
             if (now >= time_to_exit):
                 run = False
-                ng.debugger.error("No heartbeats from wiretap process for >3 minute.")
+                ng.debugger.error("No heartbeats from wiretap process for >3 minutes.")
         except Exception as e:
             ng.debugger.dump_exception("main() while loop FIXME")
     ng.debugger.critical("Exiting")
