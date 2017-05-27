@@ -251,12 +251,12 @@ def wiretap(pc, child_conn):
             pc.loop(1, received_arp, child_conn)
 
             # If we haven't heard from the main process in >1 minute, exit.
-            time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
+            time_to_exit = last_heartbeat + datetime.timedelta(minutes=5)
             if (now >= time_to_exit):
                 run = False
         except Exception as e:
             netgrasp_instance.debugger.dump_exception("wiretap() while loop FIXME")
-    netgrasp_instance.debugger.critical("No heartbeats from main process for >1 minute, exiting.")
+    netgrasp_instance.debugger.critical("No heartbeats from main process for >5 minutes, exiting.")
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     try:
@@ -788,7 +788,7 @@ def detect_netscans():
         db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50", (three_minutes_ago,))
         scans = db.cursor.fetchall()
         if scans:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag netscan(s)"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to process netscan(s)"):
                 for scan in scans:
                     count, src_mac, src_ip = scan
                     db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, EVENT_SCAN, three_minutes_ago))
@@ -815,7 +815,7 @@ def detect_anomalies(timeout):
         db.cursor.execute("SELECT COUNT(*) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1", (BROADCAST,))
         duplicates = db.cursor.fetchall()
         if duplicates:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag multiple MACs with same IP"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify multiple MACs with same IP"):
                 for duplicate in duplicates:
                     count, ip = duplicate
                     db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1;", (ip,))
@@ -833,7 +833,7 @@ def detect_anomalies(timeout):
         db.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (BROADCAST,))
         duplicates = db.cursor.fetchall()
         if duplicates:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to flag multiple IPs with same MAC"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify multiple IPs with same MAC"):
                 for duplicate in duplicates:
                     count, mac = duplicate
                     db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1;", (mac,))
@@ -875,7 +875,7 @@ def send_notifications():
 
         rows = db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to process notifications"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to process notifications"):
                 counter = 0
                 for row in rows:
                     if (timer.elapsed() > MAXSECONDS):
@@ -928,7 +928,7 @@ def send_email_alerts():
         db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)");
         rows = db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to process notifications"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to send alerts"):
                 for row in rows:
                     if (timer.elapsed() > MAXSECONDS):
                         # We've been processing alerts too long, quit for now and come back later.
@@ -1007,7 +1007,7 @@ def identify_macs():
             url = """/%s""" % mac
             http.request("GET", url)
             response = http.getresponse()
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to update vendor"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify vendor"):
                 if response.status == 200 and response.reason == "OK":
                     vendor = response.read()
                     debugger.info("Identified %s [%s] as %s", (ip, raw_mac, vendor))
@@ -1022,7 +1022,7 @@ def identify_macs():
         for row in rows:
             mac, ip = row
             hostname = dns_lookup(ip)
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to update host"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify host"):
                 db.cursor.execute("INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)", (mac, ip, hostname))
                 db.connection.commit()
     except Exception as e:
@@ -1221,7 +1221,7 @@ def garbage_collection(enabled, oldest_arplog, oldest_event):
         # schedule next garbage collection
         db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to perform garbage collection"):
+        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to perform garbage collection"):
             # Purge old arplog entries.
             db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
             arplog_count = db.cursor.fetchone()
