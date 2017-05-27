@@ -1038,11 +1038,11 @@ def dns_lookup(ip):
         try:
             hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
             debugger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", (hostname, aliaslist, ipaddrlist))
+            return hostname
         except Exception as e:
-            debugger.debug("gethostbyaddr failed: %s", (e,))
             hostname = "unknown"
-            debugger.debug("hostname(%s)", (hostname,))
-        return hostname
+            debugger.dump_exception("""dns_lookup() socket.gethostbyaddr(%s) failed, hostname = %s""" % (ip, hostname))
+            return hostname
     except Exception as e:
         debugger.dump_exception("dns_lookup() FIXME")
 
