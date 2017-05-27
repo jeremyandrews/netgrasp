@@ -133,18 +133,6 @@ def main(*pcap):
             ng.debugger.debug("top of master while loop: %s", (now,))
 
             parent_conn.send(HEARTBEAT)
-            heartbeat = False
-            while parent_conn.poll():
-                message = parent_conn.recv()
-                if (message == HEARTBEAT):
-                    heartbeat = True
-            # It's possible to receive multiple heartbeats, but many or one is the same to us.
-            if heartbeat:
-                ng.debugger.debug("received heartbeat from wiretap process")
-                last_heartbeat = now
-
-            ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
-            time.sleep(ng.delay)
 
             identify_macs()
             detect_stale_ips(ng.active_timeout)
@@ -155,16 +143,28 @@ def main(*pcap):
             send_email_digests()
             garbage_collection(ng.garbage_collection, ng.oldest_arplog, ng.oldest_event)
 
+            ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
+            time.sleep(ng.delay)
+
+            heartbeat = False
+            while parent_conn.poll():
+                message = parent_conn.recv()
+                if (message == HEARTBEAT):
+                    heartbeat = True
+            # It's possible to receive multiple heartbeats, but many or one is the same to us.
+            if heartbeat:
+                ng.debugger.debug("received heartbeat from wiretap process")
+                last_heartbeat = now
 
             if not child.is_alive():
                 ng.debugger.error("wiretap process gone away: %d", (child.exitcode,))
                 run = False
 
             # If we haven't heard from the wiretap process in >1 minute, exit.
-            time_to_exit = last_heartbeat + datetime.timedelta(minutes=1)
+            time_to_exit = last_heartbeat + datetime.timedelta(minutes=3)
             if (now >= time_to_exit):
                 run = False
-                ng.debugger.error("No heartbeats from wiretap process for >1 minute.")
+                ng.debugger.error("No heartbeats from wiretap process for >3 minute.")
         except Exception as e:
             ng.debugger.dump_exception("main() while loop FIXME")
     ng.debugger.critical("Exiting")
@@ -246,17 +246,26 @@ def wiretap(pc, child_conn):
             if heartbeat:
                 netgrasp_instance.debugger.debug("received heartbeat from main process")
                 last_heartbeat = now
-
             # Wait an arp packet, then loop again.
             pc.loop(1, received_arp, child_conn)
 
+            heartbeat = False
+            while child_conn.poll():
+                message = child_conn.recv()
+                if (message == HEARTBEAT):
+                    heartbeat = True
+            # It's possible to receive multiple heartbeats, but many or one is the same to us.
+            if heartbeat:
+                netgrasp_instance.debugger.debug("received heartbeat from main process")
+                last_heartbeat = now
+
             # If we haven't heard from the main process in >1 minute, exit.
-            time_to_exit = last_heartbeat + datetime.timedelta(minutes=5)
+            time_to_exit = last_heartbeat + datetime.timedelta(minutes=3)
             if (now >= time_to_exit):
                 run = False
         except Exception as e:
             netgrasp_instance.debugger.dump_exception("wiretap() while loop FIXME")
-    netgrasp_instance.debugger.critical("No heartbeats from main process for >5 minutes, exiting.")
+    netgrasp_instance.debugger.critical("No heartbeats from main process for >3 minutes, exiting.")
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     try:
