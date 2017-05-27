@@ -273,7 +273,7 @@ def identify(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-            prog="netgraspctl",
+            prog="netgrasp",
             description="A passive network observation tool")
     # --verbose -v, verbose
     parser.add_argument("--verbose", "-v", action="count", help="verbose output")

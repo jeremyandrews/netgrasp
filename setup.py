@@ -13,5 +13,5 @@ setup(name="NetGrasp",
       license="2-clause BSD",
       description="A passive network scanner",
       long_description=open("README.txt").read(),
-      scripts=["bin/netgraspctl", "bin/netgraspd"],
+      scripts=["bin/netgrasp"],
      )
