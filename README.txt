@@ -18,10 +18,10 @@ To start netgrasp:
 To stop netgrasp:
   sudo netgraspctl stop
 
-Finally, to control netgrasp:
+From more detail on controlling netgrasp:
 
  * netgraspctl -h
  * netgraspctl list -h
  * netgraspctl identify -h
 
-For more information, review docs/README.md
+Complete documentation can be found in docs/README.md.
