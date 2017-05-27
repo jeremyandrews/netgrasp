@@ -1050,7 +1050,7 @@ def dns_lookup(ip):
             return hostname
         except Exception as e:
             hostname = "unknown"
-            debugger.dump_exception("""dns_lookup() socket.gethostbyaddr(%s) failed, hostname = %s""" % (ip, hostname))
+            debugger.debug("dns_lookup() socket.gethostbyaddr(%s) failed, hostname = %s: %s", (ip, hostname, e))
             return hostname
     except Exception as e:
         debugger.dump_exception("dns_lookup() FIXME")
