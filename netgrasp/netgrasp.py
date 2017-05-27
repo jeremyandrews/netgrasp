@@ -166,9 +166,7 @@ def main(*pcap):
                 run = False
                 ng.debugger.error("No heartbeats from wiretap process for >1 minute.")
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            ng.debugger.warning("FIXME main while loop line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            ng.debugger.dump_exception("main() while loop FIXME")
     ng.debugger.critical("Exiting")
 
 def get_pcap():
@@ -257,9 +255,7 @@ def wiretap(pc, child_conn):
             if (now >= time_to_exit):
                 run = False
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            ng.debugger.warning("FIXME main while loop line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            netgrasp_instance.debugger.dump_exception("wiretap() while loop FIXME")
     netgrasp_instance.debugger.critical("No heartbeats from main process for >1 minute, exiting.")
 
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
@@ -336,7 +332,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                         timeSince = datetime.datetime.now() - lastSeen
                         debugger.info("[%s] %s (%s) is active again (after %s)", (did, src_ip, src_mac, timeSince))
                     else:
-                        logger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_ip, src_mac)))
+                        debugger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_ip, src_mac)))
                 else:
                     # First time we've actively seen this IP.
                     log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
@@ -373,9 +369,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 db.cursor.execute("INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("ip_seen() FIXME")
 
 def ip_request(ip, mac, src_ip, src_mac):
     try:
@@ -427,9 +421,7 @@ def ip_request(ip, mac, src_ip, src_mac):
                 db.connection.commit()
             debugger.info("%s (%s) requested, first time seeing", (ip, mac))
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("ip_request() FIXME")
 
 # Assumes we already have the database lock.
 def log_event(ip, mac, event, have_lock = False):
@@ -446,9 +438,7 @@ def log_event(ip, mac, event, have_lock = False):
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to log event: %s""" % event):
                 db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("log_event() FIXME")
 
 def ip_is_mine(ip):
     try:
@@ -458,9 +448,7 @@ def ip_is_mine(ip):
 
         return (ip == socket.gethostbyname(socket.gethostname()))
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("ip_is_mine() FIXME")
 
 # Database definitions.
 def create_database():
@@ -564,9 +552,7 @@ def create_database():
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
             db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("create_database() FIXME")
 
 def update_database():
     try:
@@ -592,9 +578,7 @@ def update_database():
                     did += 1
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("update_database() FIXME")
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
@@ -619,9 +603,7 @@ def received_arp(hdr, data, child_conn):
             debugger.debug('ARP reply from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
             ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("received_arp() FIXME")
 
 # Determine appropriate device id for IP, MAC pair.
 def get_did(ip, mac):
@@ -660,9 +642,7 @@ def get_did(ip, mac):
             debugger.debug("no matching did for %s [%s], new: %d", (ip, mac, did))
             return did
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("get_did() FIXME")
 
 def first_seen(ip, mac):
     try:
@@ -681,9 +661,7 @@ def first_seen(ip, mac):
         else:
             return False
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("first_seen() FIXME")
 
 def first_seen_recently(ip, mac):
     try:
@@ -702,9 +680,7 @@ def first_seen_recently(ip, mac):
         else:
             return False
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("first_seen_recently() FIXME")
 
 def last_seen(ip, mac):
     try:
@@ -720,9 +696,7 @@ def last_seen(ip, mac):
         else:
             return False
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("last_seen() FIXME")
 
 def previously_seen(ip, mac):
     try:
@@ -738,9 +712,7 @@ def previously_seen(ip, mac):
         else:
             return False
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("previously_seen() FIXME")
 
 def first_requested(ip, mac):
     try:
@@ -756,9 +728,7 @@ def first_requested(ip, mac):
         else:
             return False
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("first_requested() FIXME")
 
 def last_requested(ip, mac):
     try:
@@ -774,9 +744,7 @@ def last_requested(ip, mac):
         else:
             return False
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("last_requested() FIXME")
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips(timeout):
@@ -804,9 +772,7 @@ def detect_stale_ips(timeout):
                     db.cursor.execute("UPDATE seen SET active = 0 WHERE sid=?", (sid,))
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("detect_stale_ips() FIXME")
 
 def detect_netscans():
     try:
@@ -832,9 +798,7 @@ def detect_netscans():
                         debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("detect_netscans() FIXME")
 
 def detect_anomalies(timeout):
     try:
@@ -883,9 +847,7 @@ def detect_anomalies(timeout):
                             debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("detect_anomalies() FIXME")
 
 def send_notifications():
     try:
@@ -939,9 +901,7 @@ def send_notifications():
                         debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("send_notifications() FIXME")
 
 def send_email_alerts():
     try:
@@ -987,7 +947,7 @@ def send_email_alerts():
                         db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
                         info = db.cursor.fetchone()
                         if not info:
-                            logger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
+                            debugger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
                             db.connection.commit()
                             return
                         active, self, vendor, vendor_customname, hostname, host_customname = info
@@ -1011,9 +971,7 @@ def send_email_alerts():
                         db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 1, eid))
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("send_email_alerts() FIXME")
 
 # Finds new MAC addresses and assigns them a name.
 def identify_macs():
@@ -1068,9 +1026,7 @@ def identify_macs():
                 db.cursor.execute("INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)", (mac, ip, hostname))
                 db.connection.commit()
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("identify_macs() FIXME")
 
 def dns_lookup(ip):
     try:
@@ -1088,9 +1044,7 @@ def dns_lookup(ip):
             debugger.debug("hostname(%s)", (hostname,))
         return hostname
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("dns_lookup() FIXME")
 
 # Generates daily and weekly email digests.
 def send_email_digests():
@@ -1235,9 +1189,7 @@ def send_email_digests():
             debugger.info("Sending %s digest", (digest,))
             emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("send_email_digests() FIXME")
 
 def garbage_collection(enabled, oldest_arplog, oldest_event):
     try:
@@ -1283,9 +1235,7 @@ def garbage_collection(enabled, oldest_arplog, oldest_event):
         debugger.debug("deleted %d arplog entries older than %s", (arplog_count[0], now - oldest_arplog))
         debugger.debug("deleted %d event entries older than %s", (event_count[0], now - oldest_event))
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("garbage_collection() FIXME")
 
 
 #################
@@ -1336,9 +1286,7 @@ def _init(verbose, daemonize, mode = debug.FILE):
 
         return (debugger, configuration)
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("_init() FIXME")
 
 def start():
     ng = netgrasp_instance

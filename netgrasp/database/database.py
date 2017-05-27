@@ -26,9 +26,7 @@ class Database:
             else:
                 self.debugger.info("set key[%s] to value[%s]", (key, value))
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.logger.dump_exception("set_state() FIXME")
 
     def get_state(self, key, default_value, date = False):
         try:
@@ -46,9 +44,7 @@ class Database:
                 self.debugger.debug("returning default value: %s", (default_value,))
                 return default_value
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.logger.dump_exception("get_state() FIXME")
 
 class SelectQueryBuilder():
     def __init__(self, table, debugger, verbose):
@@ -115,5 +111,3 @@ class SelectQueryBuilder():
     def db_args(self):
         self.debugger.debug("Select args: %s", (self.where_args,))
         return self.where_args
-        
-        

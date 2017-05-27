@@ -62,9 +62,19 @@ class Debugger:
                     else:
                         print message
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.logger.warning("FIXME line[%s] %s: %s", exc_tb.tb_lineno, fname, e)
+            self.logger.dump_exception("debugger FIXME")
+
+    def dump_exception(self, message = None)
+        import os
+        import sys
+
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+
+        if exc_type:
+            if message:
+                self.error("%s: type(%s) value(%s) traceback(%s)", (exc_type, exc_value, exc_traceback))
+            else:
+                self.error("type(%s) value(%s) traceback(%s)", (message, exc_type, exc_value, exc_traceback))
 
     # Determine who we are, for pretty logging.
     def whoami(self):

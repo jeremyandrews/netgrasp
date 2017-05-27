@@ -43,9 +43,7 @@ class Config:
                 value = None
             return self._GetValue(section, option, value, default, required, secret)
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.dump_exception("GetText() FIXME")
 
     def GetInt(self, section, option, default = None, required = True, secret = False):
         try:
@@ -55,9 +53,7 @@ class Config:
                 value = None
             return self._GetValue(section, option, value, default, required, secret)
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.dump_exception("GetInt() FIXME")
 
     def GetBoolean(self, section, option, default = None, required = True, secret = False):
         try:
@@ -67,9 +63,7 @@ class Config:
                 value = None
             return self._GetValue(section, option, value, default, required, secret)
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.dump_exception("GetBoolean() FIXME")
 
     def GetTextList(self, section, option, default = None, required = True, secret = False, quiet = False):
         try:
@@ -86,9 +80,7 @@ class Config:
             else:
                 return self._GetValue(section, option, textlist, default, required, secret)
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.dump_exception("GetTextList() FIXME")
 
     def GetEmailList(self, section, option, default = None, required = True, secret = False):
         try:
@@ -111,9 +103,7 @@ class Config:
                     self.debugger.error('ignoring invalid email address (%s)', (email,))
             return self._GetValue(section, option, addresses, default, required, secret)
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.dump_exception("GetEmailList() FIXME")
 
 # Perform simplistic email address validation.
 def valid_email_address(address):
@@ -124,6 +114,4 @@ def valid_email_address(address):
         else:
             return True
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        self.debugger.dump_exception("valid_email_address() FIXME")

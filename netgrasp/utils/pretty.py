@@ -38,9 +38,7 @@ def pretty_date(time):
             return str(day_diff / 30) + " months ago"
         return str(day_diff / 365) + " years ago"
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("pretty_date() FIXME")
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(ip, mac):
@@ -71,6 +69,4 @@ def name_ip(ip, mac):
         else:
             return detail[0]
     except Exception as e:
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        print fname, exc_tb.tb_lineno, e
-        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.dump_exception("name_ip() FIXME")

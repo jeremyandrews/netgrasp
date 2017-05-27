@@ -16,20 +16,20 @@ class Email:
         try:
             import pyzmail
         except Exception as e:
-            debugger.error("fatal exception: %s", (e,))
-            debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (debugger.whoami()))
+            self.debugger.error("fatal exception: %s", (e,))
+            self.debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (self.debugger.whoami()))
 
         self.email_to = config.GetEmailList("Email", "to")
         if not len(self.email_to):
-            debugger.warning("no valid to address configured, email is disabled")
+            self.debugger.warning("no valid to address configured, email is disabled")
             self.enabled = False
             return
 
         email_from = config.GetEmailList("Email", "from")
         if len(email_from) > 1:
-            debugger.warning("only able to send from one address, using %s", (email_from[0],))
+            self.debugger.warning("only able to send from one address, using %s", (email_from[0],))
         elif not len(email_from):
-            debugger.warning("no valid from address configured, email is disabled")
+            self.debugger.warning("no valid from address configured, email is disabled")
             self.enabled = False
             return
         self.email_from = email_from[0]
@@ -38,7 +38,7 @@ class Email:
         self.email_port = config.GetText("Email", "smtp_port", None, False)
         self.email_mode = config.GetText("Email", "smtp_mode", "normal", False)
         if not self.email_mode in ["normal", "ssl", "tls"]:
-            debugger.warning("ignoring invalid email mode (%s), must be one of: normal, ssl, tls", (self.email_mode,))
+            self.debugger.warning("ignoring invalid email mode (%s), must be one of: normal, ssl, tls", (self.email_mode,))
             self.email_mode = "normal"
 
         self.email_username = config.GetText("Email", "smtp_username", None, False)
@@ -52,12 +52,12 @@ class Email:
             if alert in netgrasp.ALERT_TYPES:
                 self.alerts.append(alert)
             else:
-                debugger.warn("ignoring unrecognized alert type (%s), supported types: %s", (alert, netgrasp.ALERT_TYPES))
+                self.debugger.warn("ignoring unrecognized alert type (%s), supported types: %s", (alert, netgrasp.ALERT_TYPES))
         for digest in digests:
             if digest in netgrasp.DIGEST_TYPES:
                 self.digest.append(digest)
             else:
-                debugger.warn("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
+                self.debugger.warn("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
 
     def MailSend(self, subject, encoding, body):
         try:
@@ -76,6 +76,4 @@ class Email:
             else:
                 debugger.warning("email error: %s", (ret,))
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            debugger.dump_exception("MailSend() FIXME")

@@ -35,9 +35,7 @@ class ExclusiveFileLock:
                 # Briefly wait before trying the lock again.
                 time.sleep(0.05)
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.dump_exception("ExclusiveFileLock.__enter__() FIXME")
 
     def __exit__(self, *args):
         try:
@@ -51,6 +49,4 @@ class ExclusiveFileLock:
             except:
                 pass
         except Exception as e:
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print fname, exc_tb.tb_lineno, e
-            self.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+            self.debugger.dump_exception("ExclusiveFileLock.__exit__() FIXME")
