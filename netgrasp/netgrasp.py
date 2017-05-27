@@ -618,11 +618,14 @@ def get_did(ip, mac):
             did = did[0]
         if not did:
             hostname = dns_lookup(ip)
+            debugger.debug("pre-query")
             db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (mac, hostname))
+            debugger.debug("post-query")
+            debugger.debug("did: %s", (did,))
             did = db.cursor.fetchone()
             if did:
                 debugger.debug("pre")
-                debugger.debug("did: %s", (did))
+                debugger.debug("did: %s", (did,))
                 did = did[0]
 
         if not did:
@@ -631,7 +634,7 @@ def get_did(ip, mac):
             did = db.cursor.fetchone()
             if did:
                 debugger.debug("pre")
-                debugger.debug("did: %s", (did))
+                debugger.debug("did: %s", (did,))
                 did = did[0]
 
         if did:
