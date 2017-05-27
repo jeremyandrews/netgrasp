@@ -104,8 +104,8 @@ def main(*pcap):
     # http://www.sqlite.org/wal.html
     ng.db.cursor.execute("PRAGMA journal_mode=WAL")
 
-    create_database(ng.db, ng.debugger)
-    update_database(ng.db, ng.debugger)
+    create_database()
+    update_database()
 
     ng.active_timeout = ng.config.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
     ng.delay = ng.config.GetInt("Listen", "delay", 15, False)
@@ -375,7 +375,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def ip_request(ip, mac, src_ip, src_mac):
     try:
@@ -429,16 +429,14 @@ def ip_request(ip, mac, src_ip, src_mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Assumes we already have the database lock.
 def log_event(ip, mac, event, have_lock = False):
     try:
-        from utils import exclusive_lock
-
         db = database.database_instance
         debugger = debug.debugger_instance
-        debugger.debug('Entering log_event(%s, %s, %s)', (ip, mac, event))
+        debugger.debug("entering log_event(%s, %s, %s)", (ip, mac, event))
 
         now = datetime.datetime.now()
 
@@ -450,21 +448,27 @@ def log_event(ip, mac, event, have_lock = False):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def ip_is_mine(ip):
     try:
         import socket
+        debugger = debug.debugger_instance
+        debugger.debug("entering ip_is_mine(%s)", (ip,))
+
         return (ip == socket.gethostbyname(socket.gethostname()))
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Database definitions.
-def create_database(db, debugger):
+def create_database():
     try:
         from utils import exclusive_lock
+        debugger = debug.debugger_instance
+        db = database.database_instance
+
         debugger.debug('Creating database tables, if not already existing.')
 
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to create tables/indexes"):
@@ -562,11 +566,13 @@ def create_database(db, debugger):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
-def update_database(db, debugger):
+def update_database():
     try:
         from utils import exclusive_lock
+        debugger = debug.debugger_instance
+        db = database.database_instance
 
         # Update #1: add did column to seen table, populate
         try:
@@ -588,7 +594,7 @@ def update_database(db, debugger):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
@@ -615,7 +621,7 @@ def received_arp(hdr, data, child_conn):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Determine appropriate device id for IP, MAC pair.
 def get_did(ip, mac):
@@ -656,7 +662,7 @@ def get_did(ip, mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def first_seen(ip, mac):
     try:
@@ -677,7 +683,7 @@ def first_seen(ip, mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def first_seen_recently(ip, mac):
     try:
@@ -698,7 +704,7 @@ def first_seen_recently(ip, mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def last_seen(ip, mac):
     try:
@@ -716,7 +722,7 @@ def last_seen(ip, mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def previously_seen(ip, mac):
     try:
@@ -734,7 +740,7 @@ def previously_seen(ip, mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def first_requested(ip, mac):
     try:
@@ -752,7 +758,7 @@ def first_requested(ip, mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def last_requested(ip, mac):
     try:
@@ -770,7 +776,7 @@ def last_requested(ip, mac):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips(timeout):
@@ -800,7 +806,7 @@ def detect_stale_ips(timeout):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def detect_netscans():
     try:
@@ -828,7 +834,7 @@ def detect_netscans():
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def detect_anomalies(timeout):
     try:
@@ -879,7 +885,7 @@ def detect_anomalies(timeout):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def send_notifications():
     try:
@@ -935,7 +941,7 @@ def send_notifications():
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def send_email_alerts():
     try:
@@ -1007,7 +1013,7 @@ def send_email_alerts():
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Finds new MAC addresses and assigns them a name.
 def identify_macs():
@@ -1064,7 +1070,7 @@ def identify_macs():
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def dns_lookup(ip):
     try:
@@ -1084,7 +1090,7 @@ def dns_lookup(ip):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 # Generates daily and weekly email digests.
 def send_email_digests():
@@ -1231,7 +1237,7 @@ def send_email_digests():
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def garbage_collection(enabled, oldest_arplog, oldest_event):
     try:
@@ -1279,7 +1285,7 @@ def garbage_collection(enabled, oldest_arplog, oldest_event):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 
 #################
@@ -1332,7 +1338,7 @@ def _init(verbose, daemonize, mode = debug.FILE):
     except Exception as e:
         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
         print fname, exc_tb.tb_lineno, e
-        ng.debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
+        debugger.warning("FIXME line[%s] %s: %s", (exc_tb.tb_lineno, fname, e))
 
 def start():
     ng = netgrasp_instance
