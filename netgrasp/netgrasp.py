@@ -237,15 +237,6 @@ def wiretap(pc, child_conn):
 
             child_conn.send(HEARTBEAT)
 
-            heartbeat = False
-            while child_conn.poll():
-                message = child_conn.recv()
-                if (message == HEARTBEAT):
-                    heartbeat = True
-            # It's possible to receive multiple heartbeats, but many or one is the same to us.
-            if heartbeat:
-                netgrasp_instance.debugger.debug("received heartbeat from main process")
-                last_heartbeat = now
             # Wait an arp packet, then loop again.
             pc.loop(1, received_arp, child_conn)
 
