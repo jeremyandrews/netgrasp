@@ -64,7 +64,7 @@ class Debugger:
         except Exception as e:
             self.logger.dump_exception("debugger FIXME")
 
-    def dump_exception(self, message = None)
+    def dump_exception(self, message = None):
         import os
         import sys
 
