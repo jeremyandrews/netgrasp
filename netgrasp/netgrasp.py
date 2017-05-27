@@ -551,7 +551,7 @@ def create_database():
               )
             """)
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_hostname (mac, hostname)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_hostname ON host (mac, hostname)")
             db.connection.commit()
     except Exception as e:
         debugger.dump_exception("create_database() FIXME")
