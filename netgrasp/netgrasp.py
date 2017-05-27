@@ -493,6 +493,7 @@ def create_database():
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastRequested ON seen (ip, mac, lastRequested)")
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_lastSeen ON seen (active, lastSeen)")
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_active ON seen (ip, mac, active)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_did ON seen (mac, did)")
             # PRAGMA index_list(seen)
 
             # Create arplog table.
@@ -550,6 +551,7 @@ def create_database():
               )
             """)
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_hostname (mac=? AND hostname=?)")
             db.connection.commit()
     except Exception as e:
         debugger.dump_exception("create_database() FIXME")
@@ -618,7 +620,7 @@ def get_did(ip, mac):
             did = did[0]
         if not did:
             hostname = dns_lookup(ip)
-            debugger.debug("pre-query")
+            debugger.debug("pre-query mac(%s) hostname(%s)", (mac, hostname))
             db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (mac, hostname))
             debugger.debug("post-query")
             debugger.debug("did: %s", (did,))
