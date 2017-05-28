@@ -48,6 +48,7 @@ class Netgrasp:
     # Drop root permissions when no longer needed.
     def drop_root(self, ng):
         import grp
+
         os.setgroups([])
         os.setgid(grp.getgrnam(self.config.GetText('Security', 'group', DEFAULT_GROUP, False)).gr_gid)
         os.setuid(pwd.getpwnam(self.config.GetText('Security', 'user', DEFAULT_USER, False)).pw_uid)
@@ -55,6 +56,9 @@ class Netgrasp:
 
     # Determine if pid in pidfile is a running process.
     def is_running(self):
+        import os
+        import errno
+
         running = False
         if self.pidfile:
             if os.path.isfile(self.pidfile):
