@@ -7,9 +7,10 @@ config_instance = None
 
 class Config:
     def __init__(self, debugger):
+        from netgrasp import netgrasp
         self.parser = ConfigParser.ConfigParser()
         self.debugger = debugger
-        self.found = self.parser.read(['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf'])
+        self.found = self.parser.read(netgrasp.DEFAULT_CONFIG)
 
     def _GetValue(self, section, option, value, default, required, secret):
         if not value and default:

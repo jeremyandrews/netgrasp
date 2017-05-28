@@ -29,14 +29,14 @@ PROCESSED_DAILY_DIGEST  = 2
 PROCESSED_WEEKLY_DIGEST = 4
 PROCESSED_NOTIFICATION  = 8
 
-DEFAULT_CONFIG    = ['/etc/netgraspd.cfg', '/usr/local/etc/netgraspd.cfg', '~/.netgraspd.cfg', './netgraspd.cnf']
+DEFAULT_CONFIG    = ['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf']
 DEFAULT_USER      = "daemon"
 DEFAULT_GROUP     = "daemon"
 DEFAULT_LOGLEVEL  = logging.INFO
-DEFAULT_LOGFILE   = "netgraspd.log"
+DEFAULT_LOGFILE   = "/var/log/netgrasp.log"
 DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
-DEFAULT_PIDFILE   = "netgraspd.pid"
-DEFAULT_DBLOCK    = "/tmp/.database_lock"
+DEFAULT_PIDFILE   = "/var/run/netgrasp.pid"
+DEFAULT_DBLOCK    = "/tmp/.netgrasp_database_lock"
 
 class Netgrasp:
     def __init__(self, config, verbose = False, daemonize = True):
@@ -1327,9 +1327,9 @@ def start():
         ng.pidfile = ng.config.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
         username = ng.config.GetText('Security', 'user', DEFAULT_USER, False)
         groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
-        ng.debugger.info("daemonizing app=netgraspd, pidfile=%s, user=%s, group=%s, verbose=True", (ng.pidfile, username, groupname))
+        ng.debugger.info("daemonizing app=netgrasp, pidfile=%s, user=%s, group=%s, verbose=True", (ng.pidfile, username, groupname))
         try:
-            daemon = daemonize.Daemonize(app="netgraspd", pid=ng.pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
+            daemon = daemonize.Daemonize(app="netgrasp", pid=ng.pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
             daemon.start()
         except Exception as e:
             ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))

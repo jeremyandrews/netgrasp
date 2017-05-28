@@ -50,7 +50,7 @@ def start(args):
     ng.is_running = is_running(ng.pidfile)
     if ng.is_running:
         ng.debugger.critical("Netgrasp is already running with pid %d.", (ng.is_running,))
-    ng.debugger.info("Starting netgraspd...")
+    ng.debugger.info("Starting netgrasp...")
 
     if args.verbose:
         verbose = args.verbose
@@ -71,7 +71,7 @@ def start(args):
 def stop(args):
     if not ng.is_running:
         ng.debugger.critical("Netgrasp is not running.")
-    ng.debugger.info("Stopping netgraspd...")
+    ng.debugger.info("Stopping netgrasp...")
     try:
         os.kill(ng.is_running, signal.SIGTERM)
     except OSError as e:
@@ -283,21 +283,21 @@ if __name__ == "__main__":
     subparsers = parser.add_subparsers()
 
     # start
-    parser_start = subparsers.add_parser("start", help="start netgraspd")
+    parser_start = subparsers.add_parser("start", help="start netgrasp")
     parser_start.add_argument("--verbose", "-v", action="count", help="verbose logging")
     parser_start.add_argument("--foreground", "-f", action="count", help="don't daemonize, run in the foreground")
     parser_start.set_defaults(func=start)
 
     # stop
-    parser_stop = subparsers.add_parser("stop", help="stop netgraspd")
+    parser_stop = subparsers.add_parser("stop", help="stop netgrasp")
     parser_stop.set_defaults(func=stop)
 
     # restart
-    parser_restart = subparsers.add_parser("restart", help="restart netgraspd")
+    parser_restart = subparsers.add_parser("restart", help="restart netgrasp")
     parser_restart.set_defaults(func=restart)
 
     # status
-    parser_status = subparsers.add_parser("status", help="netgraspd status")
+    parser_status = subparsers.add_parser("status", help="netgrasp status")
     parser_status.set_defaults(func=status)
 
     # list
