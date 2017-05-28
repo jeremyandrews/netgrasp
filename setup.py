@@ -1,6 +1,9 @@
 #!/usr/bin/env python2
 
-from distutils.core import setup
+try:
+    from setuptools import setup
+except ImportError:
+    from distutils.core import setup
 
 setup(name="NetGrasp",
       version="0.8",
@@ -14,8 +17,9 @@ setup(name="NetGrasp",
       description="A passive network scanner",
       long_description=open("README.txt").read(),
       scripts=["bin/netgrasp"],
-      install_requires=["pypcap", "dpkt", "sqlite3", "daemonize"],
-      extras_requires = {
+      install_requires=["pypcap>=1.1.6", "dpkt>=1.8.0", "daemonize>=2.4.7"],
+      # @TODO Require sqlite3 if not on FreeBSD
+      extras_require = {
           'email': ["pyzmail"],
           'notification': ["notify"],
       },
