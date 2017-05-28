@@ -14,4 +14,9 @@ setup(name="NetGrasp",
       description="A passive network scanner",
       long_description=open("README.txt").read(),
       scripts=["bin/netgrasp"],
+      install_requires=["pypcap", "dpkt", "sqlite3", "daemonize"],
+      extras_requires = {
+          'email': ["pyzmail"],
+          'notification': ["notify"],
+      },
      )
