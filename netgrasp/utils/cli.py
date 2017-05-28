@@ -28,28 +28,42 @@ def start(ng):
     netgrasp.netgrasp_instance = daemon_ng
     netgrasp.start()
 
-def stop(ng):
+def stop(ng, must_be_running = True):
     import os
     import signal
     import errno
+
     pid = ng.is_running()
+
     if not pid:
-        ng.debugger.critical("Netgrasp is not running.")
-    ng.debugger.info("Stopping netgrasp...")
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError as e:
-        if e.errno == errno.EPERM:
-            ng.debugger.critical("Failed (perhaps try with sudo): %s", (e))
+        if must_be_running:
+            ng.debugger.critical("Netgrasp is not running.")
         else:
-            ng.debugger.critical("Failed: %s", (e,))
+            ng.debugger.info("Netgrasp is not running.")
+    else:
+        ng.debugger.info("Stopping netgrasp...")
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError as e:
+            if e.errno == errno.EPERM:
+                ng.debugger.critical("Failed (perhaps try with sudo): %s", (e))
+            else:
+                ng.debugger.critical("Failed: %s", (e,))
 
 def restart(ng):
     import time
 
-    stop(ng.args)
-    time.sleep(1)
-    start(args)
+    stop(ng, False)
+    running = ng.is_running()
+    loops = 0
+    while running:
+        loops += 1
+        if (loops > 15):
+            ng.debugger.critical("Failed to stop netgrasp.")
+        time.sleep(0.2)
+        running = ng.is_running()
+    start(ng)
 
 def status(ng):
     pid = ng.is_running()

@@ -32,14 +32,18 @@ if __name__ == "__main__":
 
     # stop
     parser_stop = subparsers.add_parser("stop", help="stop netgrasp")
+    parser_stop.add_argument("--verbose", "-v", action="count", help="verbose logging")
     parser_stop.set_defaults(func=cli.stop)
 
     # restart
     parser_restart = subparsers.add_parser("restart", help="restart netgrasp")
+    parser_restart.add_argument("--verbose", "-v", action="count", help="verbose logging")
+    parser_restart.add_argument("--foreground", "-f", action="count", help="don't daemonize, run in the foreground")
     parser_restart.set_defaults(func=cli.restart)
 
     # status
     parser_status = subparsers.add_parser("status", help="netgrasp status")
+    parser_status.add_argument("--verbose", "-v", action="count", help="verbose logging")
     parser_status.set_defaults(func=cli.status)
 
     # list
