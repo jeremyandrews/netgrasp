@@ -101,11 +101,11 @@ class SelectQueryBuilder():
         if len(self.order):
             query_string += " ORDER BY " + ", ".join(self.order)
         self.debugger.debug("Select query: %s", (query_string,))
-        #self.debugger.debug2("Query plan:")
-        #self.cursor.execute("EXPLAIN QUERY PLAN " + query_string, self.where_args)
-        #plans = self.cursor.fetchall()
-        #for plan in plans:
-        #    self.debugger.debug2(" - %s", plan[3])
+        self.debugger.debug2("Query plan:")
+        database_instance.cursor.execute("EXPLAIN QUERY PLAN " + query_string, self.where_args)
+        plans = database_instance.cursor.fetchall()
+        for plan in plans:
+            self.debugger.debug2(" - %s", plan[3])
         return query_string
 
     def db_args(self):
