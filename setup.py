@@ -6,7 +6,7 @@ except ImportError:
     from distutils.core import setup
 
 setup(name="NetGrasp",
-      version="0.8",
+      version="0.8.0dev",
       author="Jeremy Andrews",
       author_email="jeremy@tag1consulting.com",
       maintainer="Jeremy Andrews",
@@ -17,10 +17,13 @@ setup(name="NetGrasp",
       description="A passive network scanner",
       long_description=open("README.txt").read(),
       scripts=["bin/netgrasp"],
+      package_data = {
+          "": ["*.md", "*.cfg"],
+      },
       install_requires=["pypcap>=1.1.6", "dpkt>=1.8.0", "daemonize>=2.4.7"],
       # @TODO Require sqlite3 if not on FreeBSD
       extras_require = {
-          'email': ["pyzmail"],
-          'notification': ["notify"],
+          "email": ["pyzmail"],
+          "notification": ["notify"],
       },
      )

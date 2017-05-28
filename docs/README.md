@@ -6,50 +6,45 @@ Must be started as root. Will spawn another process and initiate pcap to listen
 for MAC request and reply packets on the network. Root privilieges are dropped
 as soon as possible during startup.
 
-Netgrasp should be controlled with the netgraspctl command:
+Netgrasp is started as follows:
 ```
-  sudo netgraspctl start
-  netgraspctl status
-  netgraspctl -h
+  sudo netgrasp start
 ```
-
-> Note: the 'start' functionality is not yet implemented, and will instruct you to manually start netgraspd:
-> `  sudo netgraspd -d`
 
 Netgrasp tracks IP and MAC address pairs seen on the network while it runs,
-optionally notifying you when a new device joins your network. It can also
-provide daily summary digests detailing devices on your network.
+optionally notifying you when a new device joins your network. It can provide
+daily summary digests detailing devices on your network. It can also be used
+interactively to review devices and list events on your network.
 
 ## Dependencies
  * Python 2
- * [dpkt](https://github.com/kbandla/dpkt) (`pip install dpkt`)
- * [pcap](https://github.com/dugsong/pypcap) (`pip install pypcap`)
+ * Installed when you run `./setup.py install`:
+   * [dpkt](https://github.com/kbandla/dpkt)
+   * [pycap](https://github.com/dugsong/pypcap)
+   * [daemonize](https://github.com/thesharp/daemonize)
  * sqlite3
  * (_OPTIONAL_) [pyzmail](http://www.magiksys.net/pyzmail/) (`pip install pyzmail`)
  * (_OPTIONAL_) [ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
 
-### Limitations
- * Windows not supported
+### Current limitations
  * Python 3 not supported
  * IPv6 not supported
+ * Windows not supported
 
 # Control
-
-Once netgraspd has been started (with the -d flag), use netgraspctl to control it.
-For an overview on supported commands, use the -h flag:
+Once netgrasp has been started, you can control it with the following commands:
 ```
-  netgraspctl -h
-  netgraspctl list -h
-  netgraspctl identify -h
-  netgraspctl start -h
-  netgraspctl stop -h
-  netgraspctl restart -h
-  netgraspctl status -h
+  netgrasp -h
+  netgrasp list -h
+  netgrasp identify -h
+  netgrasp start -h
+  netgrasp stop -h
+  netgrasp restart -h
+  netgrasp status -h
 ```
 
 ## Listing Devices
-
-Use `netgraspctl list` to list devices and related events on your network. By
+Use `netgrasp list` to list devices and related events on your network. By
 default only currently active devices are show, but the `-a` flag can also show
 inactive devices. The `-aa` flag shows all activity, not just the latest activity.
 
@@ -61,25 +56,25 @@ By default devices are listed. Optionally use `--type event` to list events
 instead.
 
 ### All currently active devices
-`netgraspctl list`
+`netgrasp list`
 
 ### All currently active Apple devices
-`netgraspctl list -v apple`
+`netgrasp list -v apple`
 
 ### All Apple devices that have ever been active on your network
-`netgraspctl list -av apple`
+`netgrasp list -av apple`
 
 ### All currently active devices with an IP containing 10.0
-`netgraspctl list -i 10.0`
+`netgrasp list -i 10.0`
 
 ### All records for all Apple devices ever active on your network
-`netgraspctl list -aav apple`
+`netgrasp list -aav apple`
 
 ### All events related to currently active Apple devices
-`netgraspctl list -t event -v apple`
+`netgrasp list -t event -v apple`
 
 ### All events related to all Apple devices
-`netgraspctl list -t event -av apple`
+`netgrasp list -t event -av apple`
 
 ## Identifying Devices
 
@@ -87,27 +82,31 @@ Once devices are manually identified, the custom name you assign will be used
 in listings, alerts and notifications. Custom names are attached to the MAC
 address, as well as to the MAC and IP address pair.
 
-Identifiation is a two-step process. First, find the ID associated with the
-device you want to identify. Second, set a custom name for that ID. During
-step one, you can use the same filters documented earlier for listing devices.
+Identifiation is a two-step process.
+
+1. Find the ID associated with the device. (`netgrasp identify`)
+1. Set a custom name for that ID. (`netgrasp identify --set`)
+
+During step one, you can use the same filters documented earlier for listing
+devices. For example:
 
 ### List IDs of all unidentified devices
-`netgraspctl identify`
+`netgrasp identify`
 
 ### List IDs of all devices, even if already identified
-`netgraspctl identify -a`
+`netgrasp identify -a`
 
 ### List IDs of all Apple devices
-`netgraspctl identify -av apple`
+`netgrasp identify -av apple`
 
 ### Set custom name for ID
-`netgraspctl --set 4 "my iPhone"`
+`netgrasp --set 4 "my iPhone"`
 
 # Configuration
 
 Netgrasp will look for its configuration file at the following paths:
 ```
-  /etc/netgraspd.cfg, /usr/local/etc/netgraspd.cfg, ~/.netgraspd.cfg, ./netgraspd.cfg
+  /etc/netgrasp.cfg, /usr/local/etc/netgrasp.cfg, ~/.netgrasp.cfg, ./netgrasp.cfg
 ```
 
 ## [Listen]
@@ -156,12 +155,12 @@ should be written.  The database must be readable and writeable by the user you
 specified in the Security section. For example:
 ```
 [Database]
-filename = /var/db/netgrasp/netgraspd.db
+filename = /var/db/netgrasp/netgrasp.db
 ```
 
 ## [Logging]
 If you want to see what's going on behind the scenes, you can increase the
-logging level.  Setting the logging level to WARN notifies you of problems.
+logging level.  Setting the logging level to WARNING notifies you of problems.
 Setting the logging level to INFO notifies you of interesting things (such as
 changes in state for devices on the network). Setting the logging level to DEBUG
 will flood you with information. For example:
@@ -174,16 +173,16 @@ You can force Netgrasp to generate verbose logs by starting the program with the
 -v flag. This causes Netgrasp to ignore the [Logging] level setting, and instead
 to use DEBUG. You can do this with our without the -d (daemon) flag.
 ```
-  sudo python2 netgraspd -v
+  sudo python2 netgrasp
 ```
 
-If you choose to daemonize Netgrasp, the mast process pid gets written to a pid
-file and logs are written to a log file. The paths to these files are configured
-as follows:
+By default, Netgrasp daemonizes itself, and the master processes pid gets
+written to a pid file and logs are written to a log file. The paths to these
+files are configured as follows:
 ```
 [Logging]
-pidfile = /var/run/netgraspd.pid
-filename = /var/log/netgraspd.log
+pidfile = /var/run/netgrasp.pid
+filename = /var/log/netgrasp.log
 ```
 
 ## [Email]
@@ -194,8 +193,8 @@ your network.
 
 In order for Netgrasp to send you notifications, you must properly configure an
 smtp server that it can use. Notifications can be sent to multiple people in a
-comma separated list of the format NAME|EMAIL, NAME|EMAIL where NAME is optional.
-For example:
+comma separated list of the format NAME|EMAIL, NAME|EMAIL where NAME is
+optional. For example:
 ```
 [Email]
 enabled = yes
@@ -231,15 +230,13 @@ alerts = first_seen_recently,first_seen,network_scan,duplicate_ip
 
 The following digest types are supported:
 * daily: a daily summary of network activity
-* weekly: not yet implemented, will be a weekly summary of network activity
+* weekly: be a weekly summary of network activity
 
 ## [Notifications]
 Netgrasp can also provide real-time notifiations on your desktop, using ntfy.
-These are disabled by default as ntfy can be more difficult to install
-correctly than other dependencies. Once installed, ntfy must be available to
-the user that netgraspd runs under, as configured above in the Security section.
-Netgrasp will refuse to start if you enable Notifications but don't make
-ntfy available to it.
+Once installed, ntfy must be available to the user that netgrasp runs under, as
+configured above in the Security section.  Netgrasp will refuse to start if you
+enable Notifications but don't make ntfy available to it.
 
 The same alert types that were available to email alerts are also available to
 notifications.
@@ -252,8 +249,6 @@ alerts = first_seen_recently,network_scan,changed_ip,duplicate_ip
 ```
 
 # Roadmap
-* CLI netgraspcli command for performing real time tasks:
-   * start netgraspd daemon
 * Alert on anomalies
    * destination/source IP of 0.0.0.0, or other invalid IPs
    * [Reserved IP addresses](https://en.wikipedia.org/wiki/Reserved_IP_addresses)
@@ -265,6 +260,8 @@ alerts = first_seen_recently,network_scan,changed_ip,duplicate_ip
      identify devices that we may not otherwise see via passive scanning
      devices
 * Support listening on multiple interfaces
+* Detect when subnets have changed
+* Respect DNS ttl, don't cache hostnames forever
 * Localize MAC lookup
    * Currently we're using an online API
    * Determine licensing, and download online list, for example:
