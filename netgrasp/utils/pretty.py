@@ -70,3 +70,9 @@ def name_ip(ip, mac):
             return detail[0]
     except Exception as e:
         debugger.dump_exception("name_ip() FIXME")
+
+# Truncate strings when they're too long.
+def truncate_string(string, maxlength, suffix = "..."):
+    if len(string) <= maxlength:
+        return string
+    return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)
