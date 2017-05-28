@@ -1,6 +1,8 @@
 from netgrasp import netgrasp
 
 def start(ng):
+    import os
+
     pid = ng.is_running()
     if pid:
         ng.debugger.critical("Netgrasp is already running with pid %d.", (pid,))
@@ -15,6 +17,9 @@ def start(ng):
         daemonize = False
     else:
         daemonize = True
+
+    if os.getuid() != 0:
+        ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
 
     # Re-instantiate Netgrasp with proper parameters
     daemon_ng = netgrasp.Netgrasp(ng.config, ng.verbose, daemonize)

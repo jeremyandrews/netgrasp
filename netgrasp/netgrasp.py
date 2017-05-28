@@ -1315,9 +1315,6 @@ def start():
 
     keep_fds=[ng.debugger.handler.stream.fileno()]
 
-    if os.getuid() != 0:
-        ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
-
     try:
         import sqlite3
     except Exception as e:
