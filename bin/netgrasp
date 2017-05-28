@@ -71,8 +71,9 @@ if __name__ == "__main__":
     else:
         config = netgrasp.DEFAULT_CONFIG
 
-    ng = netgrasp.Netgrasp(config, args.verbose, False)
+    ng = netgrasp.Netgrasp(config)
     ng.debugger, ng.config = netgrasp._init(args.verbose, False, debug.PRINT)
+    ng.verbose = args.verbose
     ng.pidfile = ng.config.GetText("Logging", "pidfile", netgrasp.DEFAULT_PIDFILE, False)
     ng.args = args
 

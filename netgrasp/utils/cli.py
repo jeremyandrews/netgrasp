@@ -8,22 +8,23 @@ def start(ng):
         ng.debugger.critical("Netgrasp is already running with pid %d.", (pid,))
     ng.debugger.info("Starting netgrasp...")
 
-    if ng.args.verbose:
-        verbose = ng.args.verbose
-    else:
-        verbose = False
-
-    if ng.args.foreground:
-        daemonize = False
-    else:
-        daemonize = True
-
     if os.getuid() != 0:
         ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
 
     # Re-instantiate Netgrasp with proper parameters
-    daemon_ng = netgrasp.Netgrasp(ng.config, ng.verbose, daemonize)
+    daemon_ng = netgrasp.Netgrasp(ng.config)
     daemon_ng.args = ng.args
+
+    if ng.args.verbose:
+        daemon_ng.verbose = ng.args.verbose
+    else:
+        daemon_ng.verbose = False
+
+    if ng.args.foreground:
+        daemon_ng.daemonize = ng.args.foreground
+    else:
+        daemon_ng.daemonize = True
+
     netgrasp.netgrasp_instance = daemon_ng
     netgrasp.start()
 
@@ -53,9 +54,9 @@ def restart(ng):
 def status(ng):
     pid = ng.is_running()
     if pid:
-        ng.debugger.critical("Netgrasp is running with pid %d", (pid,))
+        ng.debugger.warning("Netgrasp is running with pid %d", (pid,))
     else:
-        ng.debugger.critical("Netgrasp is not running.")
+        ng.debugger.warning("Netgrasp is not running.")
 
 def list(ng):
     import datetime

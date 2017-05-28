@@ -28,7 +28,7 @@ debugger_instance = None
 class Debugger:
     def __init__(self, verbose = False, logger = None, mode = PRINT, level = logging.CRITICAL):
         if verbose:
-            self.verbose = True
+            self.verbose = verbose
         else:
             self.verbose = False
 
@@ -56,7 +56,7 @@ class Debugger:
                 self.fatal(message, args)
 
             if self.mode == PRINT:
-                if self.verbose and verbose >= self.verbose:
+                if ((self.verbose and verbose >= self.verbose) or (verbose == ALWAYS)):
                     if args:
                         print message % args
                     else:

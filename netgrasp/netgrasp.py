@@ -39,10 +39,7 @@ DEFAULT_PIDFILE   = "/var/run/netgrasp.pid"
 DEFAULT_DBLOCK    = "/tmp/.netgrasp_database_lock"
 
 class Netgrasp:
-    def __init__(self, config, verbose = False, daemonize = True):
-        self.verbose = verbose
-        self.daemonize = daemonize
-
+    def __init__(self, config):
         if config:
             self.config = config
         else:
@@ -1303,7 +1300,7 @@ def _init(verbose, daemonize, mode = debug.FILE):
         debugger.info('loaded configuration file: %s', (configuration.found,))
 
         if not daemonize:
-            debugger.warning("Output forced to stderr, started with --foreground flag.")
+            debugger.info("Output forced to stderr, started with --foreground flag.")
 
         return (debugger, configuration)
     except Exception as e:
