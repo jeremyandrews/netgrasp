@@ -56,6 +56,25 @@ class Netgrasp:
         os.setuid(pwd.getpwnam(self.config.GetText('Security', 'user', DEFAULT_USER, False)).pw_uid)
         ng.debugger.info('running as user %s',  (self.debugger.whoami(),))
 
+    # Determine if pid in pidfile is a running process.
+    def is_running(self):
+        running = False
+        if self.pidfile:
+            if os.path.isfile(self.pidfile):
+                f = open(self.pidfile)
+                pid = int(f.readline())
+                f.close()
+                if pid > 0:
+                    self.debugger.info("Found pidfile %s, contained pid %d", (self.pidfile, pid))
+                    try:
+                        os.kill(pid, 0)
+                    except OSError as e:
+                        if e.errno == errno.EPERM:
+                            running = pid
+                    else:
+                        running = pid
+        return running
+
 # Simple, short text string used for heartbeat.
 HEARTBEAT = 'nghb'
 # Macimum seconds to process before returning to main loop

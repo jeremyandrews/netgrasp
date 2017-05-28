@@ -21,25 +21,6 @@ import datetime
 import fcntl
 import time
 
-# Determine if pid in pidfile is a running process.
-def is_running(pidfile):
-    running = False
-    if os.path.isfile(pidfile):
-        f = open(pidfile)
-        pid = int(f.readline())
-        f.close()
-        if pid > 0:
-            ng.debugger.info("Found pidfile %s, contained pid %d", (pidfile, pid))
-            try:
-                os.kill(pid, 0)
-            except OSError as e:
-                if e.errno == errno.EPERM:
-                    running = pid
-            else:
-                running = pid
-    return running
-    return str(day_diff / 365) + " years ago"
-
 # Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):
     if len(string) <= maxlength:
@@ -47,9 +28,9 @@ def truncate_string(string, maxlength, suffix = "..."):
     return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)
 
 def start(args):
-    ng.is_running = is_running(ng.pidfile)
-    if ng.is_running:
-        ng.debugger.critical("Netgrasp is already running with pid %d.", (ng.is_running,))
+    pid = ng.is_running()
+    if pid:
+        ng.debugger.critical("Netgrasp is already running with pid %d.", (pid,))
     ng.debugger.info("Starting netgrasp...")
 
     if args.verbose:
@@ -69,11 +50,12 @@ def start(args):
     netgrasp.start()
 
 def stop(args):
-    if not ng.is_running:
+    pid = ng.is_running()
+    if not pid:
         ng.debugger.critical("Netgrasp is not running.")
     ng.debugger.info("Stopping netgrasp...")
     try:
-        os.kill(ng.is_running, signal.SIGTERM)
+        os.kill(pid, signal.SIGTERM)
     except OSError as e:
         if e.errno == errno.EPERM:
             ng.debugger.critical("Failed (perhaps try with sudo): %s", (e))
@@ -86,13 +68,15 @@ def restart(args):
     start(args)
 
 def status(args):
-    if ng.is_running:
-        ng.debugger.warning("Netgrasp is running with pid %d", (ng.is_running,))
+    pid = ng.is_running()
+    if pid:
+        ng.debugger.warning("Netgrasp is running with pid %d", (pid,))
     else:
         ng.debugger.warning("Netgrasp is not running.")
 
 def list(args):
-    if not ng.is_running:
+    pid = ng.is_running()
+    if not pid:
         ng.debugger.critical("Netgrasp is not running.")
 
     ng.database_filename = ng.config.GetText('Database', 'filename')
@@ -191,7 +175,8 @@ def list(args):
             print rowFormat.format(truncate_string(row[1], 15), truncate_string(pretty.name_ip(row[1], row[0]), 22), truncate_string(row[3], 19), truncate_string(pretty.pretty_date(row[2]), 16))
 
 def identify(args):
-    if not ng.is_running:
+    pid = ng.is_running()
+    if not pid:
         ng.debugger.critical("Netgrasp is not running.")
 
     ng.database_filename = ng.config.GetText("Database", "filename")
@@ -336,6 +321,5 @@ if __name__ == "__main__":
 
     # Find/load pidfile.
     ng.pidfile = ng.config.GetText("Logging", "pidfile", netgrasp.DEFAULT_PIDFILE, False)
-    ng.is_running = is_running(ng.pidfile)
 
     args.func(args)
