@@ -17,6 +17,7 @@ setup(name="NetGrasp",
       description="A passive network scanner",
       long_description=open("README.txt").read(),
       scripts=["bin/netgrasp"],
+      download_url = "https://github.com/jeremyandrews/netgrasp/archive/v0.8.0-beta.tar.gz"
       package_data = {
           "": ["*.md", "*.cfg"],
       },
