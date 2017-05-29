@@ -6,7 +6,7 @@ except ImportError:
     from distutils.core import setup
 
 setup(name="NetGrasp",
-      version="0.8.0.dev1",
+      version="0.8.0",
       author="Jeremy Andrews",
       author_email="jeremy@tag1consulting.com",
       maintainer="Jeremy Andrews",

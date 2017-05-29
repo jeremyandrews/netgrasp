@@ -6,22 +6,27 @@ optionally generating notifications. For example, it can notify you when a new
 device joins your network. It can also send daily and weekly emails summarizing
 the devices using your network.
 
+Netgrasp requires Python 2.
+
 ============
 Installation
 ============
 Run:
+  pip install netgrasp
+
+Or:
   sudo ./setup.py install
 
 To start netgrasp:
-  sudo netgraspctl start
+  sudo netgrasp start
 
 To stop netgrasp:
-  sudo netgraspctl stop
+  sudo netgrasp stop
 
-From more detail on controlling netgrasp:
+Soem built-in documentation on using Netgrasp:
+ * netgrasp -h
+ * netgrasp list -h
+ * netgrasp identify -h
 
- * netgraspctl -h
- * netgraspctl list -h
- * netgraspctl identify -h
-
-Complete documentation can be found in docs/README.md.
+Complete documentation can be found in docs/README.md:
+  https://github.com/jeremyandrews/netgrasp/blob/master/docs/README.md
