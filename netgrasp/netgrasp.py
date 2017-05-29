@@ -290,9 +290,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
         now = datetime.datetime.now()
 
-        debugger.debug("grabbing lock")
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to insert into arplog"):
-            debugger.debug("grabbed lock")
             db.cursor.execute("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)", (src_mac, src_ip, dst_mac, dst_ip, request, now))
             db.connection.commit()
             debugger.debug("inserted into arplog")

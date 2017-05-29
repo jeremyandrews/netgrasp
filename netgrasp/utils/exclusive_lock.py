@@ -17,8 +17,10 @@ class ExclusiveFileLock:
             self._fd = os.open(self._lockfile, os.O_CREAT)
             started = time.time()
             while True:
+                self.debugger.debug("grabbing lock")
                 try:
                     fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self.debugger.debug("grabbed lock")
                     # We got the lock.
                     return
                 except (OSError, IOError) as ex:
@@ -39,7 +41,9 @@ class ExclusiveFileLock:
 
     def __exit__(self, *args):
         try:
+            self.debugger.debug("releasing lock")
             fcntl.flock(self._fd, fcntl.LOCK_UN)
+            self.debugger.debug("released lock")
             os.close(self._fd)
             self._fd = None
 
