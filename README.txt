@@ -23,7 +23,7 @@ To start netgrasp:
 To stop netgrasp:
   sudo netgrasp stop
 
-Soem built-in documentation on using Netgrasp:
+Some built-in documentation on using Netgrasp:
  * netgrasp -h
  * netgrasp list -h
  * netgrasp identify -h

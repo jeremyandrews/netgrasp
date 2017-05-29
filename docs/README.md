@@ -249,9 +249,6 @@ alerts = first_seen_recently,network_scan,changed_ip,duplicate_ip
 ```
 
 # Roadmap
-* Alert on anomalies
-   * destination/source IP of 0.0.0.0, or other invalid IPs
-   * [Reserved IP addresses](https://en.wikipedia.org/wiki/Reserved_IP_addresses)
 * Add semi-active and active modes
    * semi-active pro-actively pings devices that haven't been seen a while,
      to determine if they've really gone offline (and to more quickly identify
