@@ -18,6 +18,7 @@ class Database:
 
     def set_state(self, key, value, secret = False):
         try:
+            self.debugger.debug("entering database.set_state(%s) secret(%s)", (key, date))
             with exclusive_lock.ExclusiveFileLock(self.lock, 5, "failed to update state"):
                 self.cursor.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
                 self.connection.commit()
@@ -30,6 +31,7 @@ class Database:
 
     def get_state(self, key, default_value, date = False):
         try:
+            self.debugger.debug("entering database.get_state(%s) date(%s)", (key, date))
             self.cursor.execute("SELECT value FROM state WHERE key=?", (key,));
             value = self.cursor.fetchone();
             if value:
