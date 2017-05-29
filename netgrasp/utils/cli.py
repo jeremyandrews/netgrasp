@@ -253,7 +253,7 @@ def identify(ng):
         ng.db.cursor.execute("SELECT vendor.vid FROM vendor LEFT JOIN host ON vendor.mac = host.mac WHERE host.hid = ?", (ng.args.set[0],))
         row = ng.db.cursor.fetchone()
         if row:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to set custom name, please try again"):
+            with exclusive_lock.ExclusiveFileLock(ng.db.lock, 5, "failed to set custom name, please try again"):
                 db_args = [ng.args.set[1]]
                 db_args.append(ng.args.set[0])
                 ng.db.cursor.execute("UPDATE host SET customname = ? WHERE hid = ?", db_args)
