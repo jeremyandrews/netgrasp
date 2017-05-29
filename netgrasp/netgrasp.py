@@ -1301,9 +1301,6 @@ def _init(verbose, daemonize, mode = debug.FILE):
             logger.setLevel(configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
         debugger.info('loaded configuration file: %s', (configuration.found,))
 
-        if not daemonize:
-            debugger.info("Output forced to stderr, started with --foreground flag.")
-
         return (debugger, configuration)
     except Exception as e:
         debugger.dump_exception("_init() FIXME")
@@ -1311,6 +1308,9 @@ def _init(verbose, daemonize, mode = debug.FILE):
 def start():
     ng = netgrasp_instance
     ng.debugger, ng.config = _init(ng.verbose, ng.daemonize)
+
+    if not ng.daemonize:
+        debugger.info("Output forced to stderr, started with --foreground flag.")
 
     keep_fds=[ng.debugger.handler.stream.fileno()]
 
