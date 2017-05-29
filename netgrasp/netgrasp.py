@@ -455,6 +455,7 @@ def log_event(ip, mac, event, have_lock = False):
         else:
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to log event: %s""" % event):
                 db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
+                db.connection.commit()
     except Exception as e:
         debugger.dump_exception("log_event() FIXME")
 
