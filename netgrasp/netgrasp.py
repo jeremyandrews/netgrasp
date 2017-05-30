@@ -805,19 +805,17 @@ def detect_netscans():
         debugger.debug("entering detect_netscans()")
         now = datetime.datetime.now()
 
-        three_minutes_ago = now - datetime.timedelta(minutes=3)
-        db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50", (three_minutes_ago,))
+        minutes_ago = now - datetime.timedelta(minutes=5)
+        db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) AS count, src_mac, src_ip FROM arplog WHERE request=1 AND timestamp>=? GROUP BY src_ip HAVING count > 50", (minutes_ago,))
         scans = db.cursor.fetchall()
         if scans:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to process netscan(s)"):
-                for scan in scans:
-                    count, src_mac, src_ip = scan
-                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, EVENT_SCAN, three_minutes_ago))
-                    already_detected = db.cursor.fetchone()
-                    if not already_detected:
-                        log_event(src_ip, src_mac, EVENT_SCAN, True)
-                        debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
-                db.connection.commit()
+            for scan in scans:
+                count, src_mac, src_ip = scan
+                db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (src_mac, src_ip, EVENT_SCAN, minutes_ago))
+                already_detected = db.cursor.fetchone()
+                if not already_detected or not already_detected[0]:
+                    log_event(src_ip, src_mac, EVENT_SCAN)
+                    debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
     except Exception as e:
         debugger.dump_exception("detect_netscans() FIXME")
 
