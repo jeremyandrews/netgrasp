@@ -199,7 +199,7 @@ def identify(ng):
         ng.debugger.info("Opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
 
     ng.db.cursor = ng.db.connection.cursor()
-    ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', netgrasp.DEFAULT_DBLOCK, False))
+    ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', netgrasp.DEFAULT_DBLOCK, False), 5, "identify")
     ng.db.lock = ng._database_lock
 
     if not ng.args.set:

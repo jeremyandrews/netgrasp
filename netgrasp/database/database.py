@@ -19,7 +19,7 @@ class Database:
     def set_state(self, key, value, secret = False):
         try:
             self.debugger.debug("entering database.set_state(%s) secret(%s)", (key, secret))
-            with exclusive_lock.ExclusiveFileLock(self.lock, 5, "failed to update state"):
+            with exclusive_lock.ExclusiveFileLock(self.lock, 5, "set_state, " + key):
                 self.cursor.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
                 self.connection.commit()
             if secret:

@@ -3,12 +3,14 @@ import os
 import errno
 import time
 from netgrasp.utils import debug
+from netgrasp.utils import simple_timer
 
 class ExclusiveFileLock:
-    def __init__(self, lockfile, timeout = 5, timeout_message = None):
+    def __init__(self, lockfile, timeout, name):
         self._lockfile = lockfile
         self._timeout = timeout
-        self._timeout_message = timeout_message
+        self._name = name
+        self._timer = None
         self._fd = None
         self.debugger = debug.debugger_instance
 
@@ -17,22 +19,22 @@ class ExclusiveFileLock:
             self._fd = os.open(self._lockfile, os.O_CREAT)
             started = time.time()
             while True:
-                self.debugger.debug("grabbing lock")
+                self.debugger.debug("grabbing lock: %s", (self._name))
+                self._timer = simple_timer.Timer()
                 try:
                     fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    self.debugger.debug("grabbed lock")
                     # We got the lock.
+                    self.debugger.debug("grabbed lock (took %s seconds): %s", (self._timer.elapsed(), self._name))
+                    self._timer = simple_timer.Timer()
                     return
                 except (OSError, IOError) as ex:
                     if ex.errno != errno.EAGAIN:
                         # Resource temporarily unavailable.
-                        if self._timeout_message:
-                            self.debugger.warning("LOCK UNAVAILABLE: %s", (self._timeout_message,))
+                        self.debugger.warning("LOCK UNAVAILABLE: %s", (self._name,))
                         raise
                     elif self._timeout is not None and time.time() > (started + self._timeout):
                         # Exceeded timeout.
-                        if self._timeout_message:
-                            self.debugger.warning("LOCK TIMEOUT: %s", (self._timeout_message,))
+                        self.debugger.warning("LOCK TIMEOUT: %s", (self._name,))
                         raise
                 # Briefly wait before trying the lock again.
                 time.sleep(0.05)
@@ -41,9 +43,9 @@ class ExclusiveFileLock:
 
     def __exit__(self, *args):
         try:
-            self.debugger.debug("releasing lock")
             fcntl.flock(self._fd, fcntl.LOCK_UN)
-            self.debugger.debug("released lock")
+            self.debugger.debug("released lock (held %s seconds): %s", (self._timer.elapsed(), self._name))
+            self._timer = None
             os.close(self._fd)
             self._fd = None
 

@@ -290,7 +290,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
         now = datetime.datetime.now()
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to insert into arplog"):
+        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, arplog"):
             db.cursor.execute("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)", (src_mac, src_ip, dst_mac, dst_ip, request, now))
             debugger.debug("inserted into arplog")
             db.connection.commit()
@@ -336,7 +336,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
             if lastSeen:
                 # has been active recently
                 debugger.debug("%s (%s) is active", (src_ip, src_mac))
-                with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_SEEN):
+                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, update seen"):
                     db.cursor.execute("UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, counter + 1, sid))
                     db.connection.commit()
             else:
@@ -359,7 +359,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                     debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
 
                 # @TODO properly handle multiple active occurences of the same IP
-                with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % the_event):
+                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, update seen 2"):
                     db.cursor.execute("UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, now, counter + 1, sid))
                     db.connection.commit()
         else:
@@ -383,7 +383,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                 the_event = EVENT_SEEN_FIRST
                 debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % the_event):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, update seen 3"):
                 db.cursor.execute("INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
                 db.connection.commit()
     except Exception as e:
@@ -427,14 +427,14 @@ def ip_request(ip, mac, src_ip, src_mac):
         log_event(ip, mac, EVENT_REQUESTED)
         if active:
             # Update:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_REQUESTED):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_request, update seen"):
                 db.cursor.execute("UPDATE seen set lastRequested=? WHERE sid=?", (now, sid))
                 db.connection.commit()
             debugger.debug("%s (%s) requested", (ip, mac))
         else:
             # First time we've seen a request for this IP.
             log_event(ip, mac, EVENT_REQUESTED_FIRST)
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to update seen, %s""" % EVENT_REQUESTED_FIRST):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_request, insert into seen"):
                 db.cursor.execute("INSERT INTO seen (mac, ip, did, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (mac, ip, get_did(ip, mac), now, now, ip_is_mine(ip)))
                 db.connection.commit()
             debugger.info("%s (%s) requested, first time seeing", (ip, mac))
@@ -453,7 +453,7 @@ def log_event(ip, mac, event, have_lock = False):
         if have_lock:
             db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
         else:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, """failed to log event: %s""" % event):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "log_event, " + event):
                 db.connection.execute("INSERT INTO event (mac, ip, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, now, 0, event))
                 db.connection.commit()
     except Exception as e:
@@ -478,7 +478,7 @@ def create_database():
 
         debugger.debug('Creating database tables, if not already existing.')
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to create tables/indexes"):
+        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "create_database"):
             # Create state table.
             db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS state(
@@ -587,7 +587,7 @@ def update_database():
         except Exception as e:
             debugger.debug("%s", (e,))
             debugger.debug("applying update #1 to database: adding did column to seen, populating")
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to apply database updates"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
                 db.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
                 # Prior to this we assumed a new IP was a new device.
                 db.cursor.execute("SELECT DISTINCT ip, mac FROM seen")
@@ -781,7 +781,7 @@ def detect_stale_ips(timeout):
         db.cursor.execute("SELECT sid, mac, ip, firstSeen, lastSeen FROM seen WHERE active = 1 AND lastSeen < ?", (stale,))
         rows = db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to mark devices stale"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "detect_stale_ips"):
                 for row in rows:
                     sid, mac, ip, firstSeen, lastSeen = row
                     if (firstSeen and lastSeen):
@@ -914,12 +914,12 @@ def send_notifications():
 
                 if (timer.elapsed() > MAXSECONDS):
                     debugger.debug("processing notifications >%d seconds, aborting", (MAXSECONDS,))
-                    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will process notifications later"):
+                    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_notifications, aborting"):
                         db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                         db.connection.commit()
                     return
 
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will process notifications later"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_notifications"):
                 db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                 db.connection.commit()
     except Exception as e:
@@ -986,7 +986,7 @@ def send_email_alerts():
                 else:
                     debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
 
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify vendor"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_email_alerts"):
                 db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_ALERT, max_eid, PROCESSED_ALERT))
                 db.connection.commit()
             debugger.debug("send_email_alerts: processed %d events", (processed_events,))
@@ -1027,7 +1027,7 @@ def identify_macs():
             url = """/%s""" % mac
             http.request("GET", url)
             response = http.getresponse()
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify vendor"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "identify_macs, vendor"):
                 if response.status == 200 and response.reason == "OK":
                     vendor = response.read()
                     debugger.info("Identified %s [%s] as %s", (ip, raw_mac, vendor))
@@ -1042,7 +1042,7 @@ def identify_macs():
         for row in rows:
             mac, ip = row
             hostname = dns_lookup(ip)
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify host"):
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "identify_macs, hostname"):
                 db.cursor.execute("INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)", (mac, ip, hostname))
                 db.connection.commit()
     except Exception as e:
@@ -1199,7 +1199,7 @@ def send_email_digests():
                 processed_type = PROCESSED_WEEKLY_DIGEST
             max_eid = db.cursor.fetchone()
             if max_eid and max_eid[0]:
-                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to send digest"):
+                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_email_digests"):
                     db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (processed_type, max_eid[0], processed_type))
 
                     db.connection.commit()
@@ -1239,7 +1239,7 @@ def garbage_collection(enabled, oldest_arplog, oldest_event):
         # schedule next garbage collection
         db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to perform garbage collection"):
+        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "garbage_collection"):
             # Purge old arplog entries.
             db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
             arplog_count = db.cursor.fetchone()
