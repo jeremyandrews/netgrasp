@@ -247,25 +247,3 @@ For example:
 enabled = true
 alerts = first_seen_recently,network_scan,changed_ip,duplicate_ip
 ```
-
-# Roadmap
-* Add semi-active and active modes
-   * semi-active pro-actively pings devices that haven't been seen a while,
-     to determine if they've really gone offline (and to more quickly identify
-     a device that's no longer on the network)
-   * active pro-actively pings the entire network semi-regularly to quickly
-     identify devices that we may not otherwise see via passive scanning
-     devices
-* Support listening on multiple interfaces
-* Detect when subnets have changed
-* Respect DNS ttl, don't cache hostnames forever
-* Localize MAC lookup
-   * Currently we're using an online API
-   * Determine licensing, and download online list, for example:
-      * http://standards-oui.ieee.org/oui.txt
-* Add cross-platform UI for configuration, alerting, and ongoing network
-  monitoring
-   * [Kivy](https://kivy.org)
-   * [Python GUI Programming](https://wiki.python.org/moin/GuiProgramming)
-* Identify unassociated mobile devices
-   * [Why MAC Address Randomization is not Enough](http://papers.mathyvanhoef.com/asiaccs2016.pdf)
