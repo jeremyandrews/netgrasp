@@ -889,37 +889,44 @@ def send_notifications():
             return False
 
         import ntfy
-        timer = simple_timer.Timer()
 
         day = datetime.datetime.now() - datetime.timedelta(days=1)
+        timer = simple_timer.Timer()
+
+        # only send notifications for configured events
         db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notifier.alerts)) + ")", notifier.alerts)
 
         rows = db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to process notifications"):
-                counter = 0
-                for row in rows:
-                    if (timer.elapsed() > MAXSECONDS):
-                        # We've been processing notifications too long, quit for now and come back later.
-                        debugger.debug("processing notifications >%d seconds, quitting for now", (MAXSECONDS,))
+            counter = 0
+            max_eid = 0
+            for row in rows:
+                eid, mac, ip, timestamp, event, processed = row
+                debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
+
+                if eid > max_eid:
+                    max_eid = eid
+
+                if event in notifier.alerts:
+                    debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
+                    firstSeen = first_seen(ip, mac)
+                    lastSeen = first_seen_recently(ip, mac)
+                    previouslySeen = previously_seen(ip, mac)
+                    title = """Netgrasp alert: %s""" % (event)
+                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstSeen))
+                    ntfy.notify(body, title)
+                else:
+                    debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
+
+                if (timer.elapsed() > MAXSECONDS):
+                    debugger.debug("processing notifications >%d seconds, aborting", (MAXSECONDS,))
+                    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will process notifications later"):
+                        db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                         db.connection.commit()
-                        return
+                    return
 
-                    eid, mac, ip, timestamp, event, processed = row
-                    debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
-
-                    # only send notifications for configured events
-                    if event in notifier.alerts:
-                        debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
-                        firstSeen = first_seen(ip, mac)
-                        lastSeen = first_seen_recently(ip, mac)
-                        previouslySeen = previously_seen(ip, mac)
-                        title = """Netgrasp alert: %s""" % (event)
-                        body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstSeen))
-                        ntfy.notify(body, title)
-                        db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 8, eid))
-                    else:
-                        debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will process notifications later"):
+                db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                 db.connection.commit()
     except Exception as e:
         debugger.dump_exception("send_notifications() FIXME")
