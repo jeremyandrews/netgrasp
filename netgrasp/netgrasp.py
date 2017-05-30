@@ -944,53 +944,51 @@ def send_email_alerts():
 
         day = datetime.datetime.now() - datetime.timedelta(days=1)
 
-        timer = simple_timer.Timer()
-
-        db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1)");
+        db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1) AND event IN ("+ ",".join("?"*len(emailer.alerts)) + ")", emailer.alerts)
         rows = db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to send alerts"):
-                for row in rows:
-                    if (timer.elapsed() > MAXSECONDS):
-                        # We've been processing alerts too long, quit for now and come back later.
-                        db.connection.commit()
-                        debugger.debug("processing email alerts >%d seconds, quitting for now", (MAXSECONDS,))
-                        return
+            max_eid = 0
+            processed_events = 0
+            for row in rows:
+                eid, mac, ip, timestamp, event, processed = row
+                debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
 
-                    eid, mac, ip, timestamp, event, processed = row
-                    debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
-                    alerted = True
+                if eid > max_eid:
+                    max_eid = eid
+                processed_events += 1
 
-                    # only send emails for configured events
-                    if event in emailer.alerts:
-                        debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
-                        # get more information about this entry ...
-                        db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
-                        info = db.cursor.fetchone()
-                        if not info:
-                            debugger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
-                            db.connection.commit()
-                            return
-                        active, self, vendor, vendor_customname, hostname, host_customname = info
-                        firstSeen = first_seen(ip, mac)
-                        firstRequested = first_requested(ip, mac)
-                        lastSeen = last_seen(ip, mac)
-                        previouslySeen = previously_seen(ip, mac)
-                        lastRequested = last_requested(ip, mac)
-                        subject = """Netgrasp alert: %s""" % (event)
-                        body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty.pretty_date(firstSeen), pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstRequested), pretty.pretty_date(lastRequested), active, self)
-                        db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
-                        results = db.cursor.fetchall()
-                        if results:
-                            body += """\nIn the last day, this device talked to:"""
-                        for peer in results:
-                            body += """\n - %s (%s)""" % (peer[0], pretty.name_ip(peer[0], peer[1]))
-                        emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
-                    else:
-                        debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
-                    if alerted:
-                        db.cursor.execute("UPDATE event SET processed = ? WHERE eid = ?", (processed + 1, eid))
+                # only send emails for configured events
+                if event in emailer.alerts:
+                    debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
+                    # get more information about this entry ...
+                    db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
+                    info = db.cursor.fetchone()
+                    if not info:
+                        debugger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
+                        continue
+
+                    active, self, vendor, vendor_customname, hostname, host_customname = info
+                    firstSeen = first_seen(ip, mac)
+                    firstRequested = first_requested(ip, mac)
+                    lastSeen = last_seen(ip, mac)
+                    previouslySeen = previously_seen(ip, mac)
+                    lastRequested = last_requested(ip, mac)
+                    subject = """Netgrasp alert: %s""" % (event)
+                    body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty.pretty_date(firstSeen), pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstRequested), pretty.pretty_date(lastRequested), active, self)
+                    db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
+                    results = db.cursor.fetchall()
+                    if results:
+                        body += """\nIn the last day, this device talked to:"""
+                    for peer in results:
+                        body += """\n - %s (%s)""" % (peer[0], pretty.name_ip(peer[0], peer[1]))
+                    emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+                else:
+                    debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
+
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify vendor"):
+                db.cursor.execute("UPDATE event SET processed = processed + ? WHERE eid <= ?", (PROCESSED_ALERT, max_eid))
                 db.connection.commit()
+            debugger.debug("send_email_alerts: processed %d events", (processed_events,))
     except Exception as e:
         debugger.dump_exception("send_email_alerts() FIXME")
 
