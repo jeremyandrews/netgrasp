@@ -119,7 +119,7 @@ def main(*pcap):
         ng.debugger.critical("%s", (e,))
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
     ng.db.lock = ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False)
-    ng.debugger.info("opened %s as user %s", (ng.database_filename, ng.debugger.whoami()));
+    ng.debugger.info("opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
     ng.db.cursor = ng.db.connection.cursor()
     # http://www.sqlite.org/wal.html
     ng.db.cursor.execute("PRAGMA journal_mode=WAL")
@@ -244,7 +244,7 @@ def wiretap(pc, child_conn):
     except Exception as e:
         netgrasp_instance.debugger.error("%s", (e,))
         netgrasp_instance.debugger.critical("failed to open or create %s (as user %s), exiting", (database_filename, netgrasp_instance.debugger.whoami()))
-    netgrasp_instance.debugger.info("opened %s as user %s", (database_filename, netgrasp_instance.debugger.whoami()));
+    netgrasp_instance.debugger.info("opened %s as user %s", (database_filename, netgrasp_instance.debugger.whoami()))
     db.cursor = db.connection.cursor()
     database.database_instance = db
 
@@ -297,7 +297,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
         # @TODO Research and see if we should be treating these another way.
         if (src_ip == "0.0.0.0" or src_mac == BROADCAST):
-            debugger.info("Ignoring IP source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac));
+            debugger.info("Ignoring IP source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
             return False
 
         # Check if we've seen this IP, MAC pair before.
@@ -836,37 +836,33 @@ def detect_anomalies(timeout):
         db.cursor.execute("SELECT COUNT(*) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1", (BROADCAST,))
         duplicates = db.cursor.fetchall()
         if duplicates:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify multiple MACs with same IP"):
-                for duplicate in duplicates:
-                    count, ip = duplicate
-                    db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1;", (ip,))
-                    details = db.cursor.fetchall()
-                    for detail in details:
-                        ip, mac, sid, did = detail
-                        db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
-                        already_detected = db.cursor.fetchone()
-                        if not already_detected:
-                            log_event(ip, mac, EVENT_DUPLICATE_IP, True)
-                            debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
-                db.connection.commit()
+            for duplicate in duplicates:
+                count, ip = duplicate
+                db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1 AND mac != ?", (ip, BROADCAST))
+                details = db.cursor.fetchall()
+                for detail in details:
+                    ip, mac, sid, did = detail
+                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
+                    already_detected = db.cursor.fetchone()
+                    if not already_detected or not already_detected[0]:
+                        log_event(ip, mac, EVENT_DUPLICATE_IP)
+                        debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
 
         # Multiple IPs with the same MAC.
         db.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (BROADCAST,))
         duplicates = db.cursor.fetchall()
         if duplicates:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify multiple IPs with same MAC"):
-                for duplicate in duplicates:
-                    count, mac = duplicate
-                    db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1;", (mac,))
-                    details = db.cursor.fetchall()
-                    for detail in details:
-                        ip, mac, sid, did = detail
-                        db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
-                        already_detected = db.cursor.fetchone()
-                        if not already_detected:
-                            log_event(ip, mac, EVENT_DUPLICATE_MAC, True)
-                            debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
-                db.connection.commit()
+            for duplicate in duplicates:
+                count, mac = duplicate
+                db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1", (mac,))
+                details = db.cursor.fetchall()
+                for detail in details:
+                    ip, mac, sid, did = detail
+                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
+                    already_detected = db.cursor.fetchone()
+                    if not already_detected or not already_detected[0]:
+                        log_event(ip, mac, EVENT_DUPLICATE_MAC)
+                        debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
     except Exception as e:
         debugger.dump_exception("detect_anomalies() FIXME")
 
