@@ -292,8 +292,8 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
 
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to insert into arplog"):
             db.cursor.execute("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)", (src_mac, src_ip, dst_mac, dst_ip, request, now))
-            db.connection.commit()
             debugger.debug("inserted into arplog")
+            db.connection.commit()
 
         # @TODO Research and see if we should be treating these another way.
         if (src_ip == "0.0.0.0" or src_mac == BROADCAST):
@@ -1201,11 +1201,12 @@ def send_email_digests():
                         # We've been processing events for too long, abort.
                         # @TODO Batch process digests.
                         debugger.debug("processing events >%d seconds, aborting digest", (MAXSECONDS,))
+                        db.connection.commit()
                         return
 
                     eid, processed = row
                     db.cursor.execute("UPDATE event SET processed=? WHERE eid=?", (processed + alerted, eid))
-                    db.connection.commit()
+                db.connection.commit()
 
             debugger.info("Sending %s digest", (digest,))
             emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
