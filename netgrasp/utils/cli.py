@@ -107,6 +107,7 @@ def list(ng):
         else:
             description = "Active devices"
             query.db_where("{%BASE}.active = ?", 1)
+        query.db_where("{%BASE}.lastSeen IS NOT NULL")
 
         if (not ng.args.all or ng.args.all == 1):
             query.db_group("{%BASE}.mac")
