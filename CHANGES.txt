@@ -1,1 +1,7 @@
-v0.8.0, 19-May-2017 -- Initial release.
+v0.8.1, 30-May-2017
+ * simplified/optimized logic within locks
+ * improved locking debug
+ * fixed `netgrasp list` bug to no longer show 'never' seen devices
+ * fixed `netgrasp start --foreground` flag to not daemonize
+
+v0.8.0, 29-May-2017 -- Initial release.
