@@ -79,7 +79,7 @@ class Netgrasp:
 # Simple, short text string used for heartbeat.
 HEARTBEAT = 'nghb'
 # Macimum seconds to process before returning to main loop
-MAXSECONDS = 3
+MAXSECONDS = 2
 
 # This is our main program loop.
 def main(*pcap):
@@ -986,7 +986,7 @@ def send_email_alerts():
                     debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
 
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "will try later to identify vendor"):
-                db.cursor.execute("UPDATE event SET processed = processed + ? WHERE eid <= ?", (PROCESSED_ALERT, max_eid))
+                db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_ALERT, max_eid, PROCESSED_ALERT))
                 db.connection.commit()
             debugger.debug("send_email_alerts: processed %d events", (processed_events,))
     except Exception as e:
@@ -1088,6 +1088,10 @@ def send_email_digests():
 
         digests = ["daily", "weekly"]
         for digest in digests:
+            if (timer.elapsed() > MAXSECONDS):
+                debugger.debug("processing digests >%d seconds, aborting digest", (MAXSECONDS,))
+                return
+
             if (digest == "daily"):
                 timestamp_string = "daily_digest_timestamp"
                 future_digest_timestamp = now + datetime.timedelta(days=1)
@@ -1187,24 +1191,17 @@ def send_email_digests():
                     body += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
 
             if (digest == "daily"):
-                db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 2)", (time_period, now))
-                alerted = PROCESSED_DAILY_DIGEST
+                db.cursor.execute("SELECT MAX(eid) FROM event WHERE timestamp<=? AND NOT (processed & 2)", (now,))
+                processed_type = PROCESSED_DAILY_DIGEST
             elif (digest == "weekly"):
-                db.cursor.execute("SELECT eid, processed FROM event WHERE timestamp>=? AND timestamp<=? AND NOT (processed & 4)", (time_period, now))
-                alerted = PROCESSED_WEEKLY_DIGEST
-            rows = db.cursor.fetchall()
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to send weekly digest"):
-                for row in rows:
-                    if (timer.elapsed() > MAXSECONDS):
-                        # We've been processing events for too long, abort.
-                        # @TODO Batch process digests.
-                        debugger.debug("processing events >%d seconds, aborting digest", (MAXSECONDS,))
-                        db.connection.commit()
-                        return
+                db.cursor.execute("SELECT MAX(eid) FROM event WHERE timestamp<=? AND NOT (processed & 4)", (now,))
+                processed_type = PROCESSED_WEEKLY_DIGEST
+            max_eid = db.cursor.fetchone()
+            if max_eid and max_eid[0]:
+                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "failed to send digest"):
+                    db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (processed_type, max_eid[0], processed_type))
 
-                    eid, processed = row
-                    db.cursor.execute("UPDATE event SET processed=? WHERE eid=?", (processed + alerted, eid))
-                db.connection.commit()
+                    db.connection.commit()
 
             debugger.info("Sending %s digest", (digest,))
             emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
