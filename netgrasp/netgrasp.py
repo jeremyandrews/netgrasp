@@ -1308,7 +1308,7 @@ def start():
     ng.debugger, ng.config = _init(ng.verbose, ng.daemonize)
 
     if not ng.daemonize:
-        debugger.info("Output forced to stderr, started with --foreground flag.")
+        ng.debugger.info("Output forced to stderr, started with --foreground flag.")
 
     keep_fds=[ng.debugger.handler.stream.fileno()]
 

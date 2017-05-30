@@ -21,7 +21,7 @@ def start(ng):
         daemon_ng.verbose = False
 
     if ng.args.foreground:
-        daemon_ng.daemonize = ng.args.foreground
+        daemon_ng.daemonize = False
     else:
         daemon_ng.daemonize = True
 
