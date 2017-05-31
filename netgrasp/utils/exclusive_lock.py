@@ -44,9 +44,14 @@ class ExclusiveFileLock:
     def __exit__(self, *args):
         try:
             fcntl.flock(self._fd, fcntl.LOCK_UN)
-            self.debugger.debug("released lock (held %.5f seconds): %s", (round(self._timer.elapsed(), 5), self._name))
-            self._timer = None
+            held_lock = round(self._timer.elapsed(), 5)
+            if held_lock > 1:
+                # Holding the lock this long suggests a possible problem.
+                self.debugger.warning("released lock (held %.5f seconds): %s", (held_lock, self._name))
+            else:
+                self.debugger.debug("released lock (held %.5f seconds): %s", (held_lock, self._name))
             os.close(self._fd)
+            self._timer = None
             self._fd = None
 
             try:
