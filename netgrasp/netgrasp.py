@@ -925,6 +925,7 @@ def send_notifications():
     except Exception as e:
         debugger.dump_exception("send_notifications() FIXME")
 
+TALKED_TO_LIMIT = 50
 def send_email_alerts():
     try:
         from utils import exclusive_lock
@@ -976,13 +977,18 @@ def send_email_alerts():
                     lastRequested = last_requested(ip, mac)
                     subject = """Netgrasp alert: %s""" % (event)
                     body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty.pretty_date(firstSeen), pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstRequested), pretty.pretty_date(lastRequested), active, self)
-                    db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
-                    results = db.cursor.fetchall()
-                    if results:
-                        body += """\nIn the last day, this device talked to:"""
-                    for peer in results:
-                        dst_ip, dst_mac = peer
-                        body += """\n - %s (%s)""" % (dst_ip, pretty.name_ip(dst_ip, dst_mac))
+                    db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
+                    count = db.cursor.fetchone()
+                    if count and count[0]:
+                        db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=? LIMIT ?", (mac, day, TALKED_TO_LIMIT))
+                        results = db.cursor.fetchall()
+                        if results:
+                            body += """\nIn the last day, this device talked to %d other devices:""" % count[0]
+                            if count[0] > TALKED_TO_LIMIT:
+                                body += """"\n(only showing %d of %d devices)""" % (TALKED_TO_LIMIT, count[0])
+                            for peer in results:
+                                dst_ip, dst_mac = peer
+                                body += """\n - %s (%s)""" % (dst_ip, pretty.name_ip(dst_ip, dst_mac))
                     emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
                 else:
                     debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
