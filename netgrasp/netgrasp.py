@@ -981,7 +981,8 @@ def send_email_alerts():
                     if results:
                         body += """\nIn the last day, this device talked to:"""
                     for peer in results:
-                        body += """\n - %s (%s)""" % (peer[0], pretty.name_ip(peer[0], peer[1]))
+                        dst_ip, dst_mac = peer
+                        body += """\n - %s (%s)""" % (dst_ip, pretty.name_ip(dst_ip, dst_mac))
                     emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
                 else:
                     debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
@@ -1143,16 +1144,17 @@ def send_email_digests():
             body = """In the past %s, %d IPs were active:""" % (time_period_description, len(seen))
             noisy = []
             some_new = False
-            for ip in seen:
-                db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip[1], time_period, now))
+            for unique_seen in seen:
+                mac, ip = unique_seen
+                db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip, time_period, now))
                 requests = db.cursor.fetchone()
                 if (requests[0] > 10):
-                    noisy.append((ip[0], ip[1], requests[0], pretty.name_ip(ip[0], ip[1])))
+                    noisy.append((mac, ip, requests[0], pretty.name_ip(ip, mac)))
                 if ip in new:
-                    body += """\n - %s* (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
+                    body += """\n - %s* (%s)""" % (ip, pretty.name_ip(ip, mac))
                     some_new = True
                 else:
-                    body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
+                    body += """\n - %s (%s)""" % (ip, pretty.name_ip(ip, mac))
             if some_new:
                 body+= """\n* = not active in the previous %s""" % (time_period_description)
 
@@ -1168,7 +1170,7 @@ def send_email_digests():
             if gone:
                 body += """\n\nThe following IPs were not active, but were active the previous %s:""" % (time_period_description)
                 for ip in gone:
-                    body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip[0], ip[1]))
+                    body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip, mac))
 
             if (digest == "daily"):
                 body += "\n\nActive devices per hour during the past day:"
