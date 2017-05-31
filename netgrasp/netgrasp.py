@@ -530,6 +530,7 @@ def create_database():
               )
             """)
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcmac_timestamp ON arplog (src_mac, timestamp)")
 
             # Create event table.
             db.cursor.execute("""
@@ -980,7 +981,7 @@ def send_email_alerts():
                     db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
                     count = db.cursor.fetchone()
                     if count and count[0]:
-                        db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=? LIMIT ?", (mac, day, TALKED_TO_LIMIT))
+                        db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=? ORDER BY timestamp LIMIT ?", (mac, day, TALKED_TO_LIMIT))
                         results = db.cursor.fetchall()
                         if results:
                             body += """\nIn the last day, this device talked to %d other devices:""" % count[0]
