@@ -24,7 +24,7 @@ class ExclusiveFileLock:
                 try:
                     fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     # We got the lock.
-                    self.debugger.debug("grabbed lock (took %s seconds): %s", (self._timer.elapsed(), self._name))
+                    self.debugger.debug("grabbed lock (took %.5f seconds): %s", (round(self._timer.elapsed(), 5), self._name))
                     self._timer = simple_timer.Timer()
                     return
                 except (OSError, IOError) as ex:
@@ -44,7 +44,7 @@ class ExclusiveFileLock:
     def __exit__(self, *args):
         try:
             fcntl.flock(self._fd, fcntl.LOCK_UN)
-            self.debugger.debug("released lock (held %s seconds): %s", (self._timer.elapsed(), self._name))
+            self.debugger.debug("released lock (held %.5f seconds): %s", (round(self._timer.elapsed(), 5), self._name))
             self._timer = None
             os.close(self._fd)
             self._fd = None
