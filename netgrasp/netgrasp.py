@@ -20,8 +20,8 @@ netgrasp_instance = None
 
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
-ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan']
-EVENT_REQUESTED_FIRST, EVENT_REQUESTED, EVENT_SEEN_FIRST, EVENT_SEEN_FIRST_RECENT, EVENT_SEEN, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_STALE, EVENT_SCAN = ALERT_TYPES
+ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast']
+EVENT_REQUESTED_FIRST, EVENT_REQUESTED, EVENT_SEEN_FIRST, EVENT_SEEN_FIRST_RECENT, EVENT_SEEN, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_STALE, EVENT_SCAN, IP_NOT_ON_NETWORK, SRC_MAC_BROADCAST = ALERT_TYPES
 DIGEST_TYPES = ['daily', 'weekly']
 
 PROCESSED_ALERT         = 1
@@ -92,11 +92,11 @@ def main(*pcap):
 
     if pcap:
         # We have daemonized and are not running as root.
-        pc = pcap[0]
+        ng.pcap_instance, ng.interface, ng.network, ng.netmask = pcap
     else:
         # We are running in the foreground as root.
         pcap = get_pcap()
-        pc = pcap[0]
+        ng.pcap_instance, ng.interface, ng.network, ng.netmask = pcap
         ng.drop_root(ng)
 
     # At this point we should no longer have/need root privileges.
@@ -104,7 +104,8 @@ def main(*pcap):
 
     ng.debugger.info("initiating wiretap process")
     parent_conn, child_conn = multiprocessing.Pipe()
-    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[pc, child_conn])
+    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[ng.pcap_instance, child_conn])
+
     child.daemon = True
     child.start()
     if child.is_alive():
@@ -214,7 +215,7 @@ def get_pcap():
         debug.debugger.critical("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
     debug.debugger_instance.warning("listening for arp traffic on %s: %s/%s", (interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask)))
-    return [pc]
+    return [pc, interface, local_net, local_mask]
 
 # Child process: wiretap, uses pcap to sniff arp packets.
 def wiretap(pc, child_conn):
@@ -278,6 +279,23 @@ def wiretap(pc, child_conn):
             netgrasp_instance.debugger.dump_exception("wiretap() while loop FIXME")
     netgrasp_instance.debugger.critical("No heartbeats from main process for >3 minutes, exiting.")
 
+def ip_on_network(ip):
+    try:
+        import struct
+        import socket
+
+        ng = netgrasp_instance
+
+        debugger = debug.debugger_instance
+        debugger.debug("entering address_on_network(%s)", (ip,))
+
+        numeric_ip = struct.unpack("<L", socket.inet_aton(ip))[0]
+        cidr = sum([bin(int(x)).count("1") for x in socket.inet_ntoa(ng.netmask).split(".")])
+        netmask = struct.unpack("<L", ng.network)[0] & ((2L<<int(cidr) - 1) - 1)
+        return numeric_ip & netmask == netmask
+    except:
+        debugger.dump_exception("address_in_network() FIXME")
+
 def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     try:
         from utils import exclusive_lock
@@ -295,9 +313,14 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
             debugger.debug("inserted into arplog")
             db.connection.commit()
 
-        # @TODO Research and see if we should be treating these another way.
-        if (src_ip == "0.0.0.0" or src_mac == BROADCAST):
+        if (src_mac == BROADCAST):
             debugger.info("Ignoring IP source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
+            log_event(src_ip, src_mac, SRC_MAC_BROADCAST)
+            return False
+
+        if (not ip_on_network(src_ip)):
+            debugger.warning("Invalid IP (not on network) source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
+            log_event(src_ip, src_mac, IP_NOT_ON_NETWORK)
             return False
 
         # Check if we've seen this IP, MAC pair before.
