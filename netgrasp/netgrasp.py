@@ -985,7 +985,7 @@ def send_email_alerts():
                         if results:
                             body += """\nIn the last day, this device talked to %d other devices:""" % count[0]
                             if count[0] > TALKED_TO_LIMIT:
-                                body += """"\n(only showing %d of %d devices)""" % (TALKED_TO_LIMIT, count[0])
+                                body += """"\n  (only showing %d of %d devices)""" % (TALKED_TO_LIMIT, count[0])
                             for peer in results:
                                 dst_ip, dst_mac = peer
                                 body += """\n - %s (%s)""" % (dst_ip, pretty.name_ip(dst_ip, dst_mac))
