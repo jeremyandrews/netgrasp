@@ -1168,7 +1168,7 @@ def send_email_digests():
             seen_previous = db.cursor.fetchall()
 
             new = set(seen) - set(seen_previous)
-            gone = set(seen_previous) - set(seen)
+            gone_away = set(seen_previous) - set(seen)
 
             subject = """Netgrasp %s digest""" % (digest)
             body = """In the past %s, %d IPs were active:""" % (time_period_description, len(seen))
@@ -1197,10 +1197,11 @@ def send_email_digests():
                     if (noise[2] > 50):
                         body += " (network scan?)"
 
-            if gone:
+            if gone_away:
                 body += """\n\nThe following IPs were not active, but were active the previous %s:""" % (time_period_description)
-                for ip in gone:
-                    body += """\n - %s (%s)""" % (ip[1], pretty.name_ip(ip, mac))
+                for gone in gone_away:
+                    mac, ip = gone
+                    body += """\n - %s (%s)""" % (ip, pretty.name_ip(ip, mac))
 
             if (digest == "daily"):
                 body += "\n\nActive devices per hour during the past day:"
