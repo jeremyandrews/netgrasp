@@ -160,7 +160,7 @@ def main(*pcap):
             detect_netscans()
             detect_anomalies(ng.active_timeout)
             send_notifications()
-            send_email_alerts()
+            send_email_alerts(ng.active_timeout)
             send_email_digests()
             garbage_collection(ng.garbage_collection, ng.oldest_arplog, ng.oldest_event)
 
@@ -791,6 +791,68 @@ def last_requested(ip, mac):
     except Exception as e:
         debugger.dump_exception("last_requested() FIXME")
 
+def previous_ip(ip, mac):
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering previous_ip(%s, %s)", (ip, mac))
+        db = database.database_instance
+
+        did = get_did(ip, mac)
+        db.cursor.execute("SELECT ip FROM seen WHERE did = ? AND ip != ? ORDER BY lastSeen DESC LIMIT 1", (did, ip))
+        previous_ip = db.cursor.fetchone()
+        if previous_ip:
+            return previous_ip[0]
+        else:
+            return False
+    except Exception as e:
+        debugger.dump_exception("previous_ip() FIXME")
+
+def devices_with_ip(ip):
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering devices_with_ip(%s)", (ip,))
+        db = database.database_instance
+
+        db.cursor.execute("SELECT ip, mac FROM seen WHERE ip = ? AND active = 1 ORDER BY lastSeen DESC", (ip,))
+        ips = db.cursor.fetchall()
+        if ips:
+            return ips
+        else:
+            return False
+    except Exception as e:
+        debugger.dump_exception("devices_with_ip() FIXME")
+
+def devices_with_mac(mac):
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering devices_with_mac(%s)", (mac,))
+        db = database.database_instance
+
+        db.cursor.execute("SELECT ip, mac FROM seen WHERE mac = ? AND active = 1 ORDER BY lastSeen DESC", (mac,))
+        macs = db.cursor.fetchall()
+        if macs:
+            return macs
+        else:
+            return False
+    except Exception as e:
+        debugger.dump_exception("devices_with_mac() FIXME")
+
+def devices_requesting_ip(ip, timeout):
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering devices_requesting_ip(%s, %s)", (ip, timeout))
+        db = database.database_instance
+
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
+        db.cursor.execute("SELECT src_ip, src_mac FROM arplog WHERE dst_ip = ? AND timestamp >= ? GROUP BY src_ip ORDER BY timestamp DESC", (ip, stale))
+        macs = db.cursor.fetchall()
+        if macs:
+            return macs
+        else:
+            return False
+    except Exception as e:
+        debugger.dump_exception("devices_requesting_ip() FIXME")
+
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips(timeout):
     try:
@@ -855,7 +917,7 @@ def detect_anomalies(timeout):
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
         # Multiple MACs with the same IP.
-        db.cursor.execute("SELECT COUNT(*) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1", (BROADCAST,))
+        db.cursor.execute("SELECT COUNT(DISTINCT(mac)) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1 ORDER BY ip DESC", (BROADCAST,))
         duplicates = db.cursor.fetchall()
         if duplicates:
             for duplicate in duplicates:
@@ -871,7 +933,7 @@ def detect_anomalies(timeout):
                         debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
 
         # Multiple IPs with the same MAC.
-        db.cursor.execute("SELECT COUNT(*) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1", (BROADCAST,))
+        db.cursor.execute("SELECT COUNT(DISTINCT(ip)) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1 ORDER BY mac DESC", (BROADCAST,))
         duplicates = db.cursor.fetchall()
         if duplicates:
             for duplicate in duplicates:
@@ -950,7 +1012,7 @@ def send_notifications():
         debugger.dump_exception("send_notifications() FIXME")
 
 TALKED_TO_LIMIT = 50
-def send_email_alerts():
+def send_email_alerts(timeout):
     try:
         from utils import exclusive_lock
 
@@ -987,33 +1049,88 @@ def send_email_alerts():
                 if event in emailer.alerts:
                     debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
                     # get more information about this entry ...
-                    db.cursor.execute("SELECT s.active, s.self, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
+                    db.cursor.execute("SELECT s.active, s.self, s.counter, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
                     info = db.cursor.fetchone()
                     if not info:
                         debugger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
                         continue
 
-                    active, self, vendor, vendor_customname, hostname, host_customname = info
+                    active, self, counter, vendor, vendor_customname, hostname, host_customname = info
                     firstSeen = first_seen(ip, mac)
                     firstRequested = first_requested(ip, mac)
                     lastSeen = last_seen(ip, mac)
                     previouslySeen = previously_seen(ip, mac)
                     lastRequested = last_requested(ip, mac)
-                    subject = """Netgrasp alert: %s""" % (event)
-                    body = """IP %s [%s]\n  Vendor: %s\nCustom name: %s\n  Hostname: %s\n  Custom host name: %s\n  First seen: %s\n  Most recently seen: %s\n  Previously seen: %s\n  First requested: %s\n  Most recently requested: %s\n  Currently active: %d\n  Self: %d\n""" % (ip, mac, vendor, vendor_customname, hostname, host_customname, pretty.pretty_date(firstSeen), pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstRequested), pretty.pretty_date(lastRequested), active, self)
+
                     db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
                     count = db.cursor.fetchone()
+                    talked_to_text = ""
+                    talked_to_html = ""
                     if count and count[0]:
                         db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=? ORDER BY timestamp LIMIT ?", (mac, day, TALKED_TO_LIMIT))
                         results = db.cursor.fetchall()
                         if results:
-                            body += """\nIn the last day, this device talked to %d other devices:""" % count[0]
-                            if count[0] > TALKED_TO_LIMIT:
-                                body += """\n  (only showing %d of %d devices)""" % (TALKED_TO_LIMIT, count[0])
                             for peer in results:
                                 dst_ip, dst_mac = peer
-                                body += """\n - %s (%s)""" % (dst_ip, pretty.name_ip(dst_ip, dst_mac))
-                    emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+                                talked_to_text += """\n - %s (%s)""" % (pretty.name_ip(dst_ip, dst_mac), dst_ip)
+                                talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_ip(dst_ip, dst_mac), dst_ip)
+
+                    devices = devices_with_ip(ip)
+                    devices_with_ip_text = ""
+                    devices_with_ip_html = ""
+                    if devices:
+                        for device in devices:
+                            list_ip, list_mac = device
+                            devices_with_ip_text += """\n - %s (%s)""" % (pretty.name_ip(list_ip, list_mac), list_mac)
+                            devices_with_ip_html += """<li>%s (%s)</li>""" % (pretty.name_ip(list_ip, list_mac), list_mac)
+
+                    devices = devices_with_mac(mac)
+                    devices_with_mac_text = ""
+                    devices_with_mac_html = ""
+                    if devices:
+                        for device in devices:
+                            list_ip, list_mac = device
+                            devices_with_mac_text += """\n - %s (%s)""" % (pretty.name_ip(list_ip, list_mac), list_ip)
+                            devices_with_mac_html += """<li>%s (%s)</li>""" % (pretty.name_ip(list_ip, list_mac), list_ip)
+
+                    devices = devices_requesting_ip(ip, timeout)
+                    devices_requesting_ip_text = ""
+                    devices_requesting_ip_html = ""
+                    if devices:
+                        for device in devices:
+                            list_ip, list_mac = device
+                            devices_requesting_ip_text += """\n - %s (%s)""" % (pretty.name_ip(list_ip, list_mac), list_ip)
+                            devices_requesting_ip_html += """<li>%s (%s)</li>""" % (pretty.name_ip(list_ip, list_mac), list_ip)
+
+                    emailer.MailSend(event, dict(
+                        name=pretty.name_ip(ip, mac),
+                        ip=ip,
+                        mac=mac,
+                        event_id=eid,
+                        vendor=vendor,
+                        vendor_custom=vendor_customname,
+                        hostname=hostname,
+                        hostname_custom=host_customname,
+                        first_seen=pretty.pretty_date(firstSeen),
+                        last_seen=pretty.pretty_date(lastSeen),
+                        recently_seen_count=counter,
+                        previously_seen=pretty.pretty_date(previouslySeen),
+                        first_requested=pretty.pretty_date(firstRequested),
+                        last_requested=pretty.pretty_date(lastRequested),
+                        previous_ip=previous_ip(ip, mac),
+                        devices_with_ip_text=devices_with_ip_text,
+                        devices_with_ip_html=devices_with_ip_html,
+                        devices_with_mac_text=devices_with_mac_text,
+                        devices_with_mac_html=devices_with_mac_html,
+                        devices_requesting_ip_text=devices_requesting_ip_text,
+                        devices_requesting_ip_html=devices_requesting_ip_html,
+                        active_boolean=active,
+                        self_boolean=self,
+                        talked_to_count=count[0],
+                        talked_to_list_text=talked_to_text,
+                        talked_to_list_html=talked_to_html,
+                        event=event
+                        ))
                 else:
                     debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
 
@@ -1170,10 +1287,10 @@ def send_email_digests():
             new = set(seen) - set(seen_previous)
             gone_away = set(seen_previous) - set(seen)
 
-            subject = """Netgrasp %s digest""" % (digest)
-            body = """In the past %s, %d IPs were active:""" % (time_period_description, len(seen))
             noisy = []
             some_new = False
+            active_devices_text = ""
+            active_devices_html = ""
             for unique_seen in seen:
                 mac, ip = unique_seen
                 db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip, time_period, now))
@@ -1181,30 +1298,42 @@ def send_email_digests():
                 if (requests[0] > 10):
                     noisy.append((mac, ip, requests[0], pretty.name_ip(ip, mac)))
                 if ip in new:
-                    body += """\n - %s* (%s)""" % (ip, pretty.name_ip(ip, mac))
+                    active_devices_text += """\n - %s (%s)*""" % (pretty.name_ip(ip, mac), ip)
+                    active_devices_html += """<li>%s (%s)*</li>""" % (pretty.name_ip(ip, mac), ip)
                     some_new = True
                 else:
-                    body += """\n - %s (%s)""" % (ip, pretty.name_ip(ip, mac))
+                    active_devices_text += """\n - %s (%s)""" % (pretty.name_ip(ip, mac), ip)
+                    active_devices_html += """<li>%s (%s)</li>""" % (pretty.name_ip(ip, mac), ip)
             if some_new:
-                body+= """\n* = not active in the previous %s""" % (time_period_description)
+                new_devices_text = "* = not active in the previous " + time_period_description
+            else:
+                new_devices_text = ""
 
-            body += """\n\n%d unique IPs requested.""" % (len(requested),)
-
+            noisy_devices_intro = ""
+            noisy_devices_text = ""
+            noisy_devices_html = ""
             if noisy:
-                body += """\n\nThe following devices requested 10 or more IPs on the network:"""
+                noisy_devices_intro = "The following devices requested 10 or more IPs:"
                 for noise in noisy:
-                    body += """\n - %s (%s) requested %d IP addresses""" % (noise[1], noise[3], noise[2])
+                    noisy_devices_text += """\n - %s (%s) requested %d IP addresses""" % (noise[3], noise[1], noise[2])
+                    noisy_devices_html += """<li>%s (%s) requested %d IP addresses""" % (noise[3], noise[1], noise[2])
                     if (noise[2] > 50):
-                        body += " (network scan?)"
+                        noisy_devices_text += " (network scan?)"
+                    noisy_devices_html += "</li>"
 
+            gone_devices_intro = ""
+            gone_devices_text = ""
+            gone_devices_html = ""
             if gone_away:
-                body += """\n\nThe following IPs were not active, but were active the previous %s:""" % (time_period_description)
+                gone_devices_intro = """The following IPs were not active, but were active the previous %s:""" % (time_period_description)
                 for gone in gone_away:
                     mac, ip = gone
-                    body += """\n - %s (%s)""" % (ip, pretty.name_ip(ip, mac))
+                    gone_devices_text += """\n - %s (%s)""" % (pretty.name_ip(ip, mac), ip)
+                    gone_devices_html += """<li>%s (%s)</li>""" % (pretty.name_ip(ip, mac), ip)
 
+            device_breakdown_text = ""
+            device_breakdown_html = ""
             if (digest == "daily"):
-                body += "\n\nActive devices per hour during the past day:"
                 range = 24
                 while (range > 0):
                     lower = now - datetime.timedelta(hours=range)
@@ -1212,9 +1341,9 @@ def send_email_digests():
                     upper = now - datetime.timedelta(hours=range)
                     db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
                     distinct = db.cursor.fetchall()
-                    body += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
+                    device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
+                    device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%I %p, %x"), len(distinct))
             elif (digest == "weekly"):
-                body += "\n\nActive devices per day during the past week:"
                 range = 7
                 while (range > 0):
                     lower = now - datetime.timedelta(days=range)
@@ -1222,7 +1351,8 @@ def send_email_digests():
                     upper = now - datetime.timedelta(days=range)
                     db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE event = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
                     distinct = db.cursor.fetchall()
-                    body += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
+                    device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
+                    device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%A, %x"), len(distinct))
 
             if (digest == "daily"):
                 db.cursor.execute("SELECT MAX(eid) FROM event WHERE timestamp<=? AND NOT (processed & 2)", (now,))
@@ -1238,7 +1368,24 @@ def send_email_digests():
                     db.connection.commit()
 
             debugger.info("Sending %s digest", (digest,))
-            emailer.MailSend(subject, "iso-8859-1", (body, "us-ascii"))
+
+            emailer.MailSend('digest', dict(
+                type=digest,
+                time_period=time_period_description,
+                active_devices_count=len(seen),
+                active_devices_text=active_devices_text,
+                active_devices_html=active_devices_html,
+                new_devices_text=new_devices_text,
+                ips_requested=len(requested),
+                noisy_devices_intro=noisy_devices_intro,
+                noisy_devices_text=noisy_devices_text,
+                noisy_devices_html=noisy_devices_html,
+                gone_devices_intro=gone_devices_intro,
+                gone_devices_text=gone_devices_text,
+                gone_devices_html=gone_devices_html,
+                device_breakdown_text=device_breakdown_text,
+                device_breakdown_html=device_breakdown_html
+                ))
     except Exception as e:
         debugger.dump_exception("send_email_digests() FIXME")
 

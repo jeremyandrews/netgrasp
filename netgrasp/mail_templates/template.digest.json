@@ -1,0 +1,7 @@
+{
+    "subject": "[netgrasp] ${type} digest",
+    "body": {
+	"html": "<html><body><p>In the following ${time_period}, ${active_devices_count} devices were active:<ul>${active_devices_html}</ul>${new_devices_text}</p><p>${ips_requested} unique IPs were requested.</p><p>${noisy_devices_intro}<ul>${noisy_devices_html}</ul></p><p>${gone_devices_intro}<ul>${gone_devices_html}</ul></p><p>Active devices during the past ${time_period}<ul>${device_breakdown_html}</ul></p></body></html>",
+	"text": "In the following ${time_period}, ${active_devices_count} devices were active:${active_devices_text}\n${new_devices_text}\n\n${ips_requested} unique IPs were requested.\n${noisy_devices_intro}${noisy_devices_text}\n${gone_devices_intro}${gone_devices_text}\n\nActive devices during the past ${time_period}${device_breakdown_text}\n"
+    }
+}

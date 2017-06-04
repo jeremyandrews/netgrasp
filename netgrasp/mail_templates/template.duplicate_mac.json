@@ -1,0 +1,7 @@
+{
+    "subject": "[netgrasp] multiple devices with MAC: ${mac}",
+    "body": {
+        "html": "<html><body><p>The following devices have the same MAC:</p><ul>${devices_with_mac_html}</ul></p></body></html>",
+        "text": "The following devices have the same MAC:\n${devices_with_mac_text}\n"
+    }
+}

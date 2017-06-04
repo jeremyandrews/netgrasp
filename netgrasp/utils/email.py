@@ -17,7 +17,7 @@ class Email:
             import pyzmail
         except Exception as e:
             self.debugger.error("fatal exception: %s", (e,))
-            self.debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (self.debugger.whoami()))
+            self.debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (self.debugger.whoami(),))
 
         self.email_to = config.GetEmailList("Email", "to")
         if not len(self.email_to):
@@ -59,21 +59,57 @@ class Email:
             else:
                 self.debugger.warn("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
 
-    def MailSend(self, subject, encoding, body):
+    def LoadTemplate(self, template):
         try:
-            import pyzmail
-
             debugger = debug.debugger_instance
+            debugger.debug("entering email.LoadTemplate(%s)", (template,))
 
-            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(self.email_from, self.email_to, subject, encoding, body)
+            import pkg_resources
+            import json
+
+            import netgrasp
+
+            # @TODO allow template overrides
+
+            specific_template = "mail_templates/template." + template + ".json"
+            default_template = "mail_templates/template.default.json"
+            if pkg_resources.resource_exists("netgrasp", specific_template):
+                json_template = pkg_resources.resource_string("netgrasp", specific_template)
+            elif pkg_resources.resource_exists("netgrasp", default_template):
+                json_template = pkg_resources.resource_string("netgrasp", default_template)
+
+            debugger.debug("template loaded: %s", (json_template,))
+            data = json.loads(json_template)
+
+            debugger.debug("template parsed: %s", (data,))
+            return (data["subject"], data["body"]["html"], data["body"]["text"])
+        except:
+            debugger.dump_exception("LoadTemplate() FIXME")
+
+    # subject, encoding, body):
+    def MailSend(self, template, replace):
+        try:
+            debugger = debug.debugger_instance
+            debugger.debug("entering email.MailSend(%s, %s)", (template, replace))
+
+            from string import Template
+
+            import pyzmail
+            template_subject, template_body_html, template_body_text = self.LoadTemplate(template)
+
+            subject = Template(template_subject).substitute(replace)
+            body_html = Template(template_body_html).substitute(replace)
+            body_text = Template(template_body_text).substitute(replace)
+
+            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(self.email_from, self.email_to, subject, "iso-8859-1", (body_text, "us-ascii"), (body_html, "us-ascii"))
             ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, self.email_hostname, self.email_port, self.email_mode, self.email_username, self.email_password)
+
             if isinstance(ret, dict):
                 if ret:
                     failed_recipients = ", ".join(ret.keys())
                     debugger.warning("failed to send email, failed receipients: %s", (failed_recipients,))
                 else:
                     debugger.debug("email sent: %s", (ret,))
-            else:
-                debugger.warning("email error: %s", (ret,))
+
         except Exception as e:
             debugger.dump_exception("MailSend() FIXME")
