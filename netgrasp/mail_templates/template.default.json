@@ -1,7 +1,7 @@
 {
     "subject": "[netgrasp] ${event}: ${name}",
     "body": {
-        "html": "<html><body><p><ul><li>${name}</li><li>ip: ${ip} [${mac}]</li><li>previously seen: ${previously_seen}</li><li>first seen: ${first_seen}</li><li>recently seen %{recently_seen_count} times</li></ul></p><p>In the past 24 hours, this device talked to ${talked_to_count} devices:<ul>${talked_to_list_html}</ul></p></body></html>",
+        "html": "<html><body><p><ul><li>${name}</li><li>ip: ${ip} [${mac}]</li><li>previously seen: ${previously_seen}</li><li>first seen: ${first_seen}</li><li>recently seen ${recently_seen_count} times</li></ul></p><p>In the past 24 hours, this device talked to ${talked_to_count} devices:<ul>${talked_to_list_html}</ul></p></body></html>",
         "text": " - ${name}\n - ip: ${ip} [${mac}]\n - previously seen: ${previously_seen}\n - first seen: ${first_seen}\n - recently seen ${recently_seen_count} times\n\nIn the past 24 hours, this device talked to ${talked_to_count} devices:\n${talked_to_list_text}\n"
     }
 }

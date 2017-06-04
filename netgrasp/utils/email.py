@@ -86,7 +86,6 @@ class Email:
         except:
             debugger.dump_exception("LoadTemplate() FIXME")
 
-    # subject, encoding, body):
     def MailSend(self, template, replace):
         try:
             debugger = debug.debugger_instance
