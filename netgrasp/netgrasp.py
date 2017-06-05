@@ -1038,6 +1038,8 @@ def send_email_alerts(timeout):
         if rows:
             max_eid = 0
             processed_events = 0
+            duplicate_macs = []
+            duplicate_ips = []
             for row in rows:
                 eid, mac, ip, timestamp, event, processed = row
                 debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
@@ -1048,6 +1050,19 @@ def send_email_alerts(timeout):
 
                 # only send emails for configured events
                 if event in emailer.alerts:
+                    if event == EVENT_DUPLICATE_MAC:
+                        if mac in duplicate_macs:
+                            debugger.debug("event %s [%d], notification email already sent", (event, eid))
+                            pass
+                        else:
+                            duplicate_macs.append(mac)
+                    elif event == EVENT_DUPLICATE_IP:
+                        if ip in duplicate_macs:
+                            debugger.debug("event %s [%d], notification email already sent", (event, eid))
+                            pass
+                        else:
+                            duplicate_ips.append(ip)
+
                     debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
                     # get more information about this entry ...
                     db.cursor.execute("SELECT s.active, s.self, s.counter, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
@@ -1137,12 +1152,6 @@ def send_email_alerts(timeout):
 
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_email_alerts"):
                 db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_ALERT, max_eid, PROCESSED_ALERT))
-                if event == EVENT_DUPLICATE_MAC:
-                    # Send 1 alert for all duplicate MACs
-                    db.cursor.execute("UPDATE event SET processed=processed+? WHERE mac = ? AND event = ? AND NOT (processed & ?)", (PROCESSED_ALERT, mac, EVENT_DUPLICATE_MAC, PROCESSED_ALERT))
-                elif event == EVENT_DUPLICATE_IP:
-                    # Send 1 alert for all duplicate IPs
-                    db.cursor.execute("UPDATE event SET processed=processed+? WHERE mac = ? AND event = ? AND NOT (processed & ?)", (PROCESSED_ALERT, mac, EVENT_DUPLICATE_IP, PROCESSED_ALERT))
                 db.connection.commit()
             debugger.debug("send_email_alerts: processed %d events", (processed_events,))
     except Exception as e:
