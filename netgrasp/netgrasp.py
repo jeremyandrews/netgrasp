@@ -1137,6 +1137,12 @@ def send_email_alerts(timeout):
 
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_email_alerts"):
                 db.cursor.execute("UPDATE event SET processed=processed+? WHERE eid<=? AND NOT (processed & ?)", (PROCESSED_ALERT, max_eid, PROCESSED_ALERT))
+                if event == EVENT_DUPLICATE_MAC:
+                    # Send 1 alert for all duplicate MACs
+                    db.cursor.execute("UPDATE event SET processed=processed+? WHERE mac = ? AND event = ? AND NOT (processed & ?)", (PROCESSED_ALERT, mac, EVENT_DUPLICATE_MAC, PROCESSED_ALERT))
+                elif event == EVENT_DUPLICATE_IP:
+                    # Send 1 alert for all duplicate IPs
+                    db.cursor.execute("UPDATE event SET processed=processed+? WHERE mac = ? AND event = ? AND NOT (processed & ?)", (PROCESSED_ALERT, mac, EVENT_DUPLICATE_IP, PROCESSED_ALERT))
                 db.connection.commit()
             debugger.debug("send_email_alerts: processed %d events", (processed_events,))
     except Exception as e:
