@@ -22,6 +22,7 @@ BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
 ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast']
 EVENT_REQUESTED_FIRST, EVENT_REQUESTED, EVENT_SEEN_FIRST, EVENT_SEEN_FIRST_RECENT, EVENT_SEEN, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_STALE, EVENT_SCAN, IP_NOT_ON_NETWORK, SRC_MAC_BROADCAST = ALERT_TYPES
+
 DIGEST_TYPES = ['daily', 'weekly']
 
 PROCESSED_ALERT         = 1
