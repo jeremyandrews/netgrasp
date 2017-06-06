@@ -1,6 +1,6 @@
 import datetime
 
-def pretty_date(time):
+def time_ago(time):
     try:
         from netgrasp.utils import debug
         debugger = debug.debugger_instance
@@ -38,7 +38,47 @@ def pretty_date(time):
             return str(day_diff / 30) + " months ago"
         return str(day_diff / 365) + " years ago"
     except Exception as e:
-        debugger.dump_exception("pretty_date() FIXME")
+        debugger.dump_exception("time_ago() FIXME")
+
+def time_elapsed(time):
+    try:
+        from netgrasp.utils import debug
+        debugger = debug.debugger_instance
+
+        if not time:
+            return "an instant"
+        now = datetime.datetime.now()
+        diff = now - time
+        second_diff = diff.seconds
+        day_diff = diff.days
+
+        if day_diff < 0:
+            return ''
+
+        if day_diff == 0:
+            if second_diff < 10:
+                return "a few moments"
+            if second_diff < 60:
+                return str(second_diff) + " seconds"
+            if second_diff < 120:
+                return "a minute ago"
+            if second_diff < 3600:
+                return str(second_diff / 60) + " minutes"
+            if second_diff < 7200:
+                return "an hour ago"
+            if second_diff < 86400:
+                return str(second_diff / 3600) + " hours"
+        if day_diff == 1:
+            return "yesterday"
+        if day_diff < 7:
+            return str(day_diff) + " days"
+        if day_diff < 31:
+            return str(day_diff / 7) + " weeks"
+        if day_diff < 365:
+            return str(day_diff / 30) + " months"
+        return str(day_diff / 365) + " years"
+    except Exception as e:
+        debugger.dump_exception("time_elapsed() FIXME")
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(ip, mac):

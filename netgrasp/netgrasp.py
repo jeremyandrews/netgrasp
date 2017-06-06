@@ -792,6 +792,23 @@ def last_requested(ip, mac):
     except Exception as e:
         debugger.dump_exception("last_requested() FIXME")
 
+def time_seen(ip, mac):
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering time_seen(%s, %s)", (ip, mac))
+        db = database.database_instance
+
+        did = get_did(ip, mac)
+        db.cursor.execute('SELECT firstSeen, lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
+        active = db.cursor.fetchone()
+        if active:
+            firstSeen, lastSeen = active
+            return lastSeen - firstSeen
+        else:
+            return False
+    except Exception as e:
+        debugger.dump_exception("last_seen() FIXME")
+
 def previous_ip(ip, mac):
     try:
         debugger = debug.debugger_instance
@@ -994,7 +1011,7 @@ def send_notifications():
                     lastSeen = first_seen_recently(ip, mac)
                     previouslySeen = previously_seen(ip, mac)
                     title = """Netgrasp alert: %s""" % (event)
-                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.pretty_date(lastSeen), pretty.pretty_date(previouslySeen), pretty.pretty_date(firstSeen))
+                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.time_ago(lastSeen), pretty.time_ago(previouslySeen), pretty.time_ago(firstSeen))
                     ntfy.notify(body, title)
                 else:
                     debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
@@ -1075,6 +1092,7 @@ def send_email_alerts(timeout):
                     firstSeen = first_seen(ip, mac)
                     firstRequested = first_requested(ip, mac)
                     lastSeen = last_seen(ip, mac)
+                    timeSeen = time_seen(ip, mac)
                     previouslySeen = previously_seen(ip, mac)
                     lastRequested = last_requested(ip, mac)
 
@@ -1127,12 +1145,13 @@ def send_email_alerts(timeout):
                         vendor_custom=vendor_customname,
                         hostname=hostname,
                         hostname_custom=host_customname,
-                        first_seen=pretty.pretty_date(firstSeen),
-                        last_seen=pretty.pretty_date(lastSeen),
+                        first_seen=pretty.time_ago(firstSeen),
+                        last_seen=pretty.time_ago(lastSeen),
                         recently_seen_count=counter,
-                        previously_seen=pretty.pretty_date(previouslySeen),
-                        first_requested=pretty.pretty_date(firstRequested),
-                        last_requested=pretty.pretty_date(lastRequested),
+                        time_seen=pretty.time_elapsed(time_seen),
+                        previously_seen=pretty.time_ago(previouslySeen),
+                        first_requested=pretty.time_ago(firstRequested),
+                        last_requested=pretty.time_ago(lastRequested),
                         previous_ip=previous_ip(ip, mac),
                         devices_with_ip_text=devices_with_ip_text,
                         devices_with_ip_html=devices_with_ip_html,
