@@ -1,14 +1,14 @@
 import datetime
 
-def time_ago(time):
+def time_ago(elapsed):
     try:
         from netgrasp.utils import debug
         debugger = debug.debugger_instance
 
-        if not time:
+        if not elapsed:
             return "never"
         now = datetime.datetime.now()
-        diff = now - time
+        diff = now - elapsed
         second_diff = diff.seconds
         day_diff = diff.days
 
@@ -40,15 +40,15 @@ def time_ago(time):
     except Exception as e:
         debugger.dump_exception("time_ago() FIXME")
 
-def time_elapsed(time):
+def time_elapsed(elapsed):
     try:
         from netgrasp.utils import debug
         debugger = debug.debugger_instance
 
-        if not time:
+        if not elapsed:
             return "an instant"
         now = datetime.datetime.now()
-        diff = now - time
+        diff = now - elapsed
         second_diff = diff.seconds
         day_diff = diff.days
 
