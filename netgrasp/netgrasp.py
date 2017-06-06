@@ -1070,14 +1070,14 @@ def send_email_alerts(timeout):
                     if event == EVENT_DUPLICATE_MAC:
                         if mac in duplicate_macs:
                             debugger.debug("event %s [%d], notification email already sent", (event, eid))
-                            pass
+                            continue
                         else:
                             debugger.debug("event %s [%d], first time seeing %s", (event, eid, mac))
                             duplicate_macs.append(mac)
                     elif event == EVENT_DUPLICATE_IP:
                         if ip in duplicate_macs:
                             debugger.debug("event %s [%d], notification email already sent", (event, eid))
-                            pass
+                            continue
                         else:
                             debugger.debug("event %s [%d], first time seeing %s", (event, eid, ip))
                             duplicate_ips.append(ip)
