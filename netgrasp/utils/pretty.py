@@ -1,9 +1,11 @@
-import datetime
-
 def time_ago(elapsed):
     try:
+        import datetime
+
         from netgrasp.utils import debug
         debugger = debug.debugger_instance
+
+        debugger.debug("time_ago(%s)", (elapsed,))
 
         if not elapsed:
             return "never"
@@ -37,13 +39,17 @@ def time_ago(elapsed):
         if day_diff < 365:
             return str(day_diff / 30) + " months ago"
         return str(day_diff / 365) + " years ago"
-    except Exception as e:
-        debugger.dump_exception("time_ago() FIXME")
+    except exception as e:
+        debugger.dump_exception("time_ago() fixme")
 
 def time_elapsed(elapsed):
     try:
+        import datetime
+
         from netgrasp.utils import debug
         debugger = debug.debugger_instance
+
+        debugger.debug("time_elapsed(%s)", (elapsed,))
 
         if not elapsed:
             return "an instant"
@@ -83,6 +89,8 @@ def time_elapsed(elapsed):
 # Provides a human-friendly name for a mac-ip pair.
 def name_ip(ip, mac):
     try:
+        import datetime
+
         from netgrasp import netgrasp
         from netgrasp.utils import debug
         from netgrasp.database import database
