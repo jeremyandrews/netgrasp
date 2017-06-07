@@ -52,11 +52,9 @@ def time_elapsed(elapsed):
         debugger.debug("time_elapsed(%s)", (elapsed,))
 
         if not elapsed:
-            return "an instant"
-        now = datetime.datetime.now()
-        diff = now - elapsed
-        second_diff = diff.seconds
-        day_diff = diff.days
+            return "a single moment"
+        second_diff = elapsed.seconds
+        day_diff = elapsed.days
 
         if day_diff < 0:
             return ''

@@ -1150,7 +1150,7 @@ def send_email_alerts(timeout):
                         first_seen=pretty.time_ago(firstSeen),
                         last_seen=pretty.time_ago(lastSeen),
                         recently_seen_count=counter,
-                        time_seen=timeSeen,
+                        time_seen=pretty.time_elapsed(timeSeen),
                         previously_seen=pretty.time_ago(previouslySeen),
                         first_requested=pretty.time_ago(firstRequested),
                         last_requested=pretty.time_ago(lastRequested),
