@@ -1334,7 +1334,7 @@ def send_email_digests():
                 requests = db.cursor.fetchone()
                 if (requests[0] > 10):
                     noisy.append((mac, ip, requests[0], pretty.name_ip(ip, mac)))
-                if ip in new:
+                if unique_seen in new:
                     active_devices_text += """\n - %s (%s)*""" % (pretty.name_ip(ip, mac), ip)
                     active_devices_html += """<li>%s (%s)*</li>""" % (pretty.name_ip(ip, mac), ip)
                     some_new = True
