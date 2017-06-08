@@ -52,7 +52,7 @@ def time_elapsed(elapsed):
         debugger.debug("time_elapsed(%s)", (elapsed,))
 
         if not elapsed:
-            return "a single moment"
+            return "a second"
         second_diff = elapsed.seconds
         day_diff = elapsed.days
 
@@ -61,19 +61,19 @@ def time_elapsed(elapsed):
 
         if day_diff == 0:
             if second_diff < 10:
-                return "a few moments"
+                return "a few seconds"
             if second_diff < 60:
                 return str(second_diff) + " seconds"
             if second_diff < 120:
-                return "a minute ago"
+                return "a minute"
             if second_diff < 3600:
                 return str(second_diff / 60) + " minutes"
             if second_diff < 7200:
-                return "an hour ago"
+                return "an hour"
             if second_diff < 86400:
                 return str(second_diff / 3600) + " hours"
         if day_diff == 1:
-            return "yesterday"
+            return "a day"
         if day_diff < 7:
             return str(day_diff) + " days"
         if day_diff < 31:
