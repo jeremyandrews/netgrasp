@@ -119,6 +119,6 @@ def name_ip(ip, mac):
 
 # Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):
-    if len(string) <= maxlength:
+    if not string or len(string) <= maxlength:
         return string
     return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)

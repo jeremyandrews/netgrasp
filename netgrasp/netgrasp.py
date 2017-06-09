@@ -588,6 +588,7 @@ def create_database():
             db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS host(
                 hid INTEGER PRIMARY KEY,
+                did INTEGER,
                 mac TEXT,
                 ip TEXT,
                 hostname TEXT,
@@ -596,6 +597,7 @@ def create_database():
             """)
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_hostname ON host (mac, hostname)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_hostname ON host (did, hostname)")
             db.connection.commit()
     except Exception as e:
         debugger.dump_exception("create_database() FIXME")
@@ -611,7 +613,7 @@ def update_database():
             db.cursor.execute("SELECT did FROM seen LIMIT 1")
         except Exception as e:
             debugger.debug("%s", (e,))
-            debugger.debug("applying update #1 to database: adding did column to seen, populating")
+            debugger.info("applying update #1 to database: adding did column to seen, populating")
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
                 db.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
                 # Prior to this we assumed a new IP was a new device.
@@ -623,6 +625,33 @@ def update_database():
                     db.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
                     did += 1
                 db.connection.commit()
+
+        # Update #2: add did column to host table, populate
+        try:
+            db.cursor.execute("SELECT did FROM host LIMIT 1")
+        except Exception as e:
+            debugger.debug("%s", (e,))
+            debugger.info("applying update #2 to database: adding did column to host, populating")
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
+                db.cursor.execute("ALTER TABLE host ADD COLUMN did INTEGER")
+                # Use did to match devices when their IP changes.
+                db.cursor.execute("SELECT DISTINCT did, ip, mac FROM seen")
+                rows = db.cursor.fetchall()
+                for row in rows:
+                    did, ip, mac = row
+                    db.cursor.execute("UPDATE host SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
+                db.connection.commit()
+
+            db.cursor.execute("SELECT COUNT(did) FROM host WHERE did IS NOT NULL;")
+            count_did = db.cursor.fetchone()
+            db.cursor.execute("SELECT COUNT(did) FROM host WHERE did IS NULL;")
+            count_nodid = db.cursor.fetchone()
+            if count_did and count_nodid:
+                debugger.info("Updated host table, set ? dids, did not set ? dids", (count_did[0], count_nodid[0]))
+            else:
+                debugger.error("Failed to update host table")
+
+
     except Exception as e:
         debugger.dump_exception("update_database() FIXME")
 
@@ -1222,13 +1251,13 @@ def identify_macs():
                     db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
                 db.connection.commit()
 
-        db.cursor.execute("SELECT s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL")
+        db.cursor.execute("SELECT s.did, s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL")
         rows = db.cursor.fetchall()
         for row in rows:
-            mac, ip = row
+            did, mac, ip = row
             hostname = dns_lookup(ip)
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "identify_macs, hostname"):
-                db.cursor.execute("INSERT INTO host (mac, ip, hostname) VALUES (?, ?, ?)", (mac, ip, hostname))
+                db.cursor.execute("INSERT INTO host (did, mac, ip, hostname) VALUES (?, ?, ?, ?)", (did, mac, ip, hostname))
                 db.connection.commit()
     except Exception as e:
         debugger.dump_exception("identify_macs() FIXME")

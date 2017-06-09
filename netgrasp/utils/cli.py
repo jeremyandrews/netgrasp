@@ -159,12 +159,12 @@ def list(ng):
         query.db_where("vendor.vendor LIKE ?", "%"+ng.args.vendor+"%")
 
     if ng.args.hostname:
-        query.db_leftjoin("host", "({%BASE}.mac = host.mac AND {%BASE}.ip = host.ip)")
+        query.db_leftjoin("host", "{%BASE}.did = host.did")
         query.db_where("host.hostname LIKE ?", "%"+ng.args.hostname+"%")
 
     if ng.args.custom:
         query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-        query.db_leftjoin("host", "({%BASE}.mac = host.mac AND {%BASE}.ip = host.ip)")
+        query.db_leftjoin("host", "{%BASE}.did = host.did")
         query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+ng.args.custom+"%", "%"+ng.args.custom+"%"], True)
 
     ng.db.cursor.execute(query.db_query(), query.db_args())
@@ -212,7 +212,7 @@ def identify(ng):
         query.db_select("{%BASE}.mac")
         query.db_select("{%BASE}.ip")
 
-        query.db_leftjoin("seen", "({%BASE}.ip = seen.ip AND {%BASE}.mac = seen.mac)")
+        query.db_leftjoin("seen", "{%BASE}.did = seen.did")
         query.db_select("seen.lastSeen")
         query.db_group("seen.ip")
         query.db_group("seen.mac")
