@@ -1,3 +1,8 @@
+v0.8.2, 9-June-2017
+ * added HTML-based (and improved text-based) emails
+ * fixed lock issues, further lock-debug improvements
+ * bug fixes
+
 v0.8.1, 30-May-2017
  * simplified/optimized logic within locks
  * improved locking debug
