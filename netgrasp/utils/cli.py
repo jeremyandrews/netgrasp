@@ -247,7 +247,7 @@ def identify(ng):
             print """ %s:""" % description
             print rowFormat.format(*header)
         for row in rows:
-            ng.db.cursor.execute("SELECT customname FROM host WHERE did = ? ORDER BY customname DESC", (row[1]))
+            ng.db.cursor.execute("SELECT customname FROM host WHERE did = ? ORDER BY customname DESC", (row[1],))
             customname = ng.db.cursor.fetchone()
             if customname and customname[0]:
                 # Device changed IP and has custom name associated with previous IP.
