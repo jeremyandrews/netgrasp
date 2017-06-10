@@ -477,10 +477,10 @@ def log_event(ip, mac, event, have_lock = False):
         did = get_did(ip, mac)
 
         if have_lock:
-            db.connection.execute("INSERT INTO event (mac, ip, did, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, did, now, 0, event))
+            db.connection.execute("INSERT INTO event (mac, ip, did, timestamp, processed, event) VALUES(?, ?, ?, ?, ?, ?)", (mac, ip, did, now, 0, event))
         else:
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "log_event, " + event):
-                db.connection.execute("INSERT INTO event (mac, ip, did, timestamp, processed, event) VALUES(?, ?, ?, ?, ?)", (mac, ip, did, now, 0, event))
+                db.connection.execute("INSERT INTO event (mac, ip, did, timestamp, processed, event) VALUES(?, ?, ?, ?, ?, ?)", (mac, ip, did, now, 0, event))
                 db.connection.commit()
     except Exception as e:
         debugger.dump_exception("log_event() FIXME")
