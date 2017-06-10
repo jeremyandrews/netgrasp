@@ -98,20 +98,22 @@ def name_did(did):
 
         debugger.debug("entering name_did(%s)", (did,))
 
-        db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=?", (did,))
+        db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=? AND h.mac != ?", (did, netgrasp.BROADCAST))
         detail = db.cursor.fetchone()
-        if not detail:
-            return detail
-        if detail[2]:
-            return detail[2]
-        elif detail[3] and (detail[3] != "unknown"):
-            return detail[3]
-        elif detail[4]:
-            return detail[4]
-        elif detail[5]:
-            return """%s device""" % (detail[5])
+        if detail:
+            mac, ip, custom_hostname, hostname, custom_vendorname, vendor = detail
+            if custom_hostname:
+                return custom_hostname
+            elif hostname and (hostname != "unknown"):
+                return hostname
+            elif custom_vendorname:
+                return custom_vendorname
+            elif vendor:
+                return """%s device""" % (vendor)
+            else:
+                return """%s [%s]""" % (ip, mac)
         else:
-            return detail[0]
+            return None
     except Exception as e:
         debugger.dump_exception("name_did() FIXME")
 
