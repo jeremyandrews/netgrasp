@@ -562,6 +562,7 @@ def create_database():
                 eid INTEGER PRIMARY KEY,
                 mac TEXT,
                 ip TEXT,
+                did INTEGER,
                 interface TEXT,
                 network TEXT,
                 timestamp TIMESTAMP,
@@ -650,6 +651,31 @@ def update_database():
                 debugger.info("Updated host table, set ? dids, did not set ? dids", (count_did[0], count_nodid[0]))
             else:
                 debugger.error("Failed to update host table")
+
+        # Update #3: add did column to event table, populate
+        try:
+            db.cursor.execute("SELECT did FROM event LIMIT 1")
+        except Exception as e:
+            debugger.debug("%s", (e,))
+            debugger.info("applying update #3 to database: adding did column to event, populating")
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
+                db.cursor.execute("ALTER TABLE event ADD COLUMN did INTEGER")
+                # Use did to match devices when their IP changes.
+                db.cursor.execute("SELECT DISTINCT did, ip, mac FROM seen")
+                rows = db.cursor.fetchall()
+                for row in rows:
+                    did, ip, mac = row
+                    db.cursor.execute("UPDATE event SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
+                db.connection.commit()
+
+            db.cursor.execute("SELECT COUNT(did) FROM event WHERE did IS NOT NULL;")
+            count_did = db.cursor.fetchone()
+            db.cursor.execute("SELECT COUNT(did) FROM event WHERE did IS NULL;")
+            count_nodid = db.cursor.fetchone()
+            if count_did and count_nodid:
+                debugger.info("Updated event table, set ? dids, did not set ? dids", (count_did[0], count_nodid[0]))
+            else:
+                debugger.error("Failed to update event table")
 
 
     except Exception as e:

@@ -110,8 +110,7 @@ def list(ng):
         query.db_where("{%BASE}.lastSeen IS NOT NULL")
 
         if (not ng.args.all or ng.args.all == 1):
-            query.db_group("{%BASE}.mac")
-            query.db_group("{%BASE}.ip")
+            query.db_group("{%BASE}.did")
 
         query.db_order("{%BASE}.lastSeen DESC")
 
@@ -135,8 +134,7 @@ def list(ng):
             query.db_where("{%BASE}.timestamp >= ?", recent)
 
         if (not ng.args.all or ng.args.all == 1):
-            query.db_group("{%BASE}.mac")
-            query.db_group("{%BASE}.ip")
+            query.db_group("{%BASE}.did")
             query.db_group("{%BASE}.event")
 
         query.db_order("{%BASE}.timestamp DESC")
@@ -214,8 +212,7 @@ def identify(ng):
 
         query.db_leftjoin("seen", "{%BASE}.did = seen.did")
         query.db_select("seen.lastSeen")
-        query.db_group("seen.ip")
-        query.db_group("seen.mac")
+        query.db_group("seen.did")
         query.db_order("seen.lastSeen DESC")
 
         if not ng.args.all and not ng.args.custom:
