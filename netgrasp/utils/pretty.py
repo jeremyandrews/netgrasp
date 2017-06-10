@@ -85,7 +85,7 @@ def time_elapsed(elapsed):
         debugger.dump_exception("time_elapsed() FIXME")
 
 # Provides a human-friendly name for a mac-ip pair.
-def name_ip(ip, mac):
+def name_did(did):
     try:
         import datetime
 
@@ -96,11 +96,9 @@ def name_ip(ip, mac):
         debugger = debug.debugger_instance
         db = database.database_instance
 
-        debugger.debug("entering name_ip(%s, %s)", (ip, mac))
-        if (mac == netgrasp.BROADCAST):
-            db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=?", (ip,))
-        else:
-            db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac=?", (ip, mac))
+        debugger.debug("entering name_did(%s)", (did,))
+
+        db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=?", (did,))
         detail = db.cursor.fetchone()
         if not detail:
             return detail
@@ -115,7 +113,7 @@ def name_ip(ip, mac):
         else:
             return detail[0]
     except Exception as e:
-        debugger.dump_exception("name_ip() FIXME")
+        debugger.dump_exception("name_did() FIXME")
 
 # Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):

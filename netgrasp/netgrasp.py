@@ -888,7 +888,7 @@ def devices_with_ip(ip):
         debugger.debug("entering devices_with_ip(%s)", (ip,))
         db = database.database_instance
 
-        db.cursor.execute("SELECT ip, mac FROM seen WHERE ip = ? AND active = 1 ORDER BY lastSeen DESC", (ip,))
+        db.cursor.execute("SELECT did, ip, mac FROM seen WHERE ip = ? AND active = 1 ORDER BY lastSeen DESC", (ip,))
         ips = db.cursor.fetchall()
         if ips:
             return ips
@@ -903,7 +903,7 @@ def devices_with_mac(mac):
         debugger.debug("entering devices_with_mac(%s)", (mac,))
         db = database.database_instance
 
-        db.cursor.execute("SELECT ip, mac FROM seen WHERE mac = ? AND active = 1 ORDER BY lastSeen DESC", (mac,))
+        db.cursor.execute("SELECT did, ip, mac FROM seen WHERE mac = ? AND active = 1 ORDER BY lastSeen DESC", (mac,))
         macs = db.cursor.fetchall()
         if macs:
             return macs
@@ -1049,14 +1049,14 @@ def send_notifications():
         timer = simple_timer.Timer()
 
         # only send notifications for configured events
-        db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notifier.alerts)) + ")", notifier.alerts)
+        db.cursor.execute("SELECT eid, did, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 8) AND event IN ("+ ",".join("?"*len(notifier.alerts)) + ")", notifier.alerts)
 
         rows = db.cursor.fetchall()
         if rows:
             counter = 0
             max_eid = 0
             for row in rows:
-                eid, mac, ip, timestamp, event, processed = row
+                eid, did, mac, ip, timestamp, event, processed = row
                 debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
 
                 if eid > max_eid:
@@ -1068,7 +1068,7 @@ def send_notifications():
                     lastSeen = first_seen_recently(ip, mac)
                     previouslySeen = previously_seen(ip, mac)
                     title = """Netgrasp alert: %s""" % (event)
-                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_ip(ip, mac), ip, mac, pretty.time_ago(lastSeen), pretty.time_ago(previouslySeen), pretty.time_ago(firstSeen))
+                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_did(did), ip, mac, pretty.time_ago(lastSeen), pretty.time_ago(previouslySeen), pretty.time_ago(firstSeen))
                     ntfy.notify(body, title)
                 else:
                     debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
@@ -1107,7 +1107,7 @@ def send_email_alerts(timeout):
 
         day = datetime.datetime.now() - datetime.timedelta(days=1)
 
-        db.cursor.execute("SELECT eid, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1) AND event IN ("+ ",".join("?"*len(emailer.alerts)) + ")", emailer.alerts)
+        db.cursor.execute("SELECT eid, did, mac, ip, timestamp, event, processed FROM event WHERE NOT (processed & 1) AND event IN ("+ ",".join("?"*len(emailer.alerts)) + ")", emailer.alerts)
         rows = db.cursor.fetchall()
         if rows:
             max_eid = 0
@@ -1115,7 +1115,7 @@ def send_email_alerts(timeout):
             duplicate_macs = []
             duplicate_ips = []
             for row in rows:
-                eid, mac, ip, timestamp, event, processed = row
+                eid, did, mac, ip, timestamp, event, processed = row
                 debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
 
                 if eid > max_eid:
@@ -1165,26 +1165,27 @@ def send_email_alerts(timeout):
                         if results:
                             for peer in results:
                                 dst_ip, dst_mac = peer
-                                talked_to_text += """\n - %s (%s)""" % (pretty.name_ip(dst_ip, dst_mac), dst_ip)
-                                talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_ip(dst_ip, dst_mac), dst_ip)
+                                dst_did = get_did(dst_ip, dst_mac)
+                                talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did), dst_ip)
+                                talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(did), dst_ip)
 
                     devices = devices_with_ip(ip)
                     devices_with_ip_text = ""
                     devices_with_ip_html = ""
                     if devices:
                         for device in devices:
-                            list_ip, list_mac = device
-                            devices_with_ip_text += """\n - %s (%s)""" % (pretty.name_ip(list_ip, list_mac), list_mac)
-                            devices_with_ip_html += """<li>%s (%s)</li>""" % (pretty.name_ip(list_ip, list_mac), list_mac)
+                            list_did, list_ip, list_mac = device
+                            devices_with_ip_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_mac)
+                            devices_with_ip_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_mac)
 
                     devices = devices_with_mac(mac)
                     devices_with_mac_text = ""
                     devices_with_mac_html = ""
                     if devices:
                         for device in devices:
-                            list_ip, list_mac = device
-                            devices_with_mac_text += """\n - %s (%s)""" % (pretty.name_ip(list_ip, list_mac), list_ip)
-                            devices_with_mac_html += """<li>%s (%s)</li>""" % (pretty.name_ip(list_ip, list_mac), list_ip)
+                            list_did, list_ip, list_mac = device
+                            devices_with_mac_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
+                            devices_with_mac_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
 
                     devices = devices_requesting_ip(ip, timeout)
                     devices_requesting_ip_text = ""
@@ -1192,11 +1193,12 @@ def send_email_alerts(timeout):
                     if devices:
                         for device in devices:
                             list_ip, list_mac = device
-                            devices_requesting_ip_text += """\n - %s (%s)""" % (pretty.name_ip(list_ip, list_mac), list_ip)
-                            devices_requesting_ip_html += """<li>%s (%s)</li>""" % (pretty.name_ip(list_ip, list_mac), list_ip)
+                            list_did = get_did(list_ip, list_mac)
+                            devices_requesting_ip_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
+                            devices_requesting_ip_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
 
                     emailer.MailSend(event, dict(
-                        name=pretty.name_ip(ip, mac),
+                        name=pretty.name_did(did),
                         ip=ip,
                         mac=mac,
                         event_id=eid,
@@ -1370,9 +1372,9 @@ def send_email_digests():
                 seen = db.cursor.fetchall()
             elif (digest == "weekly"):
                 # PROCESSED_WEEKLY_DIGEST = 4
-                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
                 requested = db.cursor.fetchall()
-                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
                 seen = db.cursor.fetchall()
 
             db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
@@ -1386,18 +1388,18 @@ def send_email_digests():
             active_devices_text = ""
             active_devices_html = ""
             for unique_seen in seen:
-                mac, ip = unique_seen
+                did, mac, ip = unique_seen
                 db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arplog WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip, time_period, now))
                 requests = db.cursor.fetchone()
                 if (requests[0] > 10):
-                    noisy.append((mac, ip, requests[0], pretty.name_ip(ip, mac)))
+                    noisy.append((mac, ip, requests[0], pretty.name_did(did)))
                 if unique_seen in new:
-                    active_devices_text += """\n - %s (%s)*""" % (pretty.name_ip(ip, mac), ip)
-                    active_devices_html += """<li>%s (%s)*</li>""" % (pretty.name_ip(ip, mac), ip)
+                    active_devices_text += """\n - %s (%s)*""" % (pretty.name_did(did), ip)
+                    active_devices_html += """<li>%s (%s)*</li>""" % (pretty.name_did(did), ip)
                     some_new = True
                 else:
-                    active_devices_text += """\n - %s (%s)""" % (pretty.name_ip(ip, mac), ip)
-                    active_devices_html += """<li>%s (%s)</li>""" % (pretty.name_ip(ip, mac), ip)
+                    active_devices_text += """\n - %s (%s)""" % (pretty.name_did(did), ip)
+                    active_devices_html += """<li>%s (%s)</li>""" % (pretty.name_did(did), ip)
             if some_new:
                 new_devices_text = "* = not active in the previous " + time_period_description
             else:
@@ -1421,9 +1423,9 @@ def send_email_digests():
             if gone_away:
                 gone_devices_intro = """The following IPs were not active, but were active the previous %s:""" % (time_period_description)
                 for gone in gone_away:
-                    mac, ip = gone
-                    gone_devices_text += """\n - %s (%s)""" % (pretty.name_ip(ip, mac), ip)
-                    gone_devices_html += """<li>%s (%s)</li>""" % (pretty.name_ip(ip, mac), ip)
+                    did, mac, ip = gone
+                    gone_devices_text += """\n - %s (%s)""" % (pretty.name_did(did), ip)
+                    gone_devices_html += """<li>%s (%s)</li>""" % (pretty.name_did(did), ip)
 
             device_breakdown_text = ""
             device_breakdown_html = ""

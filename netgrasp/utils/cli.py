@@ -98,6 +98,7 @@ def list(ng):
     if ng.args.type == "device":
         # List devices.
         query = database.SelectQueryBuilder("seen", ng.debugger, ng.args.verbose)
+        query.db_select("{%BASE}.did")
         query.db_select("{%BASE}.mac")
         query.db_select("{%BASE}.ip")
         query.db_select("{%BASE}.lastSeen")
@@ -120,6 +121,7 @@ def list(ng):
     elif ng.args.type == 'event':
         # List events.
         query = database.SelectQueryBuilder("event", ng.debugger, ng.args.verbose)
+        query.db_select("{%BASE}.did")
         query.db_select("{%BASE}.mac")
         query.db_select("{%BASE}.ip")
         query.db_select("{%BASE}.timestamp")
@@ -172,9 +174,9 @@ def list(ng):
         print rowFormat.format(*header)
     for row in rows:
         if ng.args.type == 'device':
-            print rowFormat.format(pretty.truncate_string(row[1], 15), pretty.truncate_string(pretty.name_ip(row[1], row[0]), 32), pretty.truncate_string(pretty.time_ago(row[2]), 20))
+            print rowFormat.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 32), pretty.truncate_string(pretty.time_ago(row[3]), 20))
         else:
-            print rowFormat.format(pretty.truncate_string(row[1], 15), pretty.truncate_string(pretty.name_ip(row[1], row[0]), 22), pretty.truncate_string(row[3], 19), pretty.truncate_string(pretty.time_ago(row[2]), 16))
+            print rowFormat.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 22), pretty.truncate_string(row[4], 19), pretty.truncate_string(pretty.time_ago(row[3]), 16))
 
 def identify(ng):
     from netgrasp.database import database
@@ -207,6 +209,7 @@ def identify(ng):
 
         query = database.SelectQueryBuilder("host", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.hid")
+        query.db_select("{%BASE}.did")
         query.db_select("{%BASE}.mac")
         query.db_select("{%BASE}.ip")
 
@@ -244,7 +247,7 @@ def identify(ng):
             print """ %s:""" % description
             print rowFormat.format(*header)
         for row in rows:
-            print rowFormat.format(row[0], pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_ip(row[2], row[1]), 32), pretty.truncate_string(pretty.time_ago(row[3]), 20))
+            print rowFormat.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
     else:
         if ng.args.verbose > 1:
             print "id:", ng.args.set[0], "| custom name:", ng.args.set[1]
