@@ -297,7 +297,7 @@ def ip_on_network(ip):
     except:
         debugger.dump_exception("address_in_network() FIXME")
 
-def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
+def ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, request):
     try:
         from utils import exclusive_lock
         import datetime
@@ -305,57 +305,36 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
         debugger = debug.debugger_instance
         db = database.database_instance
 
-        debugger.debug("entering ip_seen(%s, %s, %s, %s, %d)", (src_ip, src_mac, dst_ip, dst_mac, request))
+        debugger.debug("entering ip_seen(%s, %s, %s, %s, %s, %s, %d)", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, request))
 
         now = datetime.datetime.now()
 
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, arplog"):
-            db.cursor.execute("INSERT INTO arplog (src_mac, src_ip, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?)", (src_mac, src_ip, dst_mac, dst_ip, request, now))
+            db.cursor.execute("INSERT INTO arplog (src_did, src_mac, src_ip, dst_did, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (src_did, src_mac, src_ip, dst_did, dst_mac, dst_ip, request, now))
             debugger.debug("inserted into arplog")
             db.connection.commit()
 
         if (src_mac == BROADCAST):
-            debugger.info("Ignoring IP source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
+            debugger.info("Ignoring IP source (%s) of %s [%s], dst (%s) %s [%s]", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
             log_event(src_ip, src_mac, SRC_MAC_BROADCAST)
             return False
 
         if (not ip_on_network(src_ip)):
-            debugger.warning("Invalid IP (not on network) source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
+            debugger.warning("Invalid IP (not on network) source (%s) of %s [%s], dst (%s) %s [%s]", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
             log_event(src_ip, src_mac, IP_NOT_ON_NETWORK)
             return False
 
         # Check if we've seen this IP, MAC pair before.
-        active, lastSeen, lastRequested, counter, sid, did, changed_ip = [False, False, False, 0, 0, 0, False]
+        active, lastSeen, lastRequested, counter, sid, did = [False, False, False, 0, 0, 0]
         debugger.debug("ip_seen query 1")
-        db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, src_mac))
+        db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE did = ? ORDER BY lastSeen DESC LIMIT 1", (src_did,))
         result = db.cursor.fetchone()
         if result:
-            active, lastSeen, lastRequested, counter, sid, did = result
-
-        if not result:
-            # Check if we've seen this MAC, hostname pair before, it may have gotten assigned a new IP.
-            # In the event of the same IP and a different hostname, we treat this like a different device
-            # (though it's likely a vm, jail, or alias). @TODO Revisit this.
-            hostname = dns_lookup(src_ip)
-            debugger.debug("ip_seen query 2")
-            db.cursor.execute("SELECT seen.active, seen.lastSeen, seen.lastRequested, seen.counter, seen.sid, seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.lastSeen DESC LIMIT 1", (src_mac, hostname))
-            result = db.cursor.fetchone()
-            if result:
-                active, lastSeen, lastRequested, counter, sid, did = result
-                changed_ip = True
-
-        if not result:
-            # Check if we've seen this IP be requested before.
-            debugger.debug("ip_seen query 3")
-            db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid, did FROM seen WHERE ip=? AND mac=? ORDER BY lastSeen DESC LIMIT 1", (src_ip, BROADCAST))
-            result = db.cursor.fetchone()
-            if result:
-                active, lastSeen, lastRequested, counter, sid, did = result
+            active, lastSeen, lastRequested, counter, sid = result
+            if ip_has_changed(src_did):
+                log_event(src_ip, src_mac, EVENT_CHANGED_IP)
 
         log_event(src_ip, src_mac, EVENT_SEEN)
-        if changed_ip:
-            debugger.info("[%s] (%s) has a new ip [%s]", (did, src_mac, src_ip))
-            log_event(src_ip, src_mac, EVENT_CHANGED_IP)
         if active:
             if lastSeen:
                 # has been active recently
@@ -365,33 +344,34 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
                     db.connection.commit()
             else:
                 # has not been active recently, but was requested recently
-                if first_seen(src_ip, src_mac):
+                if first_seen(src_did):
                     # First time we've seen IP since it was stale.
                     log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                     the_event = EVENT_SEEN_FIRST_RECENT
-                    lastSeen = last_seen(src_ip, src_mac)
+                    lastSeen = last_seen(src_did)
                     if lastSeen:
                         timeSince = datetime.datetime.now() - lastSeen
-                        debugger.info("[%s] %s (%s) is active again (after %s)", (did, src_ip, src_mac, timeSince))
+                        debugger.info("[%s] %s (%s) is active again (after %s)", (src_did, src_ip, src_mac, timeSince))
                     else:
-                        debugger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_ip, src_mac)))
+                        debugger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_did)))
                 else:
                     # First time we've actively seen this IP.
                     log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
                     log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                     the_event = EVENT_SEEN_FIRST
-                    debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
+                    debugger.info("[%s] %s (%s) is active, first time seeing", (src_did, src_ip, src_mac))
 
                 # @TODO properly handle multiple active occurences of the same IP
                 with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, update seen 2"):
                     db.cursor.execute("UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, now, counter + 1, sid))
                     db.connection.commit()
         else:
-            if did:
+            if src_did:
                 # First time we've seen this IP recently.
                 log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
                 the_event = EVENT_SEEN_FIRST_RECENT
-                debugger.info("[%s] %s (%s) is active, first time seeing recently", (did, src_ip, src_mac))
+                did = src_did
+                debugger.info("[%s] %s (%s) is active, first time seeing recently", (src_did, src_ip, src_mac))
             else:
                 # First time we've seen this IP.
                 db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
@@ -413,7 +393,7 @@ def ip_seen(src_ip, src_mac, dst_ip, dst_mac, request):
     except Exception as e:
         debugger.dump_exception("ip_seen() FIXME")
 
-def ip_request(ip, mac, src_ip, src_mac):
+def ip_request(dst_did, dst_ip, dst_mac, src_did, src_ip, src_mac):
     try:
         from utils import exclusive_lock
         import datetime
@@ -421,47 +401,34 @@ def ip_request(ip, mac, src_ip, src_mac):
         debugger = debug.debugger_instance
         db = database.database_instance
 
-        debugger.debug("entering ip_request(%s, %s, %s, %s)", (ip, mac, src_ip, src_mac))
+        debugger.debug("entering ip_request(%s, %s, %s, %s, %s, %s)", (dst_did, dst_ip, dst_mac, src_did, src_ip, src_mac))
         now = datetime.datetime.now()
 
-        if ((ip == src_ip) or (mac == src_mac)):
+        if ((dst_ip == src_ip) or (dst_mac == src_mac)):
             debugger.debug("requesting self, ignoring")
             return
 
         active = False
         lastRequested = False
-        db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, mac))
+        db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE did = ? AND active=1", (dst_did,))
         requested = db.cursor.fetchone()
         if requested:
-            active, lastRequested, sid, did = requested
-        else:
-            if (mac == BROADCAST):
-                # Maybe we already have seen a request for this address
-                db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND mac=? AND active=1", (ip, BROADCAST))
-                requested = db.cursor.fetchone()
-                if requested:
-                    active, lastRequested, sid, did = requested
-                else:
-                    # Maybe the IP has been seen already
-                    db.cursor.execute("SELECT active, lastRequested, sid, did FROM seen WHERE ip=? AND active=1", (ip,))
-                    requested = db.cursor.fetchone()
-                    if requested:
-                        active, lastRequested, sid, did = requested
+            active, lastRequested, sid = requested
 
-        log_event(ip, mac, EVENT_REQUESTED)
+        log_event(dst_ip, dst_mac, EVENT_REQUESTED)
         if active:
             # Update:
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_request, update seen"):
                 db.cursor.execute("UPDATE seen set lastRequested=? WHERE sid=?", (now, sid))
                 db.connection.commit()
-            debugger.debug("%s (%s) requested", (ip, mac))
+            debugger.debug("%s (%s) requested", (dst_ip, dst_mac))
         else:
             # First time we've seen a request for this IP.
-            log_event(ip, mac, EVENT_REQUESTED_FIRST)
+            log_event(dst_ip, dst_mac, EVENT_REQUESTED_FIRST)
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_request, insert into seen"):
-                db.cursor.execute("INSERT INTO seen (mac, ip, did, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (mac, ip, get_did(ip, mac), now, now, ip_is_mine(ip)))
+                db.cursor.execute("INSERT INTO seen (mac, ip, did, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (dst_mac, dst_ip, dst_did, now, now, ip_is_mine(dst_ip)))
                 db.connection.commit()
-            debugger.info("%s (%s) requested, first time seeing", (ip, mac))
+            debugger.info("%s (%s) requested, first time seeing", (dst_ip, dst_mac))
     except Exception as e:
         debugger.dump_exception("ip_request() FIXME")
 
@@ -494,6 +461,34 @@ def ip_is_mine(ip):
         return (ip == socket.gethostbyname(socket.gethostname()))
     except Exception as e:
         debugger.dump_exception("ip_is_mine() FIXME")
+
+def ip_has_changed(did):
+    try:
+        debugger = debug.debugger_instance
+        db = database.database_instance
+
+        debugger.debug("entering ip_has_changed(%s)", (did,))
+
+        db.cursor.execute("SELECT ip FROM seen WHERE did = ? AND mac != ? AND lastSeen IS NOT NULL ORDER BY lastSeen DESC LIMIT 2", (did, BROADCAST))
+        ips = db.cursor.fetchall()
+        debugger.debug("ips: %s", (ips,))
+        if ips and len(ips) == 2:
+            ip_a = ips[0]
+            ip_b = ips[1]
+            debugger.debug("ips: %s, %s", (ip_a, ip_b))
+
+            if ip_a != ip_b:
+                debugger.info("ip for did %s changed from %s to %s", (did, ip_a[0], ip_b[0]))
+                return True
+            else:
+                debugger.debug("ip for did %s has not changed from %s", (did, ip_a[0]))
+                return False
+        else:
+            debugger.debug("ip for did %s has not changed", (did,))
+            return False
+
+    except Exception as e:
+        debugger.dump_exception("ip_has_changed() FIXME")
 
 # Database definitions.
 def create_database():
@@ -680,6 +675,35 @@ def update_database():
             else:
                 debugger.error("Failed to update event table")
 
+        # Update #4: add src_did, dst_did columns to arplog table, populate
+        try:
+            db.cursor.execute("SELECT src_did FROM arplog LIMIT 1")
+        except Exception as e:
+            debugger.debug("%s", (e,))
+            debugger.info("applying update #4 to database: adding src_did, dst_did columns to arplog, populating")
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
+                db.cursor.execute("ALTER TABLE arplog ADD COLUMN src_did INTEGER")
+                db.cursor.execute("ALTER TABLE arplog ADD COLUMN dst_did INTEGER")
+
+                # Populate src_did.
+                db.cursor.execute("SELECT src_ip, src_mac FROM arplog GROUP BY src_ip, src_mac")
+                rows = db.cursor.fetchall()
+                for row in rows:
+                    ip, mac = row
+                    did = get_did(ip, mac)
+                    db.cursor.execute("UPDATE arplog SET src_did = ? WHERE src_ip = ? AND src_mac = ?", (did, ip, mac))
+                debugger.info("Populated arplog.src_did.")
+
+                # Populate dst_did.
+                db.cursor.execute("SELECT dst_ip, dst_mac FROM arplog GROUP BY dst_ip, dst_mac")
+                rows = db.cursor.fetchall()
+                for row in rows:
+                    ip, mac = row
+                    did = get_did(ip, mac)
+                    db.cursor.execute("UPDATE arplog SET dst_did = ? WHERE dst_ip = ? AND dst_mac = ?", (did, ip, mac))
+                debugger.info("Populated arplog.dst_did.")
+
+                db.connection.commit()
 
     except Exception as e:
         debugger.dump_exception("update_database() FIXME")
@@ -696,16 +720,18 @@ def received_arp(hdr, data, child_conn):
         packet = dpkt.ethernet.Ethernet(data)
         src_ip = socket.inet_ntoa(packet.data.spa)
         src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
+        src_did = get_did(src_ip, src_mac)
         dst_ip = socket.inet_ntoa(packet.data.tpa)
         dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
+        dst_did = get_did(dst_ip, dst_mac)
 
         if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-            debugger.debug('ARP request from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
-            ip_seen(src_ip, src_mac, dst_ip, dst_mac, True)
-            ip_request(dst_ip, dst_mac, src_ip, src_mac)
+            debugger.debug('ARP request from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+            ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, True)
+            ip_request(dst_did, dst_ip, dst_mac, src_did, src_ip, src_mac)
         elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-            debugger.debug('ARP reply from %s (%s) to %s (%s)', (src_ip, src_mac, dst_ip, dst_mac))
-            ip_seen(src_ip, src_mac, dst_ip, dst_mac, False)
+            debugger.debug('ARP reply from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+            ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, False)
     except Exception as e:
         debugger.dump_exception("received_arp() FIXME")
 
@@ -748,13 +774,12 @@ def get_did(ip, mac):
     except Exception as e:
         debugger.dump_exception("get_did() FIXME")
 
-def first_seen(ip, mac):
+def first_seen(did):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering first_seen(%s, %s)", (ip, mac))
+        debugger.debug("entering first_seen(did)", (did,))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute("SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen ASC LIMIT 1", (did,))
         active = db.cursor.fetchone()
         if active:
@@ -767,13 +792,12 @@ def first_seen(ip, mac):
     except Exception as e:
         debugger.dump_exception("first_seen() FIXME")
 
-def first_seen_recently(ip, mac):
+def first_seen_recently(did):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering last_seen_recently(%s, %s)", (ip, mac))
+        debugger.debug("entering last_seen_recently(%s)", (did,))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute('SELECT firstSeen FROM seen WHERE did = ? AND firstSeen NOT NULL ORDER BY firstSeen DESC LIMIT 1', (did,))
         recent = db.cursor.fetchone()
         if recent:
@@ -786,13 +810,12 @@ def first_seen_recently(ip, mac):
     except Exception as e:
         debugger.dump_exception("first_seen_recently() FIXME")
 
-def last_seen(ip, mac):
+def last_seen(did):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering last_seen(%s, %s)", (ip, mac))
+        debugger.debug("entering last_seen(%s)", (did,))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
         active = db.cursor.fetchone()
         if active:
@@ -802,13 +825,12 @@ def last_seen(ip, mac):
     except Exception as e:
         debugger.dump_exception("last_seen() FIXME")
 
-def previously_seen(ip, mac):
+def previously_seen(did):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering previously_seen(%s, %s)", (ip, mac))
+        debugger.debug("entering previously_seen(%s)", (did,))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute('SELECT lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL AND active != 1 ORDER BY lastSeen DESC LIMIT 1', (did,))
         previous = db.cursor.fetchone()
         if previous:
@@ -818,13 +840,12 @@ def previously_seen(ip, mac):
     except Exception as e:
         debugger.dump_exception("previously_seen() FIXME")
 
-def first_requested(ip, mac):
+def first_requested(did):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering first_requested(%s, %s)", (ip, mac))
+        debugger.debug("entering first_requested(%s)", (did,))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute('SELECT firstRequested FROM seen WHERE did=? AND firstRequested NOT NULL ORDER BY firstRequested ASC LIMIT 1', (did,))
         active = db.cursor.fetchone()
         if active:
@@ -834,13 +855,12 @@ def first_requested(ip, mac):
     except Exception as e:
         debugger.dump_exception("first_requested() FIXME")
 
-def last_requested(ip, mac):
+def last_requested(did):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering last_requested(%s, %s)", (ip, mac))
+        debugger.debug("entering last_requested(%s)", (did,))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute('SELECT lastRequested FROM seen WHERE did=? AND lastRequested NOT NULL ORDER BY lastRequested DESC LIMIT 1', (did,))
         last = db.cursor.fetchone()
         if last:
@@ -850,13 +870,12 @@ def last_requested(ip, mac):
     except Exception as e:
         debugger.dump_exception("last_requested() FIXME")
 
-def time_seen(ip, mac):
+def time_seen(did):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering time_seen(%s, %s)", (ip, mac))
+        debugger.debug("entering time_seen(%s)", (did,))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute('SELECT firstSeen, lastSeen FROM seen WHERE did=? AND lastSeen NOT NULL ORDER BY lastSeen DESC LIMIT 1', (did,))
         active = db.cursor.fetchone()
         if active:
@@ -865,15 +884,14 @@ def time_seen(ip, mac):
         else:
             return False
     except Exception as e:
-        debugger.dump_exception("last_seen() FIXME")
+        debugger.dump_exception("time_seen() FIXME")
 
-def previous_ip(ip, mac):
+def previous_ip(did, ip):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering previous_ip(%s, %s)", (ip, mac))
+        debugger.debug("entering previous_ip(%s, %s)", (did, ip))
         db = database.database_instance
 
-        did = get_did(ip, mac)
         db.cursor.execute("SELECT ip FROM seen WHERE did = ? AND ip != ? ORDER BY lastSeen DESC LIMIT 1", (did, ip))
         previous_ip = db.cursor.fetchone()
         if previous_ip:
@@ -920,7 +938,7 @@ def devices_requesting_ip(ip, timeout):
         db = database.database_instance
 
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
-        db.cursor.execute("SELECT src_ip, src_mac FROM arplog WHERE dst_ip = ? AND timestamp >= ? GROUP BY src_ip ORDER BY timestamp DESC", (ip, stale))
+        db.cursor.execute("SELECT src_ip, src_mac FROM arplog WHERE dst_ip = ? AND timestamp >= ? GROUP BY src_did ORDER BY timestamp DESC", (ip, stale))
         macs = db.cursor.fetchall()
         if macs:
             return macs
@@ -1065,9 +1083,9 @@ def send_notifications():
 
                 if event in notifier.alerts:
                     debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
-                    firstSeen = first_seen(ip, mac)
-                    lastSeen = first_seen_recently(ip, mac)
-                    previouslySeen = previously_seen(ip, mac)
+                    firstSeen = first_seen(did)
+                    lastSeen = first_seen_recently(did)
+                    previouslySeen = previously_seen(did)
                     title = """Netgrasp alert: %s""" % (event)
                     body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_did(did), ip, mac, pretty.time_ago(lastSeen), pretty.time_ago(previouslySeen), pretty.time_ago(firstSeen))
                     ntfy.notify(body, title)
@@ -1149,26 +1167,25 @@ def send_email_alerts(timeout):
                         continue
 
                     active, self, counter, vendor, vendor_customname, hostname, host_customname = info
-                    firstSeen = first_seen(ip, mac)
-                    firstRequested = first_requested(ip, mac)
-                    lastSeen = last_seen(ip, mac)
-                    timeSeen = time_seen(ip, mac)
-                    previouslySeen = previously_seen(ip, mac)
-                    lastRequested = last_requested(ip, mac)
+                    firstSeen = first_seen(did)
+                    firstRequested = first_requested(did)
+                    lastSeen = last_seen(did)
+                    timeSeen = time_seen(did)
+                    previouslySeen = previously_seen(did)
+                    lastRequested = last_requested(did)
 
                     db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
                     count = db.cursor.fetchone()
                     talked_to_text = ""
                     talked_to_html = ""
                     if count and count[0]:
-                        db.cursor.execute("SELECT DISTINCT dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=? ORDER BY timestamp LIMIT ?", (mac, day, TALKED_TO_LIMIT))
+                        db.cursor.execute("SELECT DISTINCT dst_did, dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=? ORDER BY timestamp LIMIT ?", (mac, day, TALKED_TO_LIMIT))
                         results = db.cursor.fetchall()
                         if results:
                             for peer in results:
-                                dst_ip, dst_mac = peer
-                                dst_did = get_did(dst_ip, dst_mac)
+                                dst_did, dst_ip, dst_mac = peer
                                 talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did), dst_ip)
-                                talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(did), dst_ip)
+                                talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did), dst_ip)
 
                     devices = devices_with_ip(ip)
                     devices_with_ip_text = ""
@@ -1214,7 +1231,7 @@ def send_email_alerts(timeout):
                         previously_seen=pretty.time_ago(previouslySeen),
                         first_requested=pretty.time_ago(firstRequested),
                         last_requested=pretty.time_ago(lastRequested),
-                        previous_ip=previous_ip(ip, mac),
+                        previous_ip=previous_ip(did, ip),
                         devices_with_ip_text=devices_with_ip_text,
                         devices_with_ip_html=devices_with_ip_html,
                         devices_with_mac_text=devices_with_mac_text,
