@@ -634,21 +634,8 @@ def update_database():
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
                 db.cursor.execute("ALTER TABLE host ADD COLUMN did INTEGER")
                 # Use did to match devices when their IP changes.
-                db.cursor.execute("SELECT DISTINCT did, ip, mac FROM seen")
-                rows = db.cursor.fetchall()
-                for row in rows:
-                    did, ip, mac = row
-                    db.cursor.execute("UPDATE host SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
+                # This was a bad update; it gets fixed properly in #4
                 db.connection.commit()
-
-            db.cursor.execute("SELECT COUNT(did) FROM host WHERE did IS NOT NULL;")
-            count_did = db.cursor.fetchone()
-            db.cursor.execute("SELECT COUNT(did) FROM host WHERE did IS NULL;")
-            count_nodid = db.cursor.fetchone()
-            if count_did and count_nodid:
-                debugger.info("Updated host table, set ? dids, did not set ? dids", (count_did[0], count_nodid[0]))
-            else:
-                debugger.error("Failed to update host table")
 
         # Update #3: add did column to event table, populate
         try:
@@ -702,6 +689,14 @@ def update_database():
                     did = get_did(ip, mac)
                     db.cursor.execute("UPDATE arplog SET dst_did = ? WHERE dst_ip = ? AND dst_mac = ?", (did, ip, mac))
                 debugger.info("Populated arplog.dst_did.")
+
+                # Fix host table.
+                db.cursor.execute("SELECT hid, ip, mac FROM host");
+                hosts = db.cursor.fetchall()
+                if hosts:
+                    for host in hosts:
+                        hid, ip, mac = host
+                        db.cursor.execute("UPDATE host SET did = ? WHERE hid = ?", (get_did(ip, mac), hid))
 
                 db.connection.commit()
 
@@ -938,7 +933,7 @@ def devices_requesting_ip(ip, timeout):
         db = database.database_instance
 
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
-        db.cursor.execute("SELECT src_ip, src_mac FROM arplog WHERE dst_ip = ? AND timestamp >= ? GROUP BY src_did ORDER BY timestamp DESC", (ip, stale))
+        db.cursor.execute("SELECT src_did, src_ip, src_mac FROM arplog WHERE dst_ip = ? AND timestamp >= ? GROUP BY src_did ORDER BY timestamp DESC", (ip, stale))
         macs = db.cursor.fetchall()
         if macs:
             return macs
@@ -1160,7 +1155,7 @@ def send_email_alerts(timeout):
 
                     debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
                     # get more information about this entry ...
-                    db.cursor.execute("SELECT s.active, s.self, s.counter, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.mac=? AND s.ip=? ORDER BY lastSeen DESC", (mac, ip))
+                    db.cursor.execute("SELECT s.active, s.self, s.counter, v.vendor, v.customname, h.hostname, h.customname FROM seen s LEFT JOIN vendor v ON s.mac = v.mac LEFT JOIN host h ON s.did = h.did WHERE s.did = ? ORDER BY lastSeen DESC", (did,))
                     info = db.cursor.fetchone()
                     if not info:
                         debugger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
@@ -1174,18 +1169,17 @@ def send_email_alerts(timeout):
                     previouslySeen = previously_seen(did)
                     lastRequested = last_requested(did)
 
-                    db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=?", (mac, day))
-                    count = db.cursor.fetchone()
+                    db.cursor.execute("SELECT dst_did, dst_ip, dst_mac FROM arplog WHERE src_did = ? AND timestamp >= ? GROUP BY dst_did", (did, day))
+                    peers = db.cursor.fetchall()
                     talked_to_text = ""
                     talked_to_html = ""
-                    if count and count[0]:
-                        db.cursor.execute("SELECT DISTINCT dst_did, dst_ip, dst_mac FROM arplog WHERE src_mac=? AND timestamp>=? ORDER BY timestamp LIMIT ?", (mac, day, TALKED_TO_LIMIT))
-                        results = db.cursor.fetchall()
-                        if results:
-                            for peer in results:
-                                dst_did, dst_ip, dst_mac = peer
-                                talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did), dst_ip)
-                                talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did), dst_ip)
+                    talked_to_count = 0
+                    if peers:
+                        for peer in peers:
+                            talked_to_count += 1
+                            dst_did, dst_ip, dst_mac = peer
+                            talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did), dst_ip)
+                            talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did), dst_ip)
 
                     devices = devices_with_ip(ip)
                     devices_with_ip_text = ""
@@ -1210,8 +1204,7 @@ def send_email_alerts(timeout):
                     devices_requesting_ip_html = ""
                     if devices:
                         for device in devices:
-                            list_ip, list_mac = device
-                            list_did = get_did(list_ip, list_mac)
+                            list_did, list_ip, list_mac = device
                             devices_requesting_ip_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
                             devices_requesting_ip_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
 
@@ -1240,7 +1233,7 @@ def send_email_alerts(timeout):
                         devices_requesting_ip_html=devices_requesting_ip_html,
                         active_boolean=active,
                         self_boolean=self,
-                        talked_to_count=count[0],
+                        talked_to_count=talked_to_count,
                         talked_to_list_text=talked_to_text,
                         talked_to_list_html=talked_to_html,
                         event=event
@@ -1299,7 +1292,7 @@ def identify_macs():
                     db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
                 db.connection.commit()
 
-        db.cursor.execute("SELECT s.did, s.mac, s.ip FROM seen s LEFT JOIN host h ON s.mac = h.mac AND s.ip = h.ip WHERE s.active = 1 AND h.mac IS NULL")
+        db.cursor.execute("SELECT seen.did, seen.mac, seen.ip FROM seen LEFT JOIN host ON seen.did = host.did WHERE seen.active = 1 AND host.mac IS NULL")
         rows = db.cursor.fetchall()
         for row in rows:
             did, mac, ip = row
