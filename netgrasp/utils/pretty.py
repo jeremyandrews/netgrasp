@@ -100,12 +100,15 @@ def name_did(did):
 
         db.cursor.execute("SELECT ip FROM host WHERE did = ?", (did,))
         ip = db.cursor.fetchone()
-
+        detail = None
         if ip:
             db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac != ?", (ip[0], netgrasp.BROADCAST))
-        else:
+            detail = db.cursor.fetchone()
+
+        if not detail:
             db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=?", (did,))
-        detail = db.cursor.fetchone()
+            detail = db.cursor.fetchone()
+
         if detail:
             mac, ip, custom_hostname, hostname, custom_vendorname, vendor = detail
             if custom_hostname:
