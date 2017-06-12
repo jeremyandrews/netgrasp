@@ -554,6 +554,7 @@ def create_database():
             """)
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcmac_timestamp ON arplog (src_mac, timestamp)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_dstdid_srcdid_timestamp ON arplog (dst_did, src_did, timestamp)")
 
             # Create event table.
             db.cursor.execute("""
@@ -1171,14 +1172,16 @@ def send_email_alerts(timeout):
                     previouslySeen = previously_seen(did)
                     lastRequested = last_requested(did)
 
-                    db.cursor.execute("SELECT dst_did, dst_ip, dst_mac FROM arplog WHERE src_did = ? AND timestamp >= ? GROUP BY dst_did", (did, day))
+                    db.cursor.execute("SELECT dst_did, dst_ip, dst_mac FROM arplog WHERE src_did = ? AND timestamp >= ? GROUP BY dst_did LIMIT ?", (did, day, TALKED_TO_LIMIT))
                     peers = db.cursor.fetchall()
                     talked_to_text = ""
                     talked_to_html = ""
                     talked_to_count = 0
                     if peers:
+                        db.cursor.execute("SELECT COUNT(DISTINCT dst_did) FROM arplog WHERE src_did = ?", (did,))
+                        peer_count = db.cursor.fetchone()
+                        talked_to_count = peer_count[0]
                         for peer in peers:
-                            talked_to_count += 1
                             dst_did, dst_ip, dst_mac = peer
                             talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did), dst_ip)
                             talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did), dst_ip)
