@@ -1310,7 +1310,7 @@ def identify_macs():
 
         # @TODO consider retrieving actual TTL from DNS -- for now refresh active devices every 5 mins
         ttl = datetime.datetime.now() - datetime.timedelta(minutes=5)
-        db.cursor.execute("SELECT seen.did, seen.mac, seen.ip, host.hid FROM seen LEFT JOIN host ON seen.did = host.did WHERE seen.active = 1 AND (host.mac IS NULL OR host.timestamp IS NULL OR host.timestamp < ?) LIMIT 50", (ttl,))
+        db.cursor.execute("SELECT seen.did, seen.mac, seen.ip, host.hid FROM seen LEFT JOIN host ON seen.did = host.did WHERE seen.lastSeen NOT NULL AND seen.active = 1 AND (host.mac IS NULL OR host.timestamp IS NULL OR host.timestamp < ?) LIMIT 50", (ttl,))
         rows = db.cursor.fetchall()
         for row in rows:
             did, mac, ip, hid = row
