@@ -221,11 +221,14 @@ The following alert types are supported:
 * stale: any time an IP address hasn't been seen for more than active_timeout
   seconds
 * network_scan: any time a device requests an abnormally large number of IPs
+* ip_not_on_network: an arp claims to have come from an IP not on the monitored
+  device's subnet
+* src_mac_broadcast: an arp packet claims to have come from 'ff:ff:ff:ff:ff:ff'
 
 For example:
 ```
 [Email]
-alerts = first_seen_recently,first_seen,network_scan,duplicate_ip
+alerts = first_seen_recently,network_scan,duplicate_ip,ip_not_on_network,stale
 ```
 
 The following digest types are supported:
@@ -245,5 +248,5 @@ For example:
 ```
 [Notifications]
 enabled = true
-alerts = first_seen_recently,network_scan,changed_ip,duplicate_ip
+alerts = first_seen_recently,network_scan,duplicate_ip,ip_not_on_network,stale
 ```
