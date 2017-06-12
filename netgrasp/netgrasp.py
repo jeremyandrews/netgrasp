@@ -540,8 +540,10 @@ def create_database():
             db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS arplog(
                 aid INTEGER PRIMARY KEY,
+                src_did INT,
                 src_mac TEXT,
                 src_ip TEXT,
+                dst_did TEXT,
                 dst_mac TEXT,
                 dst_ip TEXT,
                 request NUMERIC,
@@ -1377,9 +1379,9 @@ def send_email_digests():
 
             if (digest == "daily"):
                 # PROCESSED_DAILY_DIGEST  = 2
-                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
+                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'requested'", (time_period, now))
                 requested = db.cursor.fetchall()
-                db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
+                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
                 seen = db.cursor.fetchall()
             elif (digest == "weekly"):
                 # PROCESSED_WEEKLY_DIGEST = 4
