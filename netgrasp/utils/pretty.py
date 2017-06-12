@@ -102,11 +102,12 @@ def name_did(did):
         ip = db.cursor.fetchone()
         detail = None
         if ip:
-            db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.ip=? AND h.mac != ?", (ip[0], netgrasp.BROADCAST))
-            detail = db.cursor.fetchone()
+            db.cursor.execute("SELECT did FROM host WHERE ip = ? AND mac != ?", (ip[0], netgrasp.BROADCAST))
+            device_id = db.cursor.fetchone()
+            if device_id:
+                did = device_id[0]
 
-        if not detail:
-            db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=?", (did,))
+            db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=? ORDER BY h.customname DESC LIMIT 1", (did,))
             detail = db.cursor.fetchone()
 
         if detail:
