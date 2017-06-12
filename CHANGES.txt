@@ -1,3 +1,6 @@
+v0.8.4, ???
+ * #7: do not cache DNS forever
+
 v0.8.3, 12-June-2017
  * #13: properly detect when device changes IP
 

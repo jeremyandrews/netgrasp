@@ -592,6 +592,7 @@ def create_database():
                 did INTEGER,
                 mac TEXT,
                 ip TEXT,
+                timestamp TIMESTAMP,
                 hostname TEXT,
                 customname TEXT
               )
@@ -702,6 +703,15 @@ def update_database():
                         db.cursor.execute("UPDATE host SET did = ? WHERE hid = ?", (get_did(ip, mac), hid))
 
                 db.connection.commit()
+
+        # Update #5: add timestamp column to host table
+        try:
+            db.cursor.execute("SELECT timestamp FROM host LIMIT 1")
+        except Exception as e:
+            debugger.debug("%s", (e,))
+            debugger.info("applying update #5 to database: adding timestamp column to host")
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
+                db.cursor.execute("ALTER TABLE host ADD COLUMN timestamp TIMESTAMP")
 
     except Exception as e:
         debugger.dump_exception("update_database() FIXME")
@@ -1297,13 +1307,21 @@ def identify_macs():
                     db.cursor.execute("INSERT INTO vendor (mac, vendor) VALUES (?, 'unknown')", (raw_mac,))
                 db.connection.commit()
 
-        db.cursor.execute("SELECT seen.did, seen.mac, seen.ip FROM seen LEFT JOIN host ON seen.did = host.did WHERE seen.active = 1 AND host.mac IS NULL")
+        # @TODO consider retrieving actual TTL from DNS -- for now refresh active devices every 5 mins
+        ttl = datetime.datetime.now() - datetime.timedelta(minutes=5)
+        db.cursor.execute("SELECT seen.did, seen.mac, seen.ip, host.hid FROM seen LEFT JOIN host ON seen.did = host.did WHERE seen.active = 1 AND (host.mac IS NULL OR host.timestamp IS NULL OR host.timestamp < ?)", (ttl,))
         rows = db.cursor.fetchall()
         for row in rows:
-            did, mac, ip = row
+            did, mac, ip, hid = row
             hostname = dns_lookup(ip)
+            now = datetime.datetime.now()
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "identify_macs, hostname"):
-                db.cursor.execute("INSERT INTO host (did, mac, ip, hostname) VALUES (?, ?, ?, ?)", (did, mac, ip, hostname))
+                if hid:
+                    debugger.debug("Refreshing hostname %s for %s", (hostname, ip))
+                    db.cursor.execute("UPDATE host SET hostname = ?, timestamp = ? WHERE hid = ?", (hostname, now, hid))
+                else:
+                    debugger.debug("Caching hostname %s for ip %s", (hostname, ip))
+                    db.cursor.execute("INSERT INTO host (did, mac, ip, hostname, timestamp) VALUES (?, ?, ?, ?, ?)", (did, mac, ip, hostname, now))
                 db.connection.commit()
     except Exception as e:
         debugger.dump_exception("identify_macs() FIXME")
@@ -1393,7 +1411,7 @@ def send_email_digests():
                 db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND event = 'seen'", (time_period, now))
                 seen = db.cursor.fetchall()
 
-            db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
+            db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND event = 'seen'", (previous_time_period, time_period))
             seen_previous = db.cursor.fetchall()
 
             new = set(seen) - set(seen_previous)
