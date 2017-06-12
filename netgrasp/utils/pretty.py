@@ -98,7 +98,7 @@ def name_did(did):
 
         debugger.debug("entering name_did(%s)", (did,))
 
-        db.cursor.execute("SELECT ip FROM host WHERE did = ?", (did,))
+        db.cursor.execute("SELECT ip FROM host WHERE did = ? ORDER BY hid DESC LIMIT 1", (did,))
         ip = db.cursor.fetchone()
         detail = None
         if ip:
