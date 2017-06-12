@@ -1,12 +1,15 @@
+v0.8.3, 12-June-2017
+ * #13: properly detect when device changes IP
+
 v0.8.2, 9-June-2017
- * added HTML-based (and improved text-based) emails
+ * #2: added HTML-based (and improved text-based) emails
  * fixed lock issues, further lock-debug improvements
  * bug fixes
 
 v0.8.1, 30-May-2017
  * simplified/optimized logic within locks
  * improved locking debug
- * fixed `netgrasp list` bug to no longer show 'never' seen devices
+ * #3: fixed `netgrasp list` bug to no longer show 'never' seen devices
  * fixed `netgrasp start --foreground` flag to not daemonize
 
 v0.8.0, 29-May-2017 -- Initial release.
