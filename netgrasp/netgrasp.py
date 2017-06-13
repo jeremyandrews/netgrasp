@@ -755,7 +755,7 @@ def get_did(ip, mac):
         did = db.cursor.fetchone()
         if did:
             did = did[0]
-        if not did AND mac != BROADCAST:
+        if not did and mac != BROADCAST:
             hostname = dns_lookup(ip)
             db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (mac, hostname))
             did = db.cursor.fetchone()
