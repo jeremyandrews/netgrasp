@@ -763,7 +763,11 @@ def get_did(ip, mac):
                 did = did[0]
 
         if not did:
-            db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
+            if mac != BROADCAST:
+                db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
+            else:
+                db.cursor.execute("SELECT did FROM seen WHERE ip=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
+
             did = db.cursor.fetchone()
             if did:
                 did = did[0]
