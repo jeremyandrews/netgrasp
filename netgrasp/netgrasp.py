@@ -20,8 +20,8 @@ netgrasp_instance = None
 
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
-ALERT_TYPES = ['first_requested', 'requested', 'first_seen', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast']
-EVENT_REQUESTED_FIRST, EVENT_REQUESTED, EVENT_SEEN_FIRST, EVENT_SEEN_FIRST_RECENT, EVENT_SEEN, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_STALE, EVENT_SCAN, IP_NOT_ON_NETWORK, SRC_MAC_BROADCAST = ALERT_TYPES
+ALERT_TYPES = ['first_requested', 'requested', 'first_seen_mac', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast']
+EVENT_REQUESTED_FIRST, EVENT_REQUESTED, EVENT_FIRST_SEEN_MAC, EVENT_SEEN_FIRST_RECENT, EVENT_SEEN, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_STALE, EVENT_SCAN, IP_NOT_ON_NETWORK, SRC_MAC_BROADCAST = ALERT_TYPES
 
 DIGEST_TYPES = ['daily', 'weekly']
 
@@ -297,151 +297,14 @@ def ip_on_network(ip):
     except:
         debugger.dump_exception("address_in_network() FIXME")
 
-def ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, request):
-    try:
-        from utils import exclusive_lock
-        import datetime
-
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering ip_seen(%s, %s, %s, %s, %s, %s, %d)", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, request))
-
-        now = datetime.datetime.now()
-
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, arplog"):
-            db.cursor.execute("INSERT INTO arplog (src_did, src_mac, src_ip, dst_did, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (src_did, src_mac, src_ip, dst_did, dst_mac, dst_ip, request, now))
-            debugger.debug("inserted into arplog")
-            db.connection.commit()
-
-        if (src_mac == BROADCAST):
-            debugger.info("Ignoring IP source (%s) of %s [%s], dst (%s) %s [%s]", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
-            log_event(src_ip, src_mac, SRC_MAC_BROADCAST)
-            return False
-
-        if (not ip_on_network(src_ip)):
-            debugger.warning("Invalid IP (not on network) source (%s) of %s [%s], dst (%s) %s [%s]", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
-            log_event(src_ip, src_mac, IP_NOT_ON_NETWORK)
-            return False
-
-        # Check if we've seen this IP, MAC pair before.
-        active, lastSeen, lastRequested, counter, sid, did = [False, False, False, 0, 0, 0]
-        debugger.debug("ip_seen query 1")
-        db.cursor.execute("SELECT active, lastSeen, lastRequested, counter, sid FROM seen WHERE did = ? ORDER BY lastSeen DESC LIMIT 1", (src_did,))
-        result = db.cursor.fetchone()
-        if result:
-            active, lastSeen, lastRequested, counter, sid = result
-            if ip_has_changed(src_did):
-                log_event(src_ip, src_mac, EVENT_CHANGED_IP)
-
-        log_event(src_ip, src_mac, EVENT_SEEN)
-        if active:
-            if lastSeen:
-                # has been active recently
-                debugger.debug("%s (%s) is active", (src_ip, src_mac))
-                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, update seen"):
-                    db.cursor.execute("UPDATE seen set ip=?, mac=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, counter + 1, sid))
-                    db.connection.commit()
-            else:
-                # has not been active recently, but was requested recently
-                if first_seen(src_did):
-                    # First time we've seen IP since it was stale.
-                    log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-                    the_event = EVENT_SEEN_FIRST_RECENT
-                    lastSeen = last_seen(src_did)
-                    if lastSeen:
-                        timeSince = datetime.datetime.now() - lastSeen
-                        debugger.info("[%s] %s (%s) is active again (after %s)", (src_did, src_ip, src_mac, timeSince))
-                    else:
-                        debugger.warning("We've seen a packet %s [%s] with a firstSeen (%s) but no lastSeen -- this shouldn't happen.", (src_ip, src_mac, first_seen(src_did)))
-                else:
-                    # First time we've actively seen this IP.
-                    log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
-                    log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-                    the_event = EVENT_SEEN_FIRST
-                    debugger.info("[%s] %s (%s) is active, first time seeing", (src_did, src_ip, src_mac))
-
-                # @TODO properly handle multiple active occurences of the same IP
-                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, update seen 2"):
-                    db.cursor.execute("UPDATE seen set ip=?, mac=?, firstSeen=?, lastSeen=?, counter=?, active=1 WHERE sid=?", (src_ip, src_mac, now, now, counter + 1, sid))
-                    db.connection.commit()
-        else:
-            if src_did:
-                # First time we've seen this IP recently.
-                log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-                the_event = EVENT_SEEN_FIRST_RECENT
-                did = src_did
-                debugger.info("[%s] %s (%s) is active, first time seeing recently", (src_did, src_ip, src_mac))
-            else:
-                # First time we've seen this IP.
-                db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
-                row = db.cursor.fetchone()
-                if row:
-                    did = row[0]
-                else:
-                    did = 1
-                if not did:
-                    debugger.debug('Did was None, setting to 1')
-                    did = 1
-                log_event(src_ip, src_mac, EVENT_SEEN_FIRST)
-                log_event(src_ip, src_mac, EVENT_SEEN_FIRST_RECENT)
-                the_event = EVENT_SEEN_FIRST
-                debugger.info("[%s] %s (%s) is active, first time seeing", (did, src_ip, src_mac))
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, update seen 3"):
-                db.cursor.execute("INSERT INTO seen (did, mac, ip, firstSeen, lastSeen, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (did, src_mac, src_ip, now, now, ip_is_mine(src_ip)))
-                db.connection.commit()
-    except Exception as e:
-        debugger.dump_exception("ip_seen() FIXME")
-
-def ip_request(dst_did, dst_ip, dst_mac, src_did, src_ip, src_mac):
-    try:
-        from utils import exclusive_lock
-        import datetime
-
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering ip_request(%s, %s, %s, %s, %s, %s)", (dst_did, dst_ip, dst_mac, src_did, src_ip, src_mac))
-        now = datetime.datetime.now()
-
-        if ((dst_ip == src_ip) or (dst_mac == src_mac)):
-            debugger.debug("requesting self, ignoring")
-            return
-
-        active = False
-        lastRequested = False
-        db.cursor.execute("SELECT active, lastRequested, sid FROM seen WHERE did = ? AND active=1", (dst_did,))
-        requested = db.cursor.fetchone()
-        if requested:
-            active, lastRequested, sid = requested
-
-        log_event(dst_ip, dst_mac, EVENT_REQUESTED)
-        if active:
-            # Update:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_request, update seen"):
-                db.cursor.execute("UPDATE seen set lastRequested=? WHERE sid=?", (now, sid))
-                db.connection.commit()
-            debugger.debug("%s (%s) requested", (dst_ip, dst_mac))
-        else:
-            # First time we've seen a request for this IP.
-            log_event(dst_ip, dst_mac, EVENT_REQUESTED_FIRST)
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_request, insert into seen"):
-                db.cursor.execute("INSERT INTO seen (mac, ip, did, firstRequested, lastRequested, counter, active, self) VALUES(?, ?, ?, ?, ?, 1, 1, ?)", (dst_mac, dst_ip, dst_did, now, now, ip_is_mine(dst_ip)))
-                db.connection.commit()
-            debugger.info("%s (%s) requested, first time seeing", (dst_ip, dst_mac))
-    except Exception as e:
-        debugger.dump_exception("ip_request() FIXME")
-
 # Assumes we already have the database lock.
-def log_event(ip, mac, event, have_lock = False):
+def log_event(did, ip, mac, event, have_lock = False):
     try:
         db = database.database_instance
         debugger = debug.debugger_instance
-        debugger.debug("entering log_event(%s, %s, %s)", (ip, mac, event))
+        debugger.debug("entering log_event(%s, %s, %s, %s, %s)", (did, ip, mac, event, have_lock))
 
         now = datetime.datetime.now()
-
-        did = get_did(ip, mac)
 
         if have_lock:
             db.connection.execute("INSERT INTO event (mac, ip, did, timestamp, processed, event) VALUES(?, ?, ?, ?, ?, ?)", (mac, ip, did, now, 0, event))
@@ -509,32 +372,59 @@ def create_database():
               )
             """)
 
-            # Create seen table.
+            # Record of all MAC addresses ever actively seen.
             db.cursor.execute("""
-              CREATE TABLE IF NOT EXISTS seen(
-                sid INTEGER PRIMARY KEY,
-                did INTEGER,
+              CREATE TABLE IF NOT EXISTS mac(
+                mid INTEGER PRIMARY KEY,
                 mac TEXT,
-                ip TEXT,
-                interface TEXT,
-                network TEXT,
-                firstSeen TIMESTAMP,
-                firstRequested TIMESTAMP,
-                lastSeen TIMESTAMP,
-                lastRequested TIMESTAMP,
-                counter NUMERIC,
-                active NUMERIC,
+                created TIMESTAMP,
                 self NUMERIC
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstSeen ON seen (ip, mac, firstSeen)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastSeen ON seen (ip, mac, lastSeen)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_firstRequested ON seen (ip, mac, firstRequested)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_lastRequested ON seen (ip, mac, lastRequested)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_lastSeen ON seen (active, lastSeen)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac_active ON seen (ip, mac, active)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_did ON seen (mac, did)")
+            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mac ON mac (mac)")
+
+            # Record of all IP addresses ever actively seen.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS ip(
+                iid INTEGER PRIMARY KEY,
+                mid INTEGER,
+                ip TEXT,
+                firstSeen TIMESTAMP,
+                lastSeen TIMESTAMP,
+              )
+            """)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mid ON ip (ip, mid)")
+
+            # Record of device activity.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS device(
+                did INTEGER PRIMARY KEY,
+                mid INTEGER,
+                iid INTEGER,
+                interface TEXT,
+                network TEXT,
+                created TIMESTAMP,
+                updated TIMESTAMP,
+                counter NUMERIC,
+                active NUMERIC,
+              )
+            """)
             # PRAGMA index_list(seen)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mid_iid_did ON device (mid, iid, did)")
+
+            # Record of all IP addresses ever requested.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS request(
+                rid INTEGER PRIMARY KEY,
+                did INTEGER,
+                interface TEXT,
+                network TEXT,
+                created TIMESTAMP,
+                updated TIMESTAMP,
+                counter NUMERIC,
+                active NUMERIC,
+              )
+            """)
 
             # Create arplog table.
             db.cursor.execute("""
@@ -724,68 +614,280 @@ def received_arp(hdr, data, child_conn):
         import struct
         import dpkt
 
+        from utils import exclusive_lock
+
         debugger = debug.debugger_instance
+        db = database.database_instance
 
         packet = dpkt.ethernet.Ethernet(data)
         src_ip = socket.inet_ntoa(packet.data.spa)
         src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
-        src_did = get_did(src_ip, src_mac)
+
         dst_ip = socket.inet_ntoa(packet.data.tpa)
         dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
-        dst_did = get_did(dst_ip, dst_mac)
 
+#        if (src_mac == BROADCAST):
+#            debugger.info("Ignoring IP source (%s) of %s [%s], dst (%s) %s [%s]", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+#            log_event(src_ip, src_mac, SRC_MAC_BROADCAST)
+#            return False
+#
+#        if (not ip_on_network(src_ip)):
+#            debugger.warning("Invalid IP (not on network) source (%s) of %s [%s], dst (%s) %s [%s]", (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+#            log_event(src_ip, src_mac, IP_NOT_ON_NETWORK)
+#            return False
+
+        # ARP REQUEST
         if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-            debugger.debug('ARP request from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
-            ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, True)
-            ip_request(dst_did, dst_ip, dst_mac, src_did, src_ip, src_mac)
+            debugger.debug('ARP REQUEST from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+            did = device_seen(src_ip, src_mac)
+            rid = device_request(dst_ip, dst_mac)
+
+            #ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, True)
+            #ip_request(dst_did, dst_ip, dst_mac, src_did, src_ip, src_mac)
+        #if ((dst_ip == src_ip) or (dst_mac == src_mac)):
+        #    debugger.debug("requesting self, ignoring")
+        #    return
+
+
+        # ARP REPLY
         elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-            debugger.debug('ARP reply from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
-            ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, False)
+            debugger.debug('ARP REPLY from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+            did = device_seen(src_ip, src_mac)
+            #ip_seen(src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac, False)
+
+#        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "ip_seen, arplog"):
+#            db.cursor.execute("INSERT INTO arplog (src_did, src_mac, src_ip, dst_did, dst_mac, dst_ip, request, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (src_did, src_mac, src_ip, dst_did, dst_mac, dst_ip, request, now))
+#            debugger.debug("inserted into arplog")
+#            db.connection.commit()
+
     except Exception as e:
         debugger.dump_exception("received_arp() FIXME")
 
-# Determine appropriate device id for IP, MAC pair.
-def get_did(ip, mac):
+def device_seen(ip, mac):
     try:
+        import datetime
+
         debugger = debug.debugger_instance
-        debugger.debug("entering get_did(%s, %s)", (ip, mac))
         db = database.database_instance
 
-        db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, mac))
-        did = db.cursor.fetchone()
-        if did:
-            did = did[0]
-        if not did and mac != BROADCAST:
-            hostname = dns_lookup(ip)
-            db.cursor.execute("SELECT seen.did FROM seen LEFT JOIN host ON seen.mac = host.mac WHERE seen.mac = ? AND host.hostname = ? ORDER BY seen.did DESC LIMIT 1", (mac, hostname))
-            did = db.cursor.fetchone()
-            if did:
-                did = did[0]
+        debugger.debug("entering ip_seen(%s, %s)", (ip, mac))
 
-        if not did:
-            if mac != BROADCAST:
-                db.cursor.execute("SELECT did FROM seen WHERE ip=? AND mac=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
-            else:
-                db.cursor.execute("SELECT did FROM seen WHERE ip=? ORDER BY did DESC LIMIT 1", (ip, BROADCAST))
+        now = datetime.datetime.now()
 
-            did = db.cursor.fetchone()
-            if did:
-                did = did[0]
+        seen_mac, first_seen_mac, seen_ip, first_seen_ip, first_seen_host, seen_host, first_seen_device = (False, False, False, False, False, False, False)
 
-        if did:
-            debugger.debug("matched did for %s [%s]: %d", (ip, mac, did))
-            return did
+        # Get ID for MAC, creating if necessary.
+        db.cursor.execute("SELECT mid FROM mac WHERE address = ?", (mac,))
+        seen = db.cursor.fetchone()
+        if seen:
+            mid = seen[0]
+            debugger.debug("existing mac %s [%d]", (mac, mid))
+            seen_mac = True
         else:
-            db.cursor.execute("SELECT MAX(did) + 1 FROM seen")
-            did = db.cursor.fetchone()
-            if did:
-                did = did[0]
-            if not did:
-                did = 1
-            debugger.debug("no matching did for %s [%s], new: %d", (ip, mac, did))
-            return did
+            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new mac"):
+                db.cursor.execute("INSERT INTO mac (address, created, self) VALUES(?, ?, ?)", (mac, now, ip_is_mine(ip)))
+                first_seen_mac = True
+                db.connection.commit()
+            mid = db.cursor.lastrowid
+            debugger.info("new mac %s [%d]", (mac, mid))
+
+        # Get ID for IP, creating if necessary.
+        db.cursor.execute("SELECT ip.iid FROM ip WHERE ip.mid = ? AND ip.address = ?", (mid, ip))
+        seen = db.cursor.fetchone()
+        if seen:
+            iid = seen[0]
+            debugger.debug("existing ip %s [%d]", (ip, iid))
+            seen_ip = True
+        else:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new ip"):
+                db.cursor.execute("INSERT INTO ip (mid, address, created) VALUES(?, ?, ?)", (mid, ip, now))
+                first_seen_ip = True
+                db.connection.commit()
+            iid = db.cursor.lastrowid
+            debugger.info("new ip %s [%d]", (ip, iid))
+
+        # Get ID for Hostname, creating if necessary.
+        db.cursor.execute("SELECT host.hid, host.hostname, host.customname FROM host WHERE host.iid = ?", (iid,))
+        seen = db.cursor.fetchone()
+        if seen:
+            hid, hostname, customname = seen
+            debugger.debug("existing host %s (%s) [%d]", (hostname, customname, hid))
+            seen_host = True
+        else:
+            hostname = dns_lookup(ip)
+            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new host"):
+                db.cursor.execute("INSERT INTO host (iid, hostname, customname, created, updated) VALUES(?, ?, ?, ?, ?)", (iid, hostname, None, now, now))
+
+                db.connection.commit()
+            first_seen_host = True
+            hid = db.cursor.lastrowid
+            debugger.info("new hostname %s [%d]", (hostname, hid))
+
+        # Get ID for Device, creating if necessary.
+        db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, did))
+        seen = db.cursor.fetchone()
+        if seen:
+            did = seen[0]
+            debugger.debug("existing device %s (%s) [%d]", (ip, mac, did))
+        else:
+            # The IP may have changed for this Device.
+            db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.hid = ?", (mid, hid))
+            seen = db.cursor.fetchone()
+            if seen:
+                did = seen[0]
+                debugger.debug("existing device %s (%s) [%d] (new ip)", (ip, mac, did))
+                with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, update device (new ip)"):
+                    db.cursor.execute("UPDATE device SET iid = ?, updated = ? WHERE did = ?", (iid, now, did))
+                    log_event(did, ip, mac, EVENT_SEEN_DEVICE, True)
+                    log_event(did, ip, mac, EVENT_CHANGED_IP, True)
+                    db.connection.commit()
+            else:
+                with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new device"):
+                    db.cursor.execute("INSERT INTO device (mid, iid, hid, created, updated) VALUES(?, ?, ?, ?, ?)", (mid, iid, hid, now, now))
+                    db.connection.commit()
+                first_seen_device = True
+                did = db.cursor.lastrowid
+                debugger.info("new device %s (%s) [%d]", (ip, mac, did))
+
+        # Finally, log activity.
+        db.cursor.execute("SELECT activity.aid FROM activity WHERE activity.did = ? AND activity.active = 1", (did,))
+        seen = db.cursor.fetchone()
+
+        with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, log activity"):
+            if seen:
+                aid = seen[0]
+                db.cursor.execute("UPDATE activity SET updated = ?, iid = ?, counter = counter + 1 WHERE aid = ?", (now, iid, aid))
+                log_event(did, ip, mac, EVENT_SEEN_DEVICE, True)
+            else:
+                # @TODO interface, network
+                db.cursor.execute("INSERT INTO activity (did, iid, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, iid, None, None, now, now, 1, 1))
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_RECENTLY_DEVICE)
+
+            # We delayed logging these events until we know the device id (did).
+            if seen_mac:
+                log_event(did, ip, mac, EVENT_SEEN_MAC, True)
+            if first_seen_mac:
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_MAC, True)
+            if seen_ip:
+                log_event(did, ip, mac, EVENT_SEEN_IP)
+            if first_seen_ip:
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_IP, True)
+            if seen_host:
+                log_event(did, ip, mac, EVENT_SEEN_HOST)
+            if first_seen_host:
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_HOST)
+            if first_seen_device:
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_DEVICE, True)
+            db.connection.commit()
+
+        return did
+
     except Exception as e:
-        debugger.dump_exception("get_did() FIXME")
+        debugger.dump_exception("device_seen() caught exception")
+
+def device_request(ip, mac):
+    try:
+        from utils import exclusive_lock
+        import datetime
+
+        debugger = debug.debugger_instance
+        db = database.database_instance
+
+        debugger.debug("entering ip_request(%s, %s)", (ip, mac))
+
+        now = datetime.datetime.now()
+
+        mid, iid, did = get_ids(ip, mac)
+
+        # Log request.
+        db.cursor.execute("SELECT request.rid, request.active FROM request WHERE request.ip = ?", (ip,))
+        seen = db.cursor.fetchone()
+        rid, active = (False, False)
+        if seen:
+            rid, active = seen
+            if active:
+                with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, update device activity"):
+                    db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, aid))
+                    log_event(did, ip, mac, EVENT_REQUEST_DEVICE, True)
+                    db.connection.commit()
+
+        if not seen or not active:
+            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new device activity"):
+                # @TODO interface, network
+                db.cursor.execute("INSERT INTO request (did, ip, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, ip, None, None, now, now, 1, 1))
+                if rid:
+                    log_event(did, ip, mac, EVENT_FIRST_REQUEST_RECENTLY_DEVICE, True)
+                else:
+                    log_event(did, ip, mac, EVENT_FIRST_REQUEST_DEVICE, True)
+                db.connection.commit()
+
+        return did
+
+    except Exception as e:
+        debugger.dump_exception("device_request() caught exception")
+
+def get_ids(ip, mac):
+    try:
+        debugger = debug.debugger_instance
+        debugger.debug("entering get_ids(%s, %s)", (ip, mac))
+
+        # Check if we know this MAC.
+        if mac != BROADCAST:
+            db.cursor.execute("SELECT mid FROM mac WHERE address = ?", (mac,))
+            seen = db.cursor.fetchone()
+            if seen:
+                mid = seen[0]
+            else:
+                mid = None
+        else:
+            mid = None
+
+        # Check if we know this IP.
+        if mid:
+            db.cursor.execute("SELECT ip.iid FROM ip WHERE ip.mid = ? AND ip.address = ?", (mid, ip))
+            seen = db.cursor.fetchone()
+            if seen:
+                iid = seen[0]
+            else:
+                iid = None
+        else:
+            iid = None
+
+        # Check if we know this Host.
+        if iid:
+            db.cursor.execute("SELECT host.hid, host.hostname, host.customname FROM host WHERE host.iid = ?", (iid,))
+            seen = db.cursor.fetchone()
+            if seen:
+                hid, hostname, customname = seen
+            else:
+                hid = None
+        else:
+            hid = None
+
+        # Check if we know this Device.
+        if mid and iid:
+            db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, did))
+            seen = db.cursor.fetchone()
+            if seen:
+                did = seen[0]
+                debugger.debug("existing device %s (%s) [%d]", (ip, mac, did))
+            else:
+                did = None
+        else:
+            did = None
+        if not did and mid and hid:
+            db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.hid = ?", (mid, hid))
+            seen = db.cursor.fetchone()
+            if seen:
+                did = seen[0]
+                debugger.debug("existing device %s (%s) [%d] (new ip)", (ip, mac, did))
+            else:
+                did = None
+
+        return (mid, iid, did)
+
+    except Exception as e:
+        debugger.dump_exception("get_ids() caught exception")
 
 def first_seen(did):
     try:
