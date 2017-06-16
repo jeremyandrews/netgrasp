@@ -128,7 +128,7 @@ def main(*pcap):
     ng.db.cursor.execute("PRAGMA journal_mode=WAL")
 
     create_database()
-    update_database()
+    #update_database()
 
     ng.active_timeout = ng.config.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
     ng.delay = ng.config.GetInt("Listen", "delay", 15, False)
@@ -159,7 +159,7 @@ def main(*pcap):
 
             identify_macs()
             detect_stale_ips(ng.active_timeout)
-            detect_netscans()
+            #detect_netscans()
             #detect_anomalies(ng.active_timeout)
             send_notifications()
             send_email_alerts(ng.active_timeout)
@@ -367,7 +367,7 @@ def create_database():
         debugger = debug.debugger_instance
         db = database.database_instance
 
-        debugger.debug('Creating database tables, if not already existing.')
+        debugger.debug("Creating database tables, if not already existing.")
 
         # PRAGMA index_list(TABLE)
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "create_database"):
@@ -397,7 +397,7 @@ def create_database():
                 iid INTEGER PRIMARY KEY,
                 mid INTEGER,
                 address TEXT,
-                created TIMESTAMP,
+                created TIMESTAMP
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mid_address ON ip (mid, address)")
@@ -408,9 +408,9 @@ def create_database():
                 hid INTEGER PRIMARY KEY,
                 iid INTEGER,
                 hostname TEXT,
-                customname TEXT
+                customname TEXT,
 		created TIMESTAMP,
-		updated TIMESTAMP,
+		updated TIMESTAMP
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_iid ON host (iid)")
@@ -424,7 +424,7 @@ def create_database():
                 hid INTEGER,
                 vid INTEGER,
                 created TIMESTAMP,
-                updated TIMESTAMP,
+                updated TIMESTAMP
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mid_iid ON device (mid, iid)")
@@ -440,7 +440,7 @@ def create_database():
                 created TIMESTAMP,
                 updated TIMESTAMP,
                 counter NUMERIC,
-                active NUMERIC,
+                active NUMERIC
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_did_iid ON device (did, iid)")
@@ -456,7 +456,7 @@ def create_database():
                 created TIMESTAMP,
                 updated TIMESTAMP,
                 counter NUMERIC,
-                active NUMERIC,
+                active NUMERIC
               )
             """)
 
@@ -475,9 +475,9 @@ def create_database():
                 timestamp TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arplog (src_ip, timestamp, request)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcmac_timestamp ON arplog (src_mac, timestamp)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_dstdid_srcdid_timestamp ON arplog (dst_did, src_did, timestamp)")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arp (src_ip, timestamp, request)")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcmac_timestamp ON arp (src_mac, timestamp)")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_dstdid_srcdid_timestamp ON arp (dst_did, src_did, timestamp)")
 
             # Create event table.
             db.cursor.execute("""
@@ -501,30 +501,30 @@ def create_database():
             db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS vendor(
                 vid INTEGER PRIMARY KEY,
-                mac TEXT,
+                mid INTEGER,
                 vendor TEXT,
                 customname TEXT
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac ON vendor (mac)")
+            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mid ON vendor (mid)")
 
-            # Create host table.
-            db.cursor.execute("""
-              CREATE TABLE IF NOT EXISTS host(
-                hid INTEGER PRIMARY KEY,
-                did INTEGER,
-                mac TEXT,
-                ip TEXT,
-                timestamp TIMESTAMP,
-                hostname TEXT,
-                customname TEXT
-              )
-            """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_hostname ON host (mac, hostname)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_hostname ON host (did, hostname)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_customname ON host (did, customname)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_hid ON host (did, hid)")
+            ## Create host table.
+            #db.cursor.execute("""
+            #  CREATE TABLE IF NOT EXISTS host(
+            #    hid INTEGER PRIMARY KEY,
+            #    did INTEGER,
+            #    mac TEXT,
+            #    ip TEXT,
+            #    timestamp TIMESTAMP,
+            #    hostname TEXT,
+            #    customname TEXT
+            #  )
+            #""")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_hostname ON host (mac, hostname)")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_hostname ON host (did, hostname)")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_customname ON host (did, customname)")
+            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_hid ON host (did, hid)")
             db.connection.commit()
     except Exception as e:
         debugger.dump_exception("create_database() caught exception")
@@ -590,9 +590,9 @@ def update_database():
             else:
                 debugger.error("Failed to update event table")
 
-        # Update #4: add src_did, dst_did columns to arplog table, populate
+        # Update #4: add src_did, dst_did columns to arp table, populate
         try:
-            db.cursor.execute("SELECT src_did FROM arplog LIMIT 1")
+            db.cursor.execute("SELECT did FROM arplog LIMIT 1")
         except Exception as e:
             debugger.debug("%s", (e,))
             debugger.info("applying update #4 to database: adding src_did, dst_did columns to arplog, populating")
@@ -677,7 +677,7 @@ def received_arp(hdr, data, child_conn):
 
         # ARP REQUEST
         if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-            debugger.debug('ARP REQUEST from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+            debugger.debug('ARP REQUEST from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
             if seen:
                 did = device_seen(src_ip, src_mac)
             if requested:
@@ -685,7 +685,7 @@ def received_arp(hdr, data, child_conn):
 
         # ARP REPLY
         elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-            debugger.debug('ARP REPLY from [%s] %s (%s) to [%s] %s (%s)', (src_did, src_ip, src_mac, dst_did, dst_ip, dst_mac))
+            debugger.debug('ARP REPLY from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
             if seen:
                 did = device_seen(src_ip, src_mac)
 
@@ -758,7 +758,7 @@ def device_seen(ip, mac):
             debugger.info("new hostname %s [%d]", (hostname, hid))
 
         # Get ID for Device, creating if necessary.
-        db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, did))
+        db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, iid))
         seen = db.cursor.fetchone()
         if seen:
             did = seen[0]
@@ -1156,6 +1156,7 @@ def detect_stale_ips(timeout):
     except Exception as e:
         debugger.dump_exception("detect_stale_ips() caught exception")
 
+# @TODO restore funcionality
 def detect_netscans():
     try:
         from utils import exclusive_lock
