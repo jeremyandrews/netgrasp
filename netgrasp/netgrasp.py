@@ -119,7 +119,7 @@ def main(*pcap):
         ng.db = database.Database(ng.database_filename, ng.debugger)
         database.database_instance = ng.db
     except Exception as e:
-        ng.debugger.critical("%s", (e,))
+        ng.debugger.dump_exception("main() caught exception creating database")
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
     ng.db.lock = ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False)
     ng.debugger.info("opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
@@ -157,7 +157,6 @@ def main(*pcap):
 
             parent_conn.send(HEARTBEAT)
 
-            identify_macs()
             detect_stale_ips(ng.active_timeout)
             #detect_netscans()
             #detect_anomalies(ng.active_timeout)
@@ -502,8 +501,8 @@ def create_database():
               CREATE TABLE IF NOT EXISTS vendor(
                 vid INTEGER PRIMARY KEY,
                 mid INTEGER,
-                vendor TEXT,
-                customname TEXT
+                name TEXT,
+                created TIMESTAMP
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mid ON vendor (mid)")
@@ -652,6 +651,10 @@ def received_arp(hdr, data, child_conn):
         debugger = debug.debugger_instance
         db = database.database_instance
 
+        debugger.debug("entering received_arp")
+
+        now = datetime.datetime.now()
+
         packet = dpkt.ethernet.Ethernet(data)
         src_ip = socket.inet_ntoa(packet.data.spa)
         src_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.src)
@@ -690,7 +693,7 @@ def received_arp(hdr, data, child_conn):
                 did = device_seen(src_ip, src_mac)
 
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "received_arp, arp"):
-            db.cursor.execute("INSERT INTO arp (did, rid, src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?)", (did, rid, src_mac, src_ip, dst_did, dst_mac, dst_ip, now))
+            db.cursor.execute("INSERT INTO arp (did, rid, src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
             debugger.debug("inserted into arp")
             db.connection.commit()
 
@@ -704,7 +707,7 @@ def device_seen(ip, mac):
         debugger = debug.debugger_instance
         db = database.database_instance
 
-        debugger.debug("entering ip_seen(%s, %s)", (ip, mac))
+        debugger.debug("entering device_seen(%s, %s)", (ip, mac))
 
         now = datetime.datetime.now()
 
@@ -757,6 +760,23 @@ def device_seen(ip, mac):
             hid = db.cursor.lastrowid
             debugger.info("new hostname %s [%d]", (hostname, hid))
 
+        # Get ID for Vendor, creating if necessary
+        db.cursor.execute("SELECT vendor.vid, vendor.name FROM vendor WHERE vendor.mid = ?", (mid,))
+        seen = db.cursor.fetchone()
+        if seen:
+            vid, vendor = seen
+            debugger.debug("existing vendor %s [%s] [%d]", (vendor, mid, vid))
+            seen_vendor = True
+        else:
+            vendor = mac_lookup(mac)
+            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new vendor"):
+                db.cursor.execute("INSERT INTO vendor (mid, name, created) VALUES(?, ?, ?)", (mid, vendor, now))
+
+                db.connection.commit()
+            first_seen_vendor = True
+            vid = db.cursor.lastrowid
+            debugger.info("new vendor %s [%d]", (vendor, vid))
+
         # Get ID for Device, creating if necessary.
         db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, iid))
         seen = db.cursor.fetchone()
@@ -777,7 +797,7 @@ def device_seen(ip, mac):
                     db.connection.commit()
             else:
                 with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new device"):
-                    db.cursor.execute("INSERT INTO device (mid, iid, hid, created, updated) VALUES(?, ?, ?, ?, ?)", (mid, iid, hid, now, now))
+                    db.cursor.execute("INSERT INTO device (mid, iid, hid, vid, created, updated) VALUES(?, ?, ?, ?, ?, ?)", (mid, iid, hid, vid, now, now))
                     db.connection.commit()
                 first_seen_device = True
                 did = db.cursor.lastrowid
@@ -795,7 +815,7 @@ def device_seen(ip, mac):
             else:
                 # @TODO interface, network
                 db.cursor.execute("INSERT INTO activity (did, iid, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, iid, None, None, now, now, 1, 1))
-                log_event(did, ip, mac, EVENT_FIRST_SEEN_DEVICE_RECENTLY)
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_DEVICE_RECENTLY, True)
 
             # We delayed logging these events until we know the device id (did).
             if seen_mac:
@@ -803,13 +823,13 @@ def device_seen(ip, mac):
             if first_seen_mac:
                 log_event(did, ip, mac, EVENT_FIRST_SEEN_MAC, True)
             if seen_ip:
-                log_event(did, ip, mac, EVENT_SEEN_IP)
+                log_event(did, ip, mac, EVENT_SEEN_IP, True)
             if first_seen_ip:
                 log_event(did, ip, mac, EVENT_FIRST_SEEN_IP, True)
             if seen_host:
-                log_event(did, ip, mac, EVENT_SEEN_HOST)
+                log_event(did, ip, mac, EVENT_SEEN_HOST, True)
             if first_seen_host:
-                log_event(did, ip, mac, EVENT_FIRST_SEEN_HOST)
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_HOST, True)
             if first_seen_device:
                 log_event(did, ip, mac, EVENT_FIRST_SEEN_DEVICE, True)
             db.connection.commit()
@@ -827,7 +847,7 @@ def device_request(ip, mac):
         debugger = debug.debugger_instance
         db = database.database_instance
 
-        debugger.debug("entering ip_request(%s, %s)", (ip, mac))
+        debugger.debug("entering device_request(%s, %s)", (ip, mac))
 
         now = datetime.datetime.now()
 
@@ -841,7 +861,7 @@ def device_request(ip, mac):
             rid, active = seen
             if active:
                 with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, update device activity"):
-                    db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, aid))
+                    db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, rid))
                     log_event(did, ip, mac, EVENT_REQUEST_IP, True)
                     db.connection.commit()
 
@@ -862,6 +882,7 @@ def device_request(ip, mac):
 
 def get_ids(ip, mac):
     try:
+        db = database.database_instance
         debugger = debug.debugger_instance
         debugger.debug("entering get_ids(%s, %s)", (ip, mac))
 
@@ -1345,13 +1366,13 @@ def send_email_alerts(timeout):
 
                     debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
                     # get more information about this entry ...
-                    db.cursor.execute("SELECT activity.active, activity.counter, vendor.vendor, vendor.customname, host.hostname, host.customname FROM activity LEFT JOIN vendor ON activity.mid = vendor.mid LEFT JOIN host ON activity.iid = host.iid WHERE activity.did = ? ORDER BY updated DESC LIMIT 1", (did,))
+                    db.cursor.execute("SELECT activity.active, activity.counter, vendor.name, host.hostname, host.customname FROM activity LEFT JOIN vendor ON activity.mid = vendor.mid LEFT JOIN host ON activity.iid = host.iid WHERE activity.did = ? ORDER BY updated DESC LIMIT 1", (did,))
                     info = db.cursor.fetchone()
                     if not info:
                         debugger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
                         continue
 
-                    active, counter, vendor, vendor_customname, hostname, host_customname = info
+                    active, counter, vendor, hostname, host_customname = info
                     firstSeen = first_seen(did)
                     firstRequested = first_requested(did)
                     lastSeen = last_seen(did)
@@ -1406,7 +1427,6 @@ def send_email_alerts(timeout):
                         mac=mac,
                         event_id=eid,
                         vendor=vendor,
-                        vendor_custom=vendor_customname,
                         hostname=hostname,
                         hostname_custom=host_customname,
                         first_seen=pretty.time_ago(firstSeen),
@@ -1440,49 +1460,44 @@ def send_email_alerts(timeout):
     except Exception as e:
         debugger.dump_exception("send_email_alerts() caught exception")
 
-# Finds new MAC addresses and assigns them a name.
-def identify_macs():
+# Identify vendor associated with MAC.
+def mac_lookup(mac):
     try:
         from utils import exclusive_lock
 
         debugger = debug.debugger_instance
         db = database.database_instance
 
-        debugger.debug("entering identify_macs()")
+        debugger.debug("entering mac_lookup(%s)", (mac,))
 
         import re
         import httplib
 
-        # @TODO: Review query, simplify?
-        db.cursor.execute("SELECT device.mid, mac.address, ip.address FROM device LEFT JOIN activity ON device.did = activity.did LEFT JOIN vendor ON device.mid = vendor.mid LEFT JOIN mac ON vendor.mid = mac.mid LEFT JOIN ip ON device.iid = ip.iid WHERE activity.active = 1 AND vendor.mid IS NULL")
-        rows = db.cursor.fetchall()
-        for row in rows:
-            mid, mac, ip = row
-            if not re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", mac.lower()):
-                fixed_mac = []
-                pieces = mac.split(":")
-                if not pieces:
-                    pieces = mac.split("-")
-                for piece in pieces:
-                    if len(piece) == 1:
-                        piece = "0"+piece
-                    fixed_mac.append(piece)
-                fixed_mac = ":".join(fixed_mac)
-                mac = fixed_mac
-            debugger.debug("Looking up vendor for %s [%s]", (ip, mac))
-            http = httplib.HTTPConnection("api.macvendors.com", 80)
-            url = """/%s""" % mac
-            http.request("GET", url)
-            response = http.getresponse()
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "identify_macs, vendor"):
-                if response.status == 200 and response.reason == "OK":
-                    vendor = response.read()
-                    debugger.info("Identified %s [%s] as %s", (ip, mac, vendor))
-                    db.cursor.execute("INSERT INTO vendor (mid, vendor) VALUES (?, ?)", (mid, vendor))
-                else:
-                    debugger.info("Failed identify vendor for [%s]", (mid,))
-                    db.cursor.execute("INSERT INTO vendor (mid, vendor) VALUES (?, 'unknown')", (mid,))
-                db.connection.commit()
+        if not re.match("[0-9a-f]{2}([-:])[0-9a-f]{2}(\\1[0-9a-f]{2}){4}$", mac.lower()):
+            fixed_mac = []
+            pieces = mac.split(":")
+            if not pieces:
+                pieces = mac.split("-")
+            for piece in pieces:
+                if len(piece) == 1:
+                    piece = "0"+piece
+                fixed_mac.append(piece)
+            fixed_mac = ":".join(fixed_mac)
+            mac = fixed_mac
+        debugger.debug("Looking up vendor for %s", (mac,))
+        http = httplib.HTTPConnection("api.macvendors.com", 80)
+        url = """/%s""" % mac
+        http.request("GET", url)
+        response = http.getresponse()
+
+        if response.status == 200 and response.reason == "OK":
+            vendor = response.read()
+            debugger.info("identified %s as %s", (mac, vendor))
+        else:
+            vendor = None
+            debugger.info("failed to identify %s", (mac,))
+
+        return vendor
 
         # @TODO restore functionality
         # @TODO consider retrieving actual TTL from DNS -- for now refresh active devices every 5 mins
@@ -1501,8 +1516,9 @@ def identify_macs():
 #                    debugger.debug("Caching hostname %s for ip %s", (hostname, ip))
 #                    db.cursor.execute("INSERT INTO host (did, mac, ip, hostname, timestamp) VALUES (?, ?, ?, ?, ?)", (did, mac, ip, hostname, now))
 #                db.connection.commit()
+
     except Exception as e:
-        debugger.dump_exception("identify_macs() caught exception")
+        debugger.dump_exception("mac_lookup() caught exception")
 
 def dns_lookup(ip):
     try:

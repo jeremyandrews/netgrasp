@@ -19,7 +19,7 @@ class ExclusiveFileLock:
             self._fd = os.open(self._lockfile, os.O_CREAT)
             started = time.time()
             while True:
-                self.debugger.debug("grabbing lock: %s", (self._name))
+                self.debugger.debug("grabbing lock: %s", (self._name,))
                 self._timer = simple_timer.Timer()
                 try:
                     fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
