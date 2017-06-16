@@ -98,20 +98,10 @@ def name_did(did):
 
         debugger.debug("entering name_did(%s)", (did,))
 
-        db.cursor.execute("SELECT ip FROM host WHERE did = ? ORDER BY hid DESC LIMIT 1", (did,))
-        ip = db.cursor.fetchone()
-        detail = None
-        if ip:
-            db.cursor.execute("SELECT did FROM host WHERE ip = ? AND mac != ?", (ip[0], netgrasp.BROADCAST))
-            device_id = db.cursor.fetchone()
-            if device_id:
-                did = device_id[0]
-
-            db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=? ORDER BY h.customname DESC LIMIT 1", (did,))
-            detail = db.cursor.fetchone()
-
+        db.cursor.execute("SELECT ip.address, mac.address, host.hostname, host.customname, vendor.vendor, vendor.customname FROM device LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?")
+        detail = db.cursor.fetchone()
         if detail:
-            mac, ip, custom_hostname, hostname, custom_vendorname, vendor = detail
+            ip, mac, hostname, custom_hostname, vendor, custom_vendorname = detail
             if custom_hostname:
                 return custom_hostname
             elif hostname and (hostname != "unknown"):

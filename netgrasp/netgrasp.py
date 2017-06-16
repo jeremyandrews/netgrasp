@@ -511,6 +511,7 @@ def create_database():
               CREATE TABLE IF NOT EXISTS host(
                 hid INTEGER PRIMARY KEY,
                 did INTEGER,
+                vid INTEGER,
                 mac TEXT,
                 ip TEXT,
                 timestamp TIMESTAMP,
