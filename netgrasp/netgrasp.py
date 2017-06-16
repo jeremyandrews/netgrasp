@@ -20,8 +20,9 @@ netgrasp_instance = None
 
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
-ALERT_TYPES = ['first_requested', 'requested', 'first_seen_mac', 'first_seen_recently', 'seen', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'stale', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast']
-EVENT_REQUESTED_FIRST, EVENT_REQUESTED, EVENT_FIRST_SEEN_MAC, EVENT_SEEN_FIRST_RECENT, EVENT_SEEN, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_STALE, EVENT_SCAN, IP_NOT_ON_NETWORK, SRC_MAC_BROADCAST = ALERT_TYPES
+ALERT_TYPES = ['requested_ip', 'first_requested_ip', 'first_requested_ip_recently', 'seen_device', 'first_seen_device', 'first_seen_device_recently', 'seen_mac', 'first_seen_mac', 'seen_ip', 'first_seen_ip', 'seen_host', 'first_seen_host', 'device_stale', 'request_stale', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'network_scan', 'ip_not_on_network', 'mac_broadcast', 'requested_self']
+
+EVENT_REQUEST_IP, EVENT_FIRST_REQUEST_IP, EVENT_FIRST_REQUEST_RECENTLY_IP, EVENT_SEEN_DEVICE, EVENT_FIRST_SEEN_DEVICE, EVENT_FIRST_SEEN_DEVICE_RECENTLY, EVENT_SEEN_MAC, EVENT_FIRST_SEEN_MAC, EVENT_SEEN_IP, EVENT_FIRST_SEEN_IP, EVENT_SEEN_HOST, EVENT_FIRST_SEEN_HOST, EVENT_STALE, EVENT_REQUEST_STALE, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_SCAN, EVENT_IP_NOT_ON_NETWORK, EVENT_SRC_MAC_BROADCAST, EVENT_REQUESTED_SELF = ALERT_TYPES
 
 DIGEST_TYPES = ['daily', 'weekly']
 
@@ -421,6 +422,7 @@ def create_database():
                 mid INTEGER,
                 iid INTEGER,
                 hid INTEGER,
+                vid INTEGER,
                 created TIMESTAMP,
                 updated TIMESTAMP,
               )
@@ -511,7 +513,6 @@ def create_database():
               CREATE TABLE IF NOT EXISTS host(
                 hid INTEGER PRIMARY KEY,
                 did INTEGER,
-                vid INTEGER,
                 mac TEXT,
                 ip TEXT,
                 timestamp TIMESTAMP,
@@ -662,12 +663,12 @@ def received_arp(hdr, data, child_conn):
         if (src_mac == BROADCAST):
             seen = False
             debugger.info("Ignoring arp source of %s [%s], destination %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
-            log_event(src_ip, src_mac, SRC_MAC_BROADCAST)
+            log_event(src_ip, src_mac, EVENT_SRC_MAC_BROADCAST)
 
         if not ip_on_network(src_ip):
             seen = False
             debugger.info("IP not on network, source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
-            log_event(src_ip, src_mac, IP_NOT_ON_NETWORK)
+            log_event(src_ip, src_mac, EVENT_IP_NOT_ON_NETWORK)
 
         if (dst_ip == src_ip) or (dst_mac == src_mac):
             requested = False
@@ -794,7 +795,7 @@ def device_seen(ip, mac):
             else:
                 # @TODO interface, network
                 db.cursor.execute("INSERT INTO activity (did, iid, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, iid, None, None, now, now, 1, 1))
-                log_event(did, ip, mac, EVENT_FIRST_SEEN_RECENTLY_DEVICE)
+                log_event(did, ip, mac, EVENT_FIRST_SEEN_DEVICE_RECENTLY)
 
             # We delayed logging these events until we know the device id (did).
             if seen_mac:
@@ -841,7 +842,7 @@ def device_request(ip, mac):
             if active:
                 with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, update device activity"):
                     db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, aid))
-                    log_event(did, ip, mac, EVENT_REQUEST_DEVICE, True)
+                    log_event(did, ip, mac, EVENT_REQUEST_IP, True)
                     db.connection.commit()
 
         if not seen or not active:
@@ -849,9 +850,9 @@ def device_request(ip, mac):
                 # @TODO interface, network
                 db.cursor.execute("INSERT INTO request (did, ip, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, ip, None, None, now, now, 1, 1))
                 if rid:
-                    log_event(did, ip, mac, EVENT_FIRST_REQUEST_RECENTLY_DEVICE, True)
+                    log_event(did, ip, mac, EVENT_FIRST_REQUEST_RECENTLY_IP, True)
                 else:
-                    log_event(did, ip, mac, EVENT_FIRST_REQUEST_DEVICE, True)
+                    log_event(did, ip, mac, EVENT_FIRST_REQUEST_IP, True)
                 db.connection.commit()
 
         return did
@@ -1147,7 +1148,7 @@ def detect_stale_ips(timeout):
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "detect_stale_ips, request"):
                 for row in rows:
                     rid, did, ip = row
-                    log_event(did, ip, None, EVENT_STALE_REQUEST, True)
+                    log_event(did, ip, None, EVENT_REQUEST_STALE, True)
                     debugger.info("%s (%d) is no longer active)", (ip, did))
                     db.cursor.execute("UPDATE request SET active = 0 WHERE rid = ?", (rid,))
                 db.connection.commit()

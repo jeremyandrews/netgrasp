@@ -52,12 +52,12 @@ class Email:
             if alert in netgrasp.ALERT_TYPES:
                 self.alerts.append(alert)
             else:
-                self.debugger.warn("ignoring unrecognized alert type (%s), supported types: %s", (alert, netgrasp.ALERT_TYPES))
+                self.debugger.warning("ignoring unrecognized alert type (%s), supported types: %s", (alert, netgrasp.ALERT_TYPES))
         for digest in digests:
             if digest in netgrasp.DIGEST_TYPES:
                 self.digest.append(digest)
             else:
-                self.debugger.warn("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
+                self.debugger.warning("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
 
     def LoadTemplate(self, template):
         try:
