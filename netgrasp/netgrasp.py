@@ -1171,11 +1171,10 @@ def detect_stale_ips(timeout):
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "detect_stale_ips, activity"):
                 for row in rows:
                     aid, did, iid = row
-                    db.cursor.execute("SELECT ip.address, mac.address FROM ip LEFT JOIN mac ON ip.mid = mac.mid WHERE iid = ? LIMIT 1", (iid,))
+                    db.cursor.execute("SELECT ip.address, mac.mid, mac.address FROM ip LEFT JOIN mac ON ip.mid = mac.mid WHERE iid = ? LIMIT 1", (iid,))
                     address = db.cursor.fetchone()
                     if address:
-                        ip, mac = address
-                        # @TODO: get mid
+                        ip, mid, mac = address
                         log_event(mid, iid, did, rid, EVENT_STALE, True)
                         debugger.info("%s [%s] is no longer active)", (ip, mac))
                     else:
@@ -1190,6 +1189,7 @@ def detect_stale_ips(timeout):
             with exclusive_lock.ExclusiveFileLock(db.lock, 5, "detect_stale_ips, request"):
                 for row in rows:
                     rid, did, ip = row
+                    mid, iid = (None, None)
                     log_event(mid, iid, did, rid, EVENT_REQUEST_STALE, True)
                     debugger.info("%s (%d) is no longer active)", (ip, did))
                     db.cursor.execute("UPDATE request SET active = 0 WHERE rid = ?", (rid,))
