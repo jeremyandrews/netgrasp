@@ -82,7 +82,7 @@ def time_elapsed(elapsed):
             return str(day_diff / 30) + " months"
         return str(day_diff / 365) + " years"
     except Exception as e:
-        debugger.dump_exception("time_elapsed() FIXME")
+        debugger.dump_exception("time_elapsed() caught exception")
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_did(did):
@@ -98,16 +98,13 @@ def name_did(did):
 
         debugger.debug("entering name_did(%s)", (did,))
 
-        db.cursor.execute("SELECT ip.address, mac.address, host.hostname, host.customname, vendor.vendor, vendor.customname FROM device LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?")
-        detail = db.cursor.fetchone()
-        if detail:
-            ip, mac, hostname, custom_hostname, vendor, custom_vendorname = detail
-            if custom_hostname:
-                return custom_hostname
+        details = netgrasp.get_details(did)
+        if details:
+            active, counter, ip, mac, hostname, custom_name, vendor = details
+            if custom_name:
+                return custom_name
             elif hostname and (hostname != "unknown"):
                 return hostname
-            elif custom_vendorname:
-                return custom_vendorname
             elif vendor:
                 return """%s device""" % (vendor)
             else:
@@ -115,7 +112,7 @@ def name_did(did):
         else:
             return None
     except Exception as e:
-        debugger.dump_exception("name_did() FIXME")
+        debugger.dump_exception("name_did() caught exception")
 
 # Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):

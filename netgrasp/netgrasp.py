@@ -158,7 +158,7 @@ def main(*pcap):
             parent_conn.send(HEARTBEAT)
 
             detect_stale_ips(ng.active_timeout)
-            #detect_netscans()
+            detect_netscans()
             #detect_anomalies(ng.active_timeout)
             send_notifications()
             send_email_alerts(ng.active_timeout)
@@ -347,7 +347,7 @@ def ip_has_changed(did):
         #debugger.debug("ips: %s", (ips,))
         if iids and len(iids) == 2:
             db.cursor.execute("SELECT address FROM ip WHERE iid IN(?, ?)", (iids[0], iids[1]))
-            ips = db_cursor.fetchall()
+            ips = db.cursor.fetchall()
             if ips:
                 ip_a = ips[0]
                 ip_b = ips[1]
@@ -469,6 +469,7 @@ def create_database():
                 active NUMERIC
               )
             """)
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_updated ON request (active, updated)")
 
             # Create arplog table.
             db.cursor.execute("""
@@ -900,6 +901,23 @@ def device_request(ip, mac):
     except Exception as e:
         debugger.dump_exception("device_request() caught exception")
 
+def get_mac(ip):
+    try:
+        db = database.database_instance
+        debugger = debug.debugger_instance
+
+        debugger.debug("entering get_mac(%s)", (ip,))
+
+        db.cursor.execute("SELECT ip.address FROM ip LEFT JOIN mac ON ip.mid = mac.mid WHERE mac.address = ?", (mac,))
+        mac = db.cursor.fetchone()
+        if mac:
+            return mac[0]
+        else:
+            return None
+
+    except Exception as e:
+        debugger.dump_exception("get_mac() caught exception")
+
 def get_ids(ip, mac):
     try:
         db = database.database_instance
@@ -964,13 +982,31 @@ def get_ids(ip, mac):
     except Exception as e:
         debugger.dump_exception("get_ids() caught exception")
 
+def get_details(did):
+    try:
+        db = database.database_instance
+        debugger = debug.debugger_instance
+        debugger.debug("entering get_details(%s)", (did,))
+
+        db.cursor.execute("SELECT activity.active, activity.counter, ip.address, mac.address, host.hostname, host.customname, vendor.name FROM activity LEFT JOIN device ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?", (did,))
+        info = db.cursor.fetchone()
+        if info:
+            active, counter, ip, mac, hostname, custom_name, vendor = info
+            return (active, counter, ip, mac, hostname, custom_name, vendor)
+        else:
+            debugger.warning("unknown device %d", (did,))
+            return False
+
+    except Exception as e:
+        debugger.dump_exception("get_details() caught exception")
+
 def first_seen(did):
     try:
         debugger = debug.debugger_instance
         debugger.debug("entering first_seen(did)", (did,))
         db = database.database_instance
 
-        db.cursor.execute("SELECT timestamp FROM activity WHERE did = ? AND timestamp NOT NULL ORDER BY timestamp ASC LIMIT 1", (did,))
+        db.cursor.execute("SELECT created FROM activity WHERE did = ? AND created NOT NULL ORDER BY created ASC LIMIT 1", (did,))
         active = db.cursor.fetchone()
         if active:
             active = active[0]
@@ -988,7 +1024,7 @@ def first_seen_recently(did):
         debugger.debug("entering last_seen_recently(%s)", (did,))
         db = database.database_instance
 
-        db.cursor.execute('SELECT timestamp FROM activity WHERE did = ? AND timestamp NOT NULL ORDER BY timestamp DESC LIMIT 1', (did,))
+        db.cursor.execute('SELECT created FROM activity WHERE did = ? AND created NOT NULL ORDER BY created DESC LIMIT 1', (did,))
         recent = db.cursor.fetchone()
         if recent:
             recent = recent[0]
@@ -1066,7 +1102,7 @@ def time_seen(did):
         debugger.debug("entering time_seen(%s)", (did,))
         db = database.database_instance
 
-        db.cursor.execute('SELECT timestamp, updated FROM activity WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
+        db.cursor.execute('SELECT created, updated FROM activity WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
         active = db.cursor.fetchone()
         if active:
             firstSeen, lastSeen = active
@@ -1083,8 +1119,8 @@ def previous_ip(did):
         db = database.database_instance
 
         previous_ip = None
-        db.cursor.execute("SELECT DISTINCT iid FROM activity WHERE did = ? ORDER BY updated DESC LIMIT 2", (did, ip))
-        ips = db.curosr.fetchall()
+        db.cursor.execute("SELECT DISTINCT iid FROM activity WHERE did = ? ORDER BY updated DESC LIMIT 2", (did,))
+        ips = db.cursor.fetchall()
         if ips and len(ips) == 2:
             db.cursor.execute("SELECT address FROM ip WHERE iid = ?", (ips[1]))
             previous_ip = db.cursor.fetchone()
@@ -1106,10 +1142,17 @@ def devices_with_ip(ip):
         db.cursor.execute("SELECT iid FROM ip WHERE address = ?", (ip,))
         ids = db.cursor.fetchall()
         if ids:
-            db.cursor.execute("SELECT did FROM activity WHERE iid IN ("+ ",".join("?"*len(ids)) + ")", ids)
+            iids = []
+            for iid in ids:
+                iids.append(iid[0])
+            db.cursor.execute("SELECT did FROM activity WHERE iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
+
         if devices:
-            return devices
+            dids = []
+            for device in devices:
+                dids.append(device[0])
+            return dids
         else:
             return None
 
@@ -1123,32 +1166,45 @@ def devices_with_mac(mac):
         db = database.database_instance
 
         devices = None
-        db.cursor.execute("SELECT ip.iid FROM ip LEFT JOIN mac ON mac.mid = ip.mid WHERE mac.address = ?", (mac,))
+        db.cursor.execute("SELECT ip.iid FROM mac LEFT JOIN ip ON mac.mid = ip.mid WHERE mac.address = ?", (mac,))
         ids = db.cursor.fetchall()
         if ids:
-            db.cursor.execute("SELECT did FROM activity WHERE iid IN ("+ ",".join("?"*len(ids)) + ")", ids)
+            iids = []
+            for iid in ids:
+                iids.append(iid[0])
+            db.cursor.execute("SELECT did FROM activity WHERE iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
+
         if devices:
-            return devices
+            dids = []
+            for device in devices:
+                dids.append(device[0])
+            return dids
         else:
             return None
 
     except Exception as e:
         debugger.dump_exception("devices_with_mac() caught exception")
 
-def devices_requesting_ip(ip):
+def devices_requesting_ip(ip, timeout):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering devices_requesting_ip(%s, %s)", (ip,))
         db = database.database_instance
 
-        # @TODO: do we consistently have a did here?
-        db.cursor.execute("SELECT did FROM request WHERE ip = ? AND active = 1 GROUP BY did ORDER BY created DESC", (ip,))
-        devices = db.cursor.fetchall()
-        if devices:
-            return devices
-        else:
-            return None
+        debugger.debug("entering devices_requesting_ip(%s, %s)", (ip, timeout))
+
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
+
+        dids = []
+        db.cursor.execute("SELECT dst_ip FROM arp WHERE src_ip = ? AND rid IS NOT NULL AND timestamp < ? GROUP BY src_ip ORDER BY timestamp DESC", (ip, stale))
+        ips = db.cursor.fetchall()
+        if ips:
+            for dst_ip in ips:
+                dst_mac = get_mac(dst_ip)
+                mid, iid, did = get_ids(dst_ip, dst_mac)
+                dids.append(did)
+
+        return dids
 
     except Exception as e:
         debugger.dump_exception("devices_requesting_ip() caught exception")
@@ -1198,7 +1254,6 @@ def detect_stale_ips(timeout):
     except Exception as e:
         debugger.dump_exception("detect_stale_ips() caught exception")
 
-# @TODO restore funcionality
 def detect_netscans():
     try:
         from utils import exclusive_lock
@@ -1208,19 +1263,21 @@ def detect_netscans():
 
         debugger.debug("entering detect_netscans()")
         now = datetime.datetime.now()
+        minutes_ago = now - datetime.timedelta(minutes=10)
 
-        minutes_ago = now - datetime.timedelta(minutes=5)
-        db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) AS count, did, src_ip, src_mac FROM arp WHERE request=1 AND timestamp>=? GROUP BY did HAVING count > 50", (minutes_ago,))
+        db.cursor.execute("SELECT COUNT(DISTINCT request.rid) AS count, arp.src_ip, arp.src_mac FROM request LEFT JOIN arp ON request.rid = arp.rid WHERE active = 1 GROUP BY arp.src_ip HAVING count > 50")
         scans = db.cursor.fetchall()
         if scans:
+            debugger.debug("scans in progress (count, src ip, src mac): %s", (scans,))
             for scan in scans:
-                count, did = scan
-                db.cursor.execute("SELECT eid FROM event WHERE did = ? AND event = ? AND timestamp > ?", (did, EVENT_SCAN, minutes_ago))
+                count, src_ip, src_mac = scan
+                mid, iid, did = get_ids(src_ip, src_mac)
+                db.cursor.execute("SELECT eid FROM event WHERE did = ? AND type = ? AND timestamp > ?", (did, EVENT_SCAN, minutes_ago))
                 already_detected = db.cursor.fetchone()
                 if not already_detected:
-                    # @TODO load mid, iid
-                    log_event(mid, iid, did, rid, EVENT_SCAN)
-                    debugger.info("Detected network scan by %s [%s]", (src_ip, src_mac))
+                    # logging rid doesn't make sense, as there's 1 rid per IP requested.
+                    log_event(mid, iid, did, None, EVENT_SCAN)
+                    debugger.info("network scan by %s [%s]", (src_ip, src_mac))
 
     except Exception as e:
         debugger.dump_exception("detect_netscans() caught exception")
@@ -1247,12 +1304,12 @@ def detect_anomalies(timeout):
                 details = db.cursor.fetchall()
                 for detail in details:
                     ip, mac, sid, did = detail
-                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
+                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND type=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
                     already_detected = db.cursor.fetchone()
                     if not already_detected or not already_detected[0]:
                         # @TODO load mid, iid, did
                         log_event(mid, iid, did, rid, EVENT_DUPLICATE_IP)
-                        debugger.info("Detected multiple MACs with same IP %s [%s]", (ip, mac))
+                        debugger.info("multiple MACs with same IP %s [%s]", (ip, mac))
 
         # Multiple IPs with the same MAC.
         db.cursor.execute("SELECT COUNT(DISTINCT(ip)) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1 ORDER BY mac DESC", (BROADCAST,))
@@ -1264,11 +1321,11 @@ def detect_anomalies(timeout):
                 details = db.cursor.fetchall()
                 for detail in details:
                     ip, mac, sid, did = detail
-                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND event=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
+                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND type=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
                     already_detected = db.cursor.fetchone()
                     if not already_detected or not already_detected[0]:
                         log_event(mid, iid, did, rid, EVENT_DUPLICATE_MAC)
-                        debugger.info("Detected multiple IPs with same MAC %s [%s]", (ip, mac))
+                        debugger.info("multiple IPs with same MAC %s [%s]", (ip, mac))
     except Exception as e:
         debugger.dump_exception("detect_anomalies() caught exception")
 
@@ -1310,6 +1367,12 @@ def send_notifications():
                     max_eid = eid
 
                 if event in notifier.alerts:
+                    details = get_details(did)
+                    if not details:
+                        debugger.warning("invalid device %d, unable to generate notification")
+                        continue
+                    active, counter, ip, mac, hostname, custom_name, vendor = details
+
                     debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
                     firstSeen = first_seen(did)
                     lastSeen = first_seen_recently(did)
@@ -1389,14 +1452,12 @@ def send_email_alerts(timeout):
                             duplicate_ips.append(ip)
 
                     debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
-                    # get more information about this entry ...
-                    db.cursor.execute("SELECT activity.active, activity.counter, vendor.name, host.hostname, host.customname FROM activity LEFT JOIN vendor ON activity.mid = vendor.mid LEFT JOIN host ON activity.iid = host.iid WHERE activity.did = ? ORDER BY updated DESC LIMIT 1", (did,))
-                    info = db.cursor.fetchone()
-                    if not info:
-                        debugger.warning("Event for ip %s [%s] that we haven't seen", (ip, mac))
+                    details = get_details(did)
+                    if not details:
+                        debugger.warning("invalid device %d, unable to generate alert")
                         continue
+                    active, counter, ip, mac, hostname, custom_name, vendor = details
 
-                    active, counter, vendor, hostname, host_customname = info
                     firstSeen = first_seen(did)
                     firstRequested = first_requested(did)
                     lastSeen = last_seen(did)
@@ -1410,7 +1471,7 @@ def send_email_alerts(timeout):
                     talked_to_html = ""
                     talked_to_count = 0
                     if peers:
-                        db.cursor.execute("SELECT COUNT(DISTINCT rid) FROM arp WHERE src_did = ?", (did,))
+                        db.cursor.execute("SELECT COUNT(DISTINCT rid) FROM arp WHERE did = ?", (did,))
                         peer_count = db.cursor.fetchone()
                         talked_to_count = peer_count[0]
                         for peer in peers:
@@ -1423,18 +1484,16 @@ def send_email_alerts(timeout):
                     devices_with_ip_html = ""
                     if devices:
                         for device in devices:
-                            list_did, list_ip, list_mac = device
-                            devices_with_ip_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_mac)
-                            devices_with_ip_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_mac)
+                            devices_with_ip_text += """\n - %s""" % (pretty.name_did(device))
+                            devices_with_ip_html += """<li>%s</li>""" % (pretty.name_did(device))
 
                     devices = devices_with_mac(mac)
                     devices_with_mac_text = ""
                     devices_with_mac_html = ""
                     if devices:
                         for device in devices:
-                            list_did, list_ip, list_mac = device
-                            devices_with_mac_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
-                            devices_with_mac_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
+                            devices_with_mac_text += """\n - %s""" % (pretty.name_did(device))
+                            devices_with_mac_html += """<li>%s</li>""" % (pretty.name_did(device))
 
                     devices = devices_requesting_ip(ip, timeout)
                     devices_requesting_ip_text = ""
@@ -1452,7 +1511,7 @@ def send_email_alerts(timeout):
                         event_id=eid,
                         vendor=vendor,
                         hostname=hostname,
-                        hostname_custom=host_customname,
+                        custom_name=custom_name,
                         first_seen=pretty.time_ago(firstSeen),
                         last_seen=pretty.time_ago(lastSeen),
                         recently_seen_count=counter,
@@ -1460,7 +1519,7 @@ def send_email_alerts(timeout):
                         previously_seen=pretty.time_ago(previouslySeen),
                         first_requested=pretty.time_ago(firstRequested),
                         last_requested=pretty.time_ago(lastRequested),
-                        previous_ip=previous_ip(did, ip),
+                        previous_ip=previous_ip(did),
                         devices_with_ip_text=devices_with_ip_text,
                         devices_with_ip_html=devices_with_ip_html,
                         devices_with_mac_text=devices_with_mac_text,
