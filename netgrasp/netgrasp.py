@@ -158,7 +158,7 @@ def main(*pcap):
             parent_conn.send(HEARTBEAT)
 
             detect_stale_ips(ng.active_timeout)
-            detect_netscans()
+            detect_netscans(ng.active_timeout)
             #detect_anomalies(ng.active_timeout)
             send_notifications()
             send_email_alerts(ng.active_timeout)
@@ -1254,7 +1254,7 @@ def detect_stale_ips(timeout):
     except Exception as e:
         debugger.dump_exception("detect_stale_ips() caught exception")
 
-def detect_netscans():
+def detect_netscans(timeout):
     try:
         from utils import exclusive_lock
 
@@ -1263,7 +1263,7 @@ def detect_netscans():
 
         debugger.debug("entering detect_netscans()")
         now = datetime.datetime.now()
-        minutes_ago = now - datetime.timedelta(minutes=10)
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout) - datetime.timedelta(minutes=10)
 
         db.cursor.execute("SELECT COUNT(DISTINCT request.rid) AS count, arp.src_ip, arp.src_mac FROM request LEFT JOIN arp ON request.rid = arp.rid WHERE active = 1 GROUP BY arp.src_ip HAVING count > 50")
         scans = db.cursor.fetchall()
@@ -1272,7 +1272,7 @@ def detect_netscans():
             for scan in scans:
                 count, src_ip, src_mac = scan
                 mid, iid, did = get_ids(src_ip, src_mac)
-                db.cursor.execute("SELECT eid FROM event WHERE did = ? AND type = ? AND timestamp > ?", (did, EVENT_SCAN, minutes_ago))
+                db.cursor.execute("SELECT eid FROM event WHERE did = ? AND type = ? AND timestamp > ?", (did, EVENT_SCAN, stale))
                 already_detected = db.cursor.fetchone()
                 if not already_detected:
                     # logging rid doesn't make sense, as there's 1 rid per IP requested.
