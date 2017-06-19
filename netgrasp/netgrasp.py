@@ -159,7 +159,7 @@ def main(*pcap):
 
             detect_stale_ips(ng.active_timeout)
             detect_netscans(ng.active_timeout)
-            #detect_anomalies(ng.active_timeout)
+            detect_anomalies(ng.active_timeout)
             send_notifications()
             send_email_alerts(ng.active_timeout)
             #send_email_digests()
@@ -908,7 +908,7 @@ def get_mac(ip):
 
         debugger.debug("entering get_mac(%s)", (ip,))
 
-        db.cursor.execute("SELECT ip.address FROM ip LEFT JOIN mac ON ip.mid = mac.mid WHERE mac.address = ?", (mac,))
+        db.cursor.execute("SELECT mac.address FROM mac LEFT JOIN ip ON ip.mid = mac.mid WHERE ip.address = ?", (ip,))
         mac = db.cursor.fetchone()
         if mac:
             return mac[0]
@@ -1231,7 +1231,7 @@ def detect_stale_ips(timeout):
                     address = db.cursor.fetchone()
                     if address:
                         ip, mid, mac = address
-                        log_event(mid, iid, did, rid, EVENT_STALE, True)
+                        log_event(mid, iid, did, None, EVENT_STALE, True)
                         debugger.info("%s [%s] is no longer active)", (ip, mac))
                     else:
                         debugger.error("aid(%d) did(%d) is no longer active, no ip/mac found)", (aid, did))
@@ -1282,7 +1282,6 @@ def detect_netscans(timeout):
     except Exception as e:
         debugger.dump_exception("detect_netscans() caught exception")
 
-# @TODO: FIXME
 def detect_anomalies(timeout):
     try:
         from utils import exclusive_lock
@@ -1295,37 +1294,44 @@ def detect_anomalies(timeout):
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
         # Multiple MACs with the same IP.
-        db.cursor.execute("SELECT COUNT(DISTINCT(mac)) as count, ip FROM seen WHERE active = 1 AND mac != ? GROUP BY ip HAVING count > 1 ORDER BY ip DESC", (BROADCAST,))
+        db.cursor.execute("SELECT COUNT(activity.iid) AS count, ip.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE activity.active = 1 GROUP BY activity.iid HAVING count > 1 ORDER BY ip.iid ASC")
         duplicates = db.cursor.fetchall()
+        debugger.debug("duplicate ips: %s", (duplicates,))
         if duplicates:
             for duplicate in duplicates:
                 count, ip = duplicate
-                db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE ip = ? AND active = 1 AND mac != ?", (ip, BROADCAST))
-                details = db.cursor.fetchall()
-                for detail in details:
-                    ip, mac, sid, did = detail
-                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND type=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_IP, stale))
+                db.cursor.execute("SELECT ip.mid, ip.iid, activity.did FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE ip.address = ? AND active = 1", (ip,))
+                dupes = db.cursor.fetchall()
+                debugger.debug("dupes: %s", (dupes,))
+                for dupe in dupes:
+                    mid, iid, did = dupe
+                    db.cursor.execute("SELECT eid FROM event WHERE mid=? AND type=? AND timestamp>?", (mid, EVENT_DUPLICATE_IP, stale))
                     already_detected = db.cursor.fetchone()
-                    if not already_detected or not already_detected[0]:
-                        # @TODO load mid, iid, did
-                        log_event(mid, iid, did, rid, EVENT_DUPLICATE_IP)
-                        debugger.info("multiple MACs with same IP %s [%s]", (ip, mac))
+                    if already_detected:
+                        break
+                    log_event(mid, iid, did, None, EVENT_DUPLICATE_IP)
+                    debugger.info("multiple MACs with same IP: mid=%d, iid=%d", (mid, iid))
 
         # Multiple IPs with the same MAC.
-        db.cursor.execute("SELECT COUNT(DISTINCT(ip)) as count, mac FROM seen WHERE active = 1 AND mac != ? GROUP BY mac HAVING count > 1 ORDER BY mac DESC", (BROADCAST,))
+        db.cursor.execute("SELECT COUNT(ip.mid) AS count, ip.mid FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE activity.active = 1 GROUP BY ip.mid HAVING count > 1 ORDER BY ip.mid ASC")
         duplicates = db.cursor.fetchall()
+        debugger.debug("duplicate macs: %s", (duplicates,))
         if duplicates:
             for duplicate in duplicates:
-                count, mac = duplicate
-                db.cursor.execute("SELECT ip, mac, sid, did FROM seen WHERE mac = ? AND active = 1", (mac,))
-                details = db.cursor.fetchall()
-                for detail in details:
-                    ip, mac, sid, did = detail
-                    db.cursor.execute("SELECT eid FROM event WHERE mac=? AND ip=? AND type=? AND timestamp>?", (mac, ip, EVENT_DUPLICATE_MAC, stale))
+                count, mid = duplicate
+                db.cursor.execute("SELECT ip.mid, ip.iid, activity.did FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE ip.mid = ? AND active = 1", (mid,))
+                dupes = db.cursor.fetchall()
+                debugger.debug("dupes: %s", (dupes,))
+                for dupe in dupes:
+                    mid, iid, did = dupe
+                    db.cursor.execute("SELECT eid FROM event WHERE iid=? AND type=? AND timestamp>?", (iid, EVENT_DUPLICATE_MAC, stale))
                     already_detected = db.cursor.fetchone()
-                    if not already_detected or not already_detected[0]:
-                        log_event(mid, iid, did, rid, EVENT_DUPLICATE_MAC)
-                        debugger.info("multiple IPs with same MAC %s [%s]", (ip, mac))
+                    debugger.debug("already_detected: %s", (already_detected,))
+                    if already_detected:
+                        break
+                    log_event(mid, iid, did, None, EVENT_DUPLICATE_MAC)
+                    debugger.info("multiple IPs with same MAC: mid=%d, iid=%d", (mid, iid))
+
     except Exception as e:
         debugger.dump_exception("detect_anomalies() caught exception")
 
@@ -1426,9 +1432,8 @@ def send_email_alerts(timeout):
             duplicate_macs = []
             duplicate_ips = []
             for row in rows:
-                # @TODO: load mac, ip
                 eid, mid, iid, did, timestamp, event, processed = row
-                #debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
+                debugger.debug("processing event %d for iid[%d] mid[%d] at %s", (eid, iid, mid, timestamp))
 
                 if eid > max_eid:
                     max_eid = eid
@@ -1436,6 +1441,12 @@ def send_email_alerts(timeout):
 
                 # only send emails for configured events
                 if event in emailer.alerts:
+                    details = get_details(did)
+                    if not details:
+                        debugger.warning("invalid device %d, unable to generate alert")
+                        continue
+                    active, counter, ip, mac, hostname, custom_name, vendor = details
+
                     if event == EVENT_DUPLICATE_MAC:
                         if mac in duplicate_macs:
                             debugger.debug("event %s [%d], notification email already sent", (event, eid))
@@ -1452,12 +1463,6 @@ def send_email_alerts(timeout):
                             duplicate_ips.append(ip)
 
                     debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
-                    details = get_details(did)
-                    if not details:
-                        debugger.warning("invalid device %d, unable to generate alert")
-                        continue
-                    active, counter, ip, mac, hostname, custom_name, vendor = details
-
                     firstSeen = first_seen(did)
                     firstRequested = first_requested(did)
                     lastSeen = last_seen(did)
