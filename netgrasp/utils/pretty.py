@@ -85,7 +85,7 @@ def time_elapsed(elapsed):
         debugger.dump_exception("time_elapsed() caught exception")
 
 # Provides a human-friendly name for a mac-ip pair.
-def name_did(did):
+def name_did(did, ip = None):
     try:
         import datetime
 
@@ -109,8 +109,15 @@ def name_did(did):
                 return """%s device""" % (vendor)
             else:
                 return """%s [%s]""" % (ip, mac)
-        else:
-            return None
+
+        # This may be a request for a device we've not yet seen.
+        if ip:
+            hostname = netgrasp.dns_lookup(ip)
+            if hostname:
+                return hostname
+
+        return "Unrecognized device"
+
     except Exception as e:
         debugger.dump_exception("name_did() caught exception")
 

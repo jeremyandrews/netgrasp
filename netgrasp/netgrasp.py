@@ -705,7 +705,7 @@ def received_arp(hdr, data, child_conn):
 
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "received_arp, arp"):
             db.cursor.execute("INSERT INTO arp (did, rid, src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
-            debugger.debug("inserted into arp")
+            debugger.debug("inserted into arp (%s, %s, %s, %s, %s, %s, %s)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
             if src_mac_broadcast:
                 log_event(mid, iid, did, rid, EVENT_SRC_MAC_BROADCAST, True)
             if ip_not_on_network:
@@ -933,7 +933,13 @@ def get_ids(ip, mac):
             else:
                 mid = None
         else:
-            mid = None
+            # Look the MAC up in our arp cache.
+            db.cursor.execute("SELECT mid FROM ip WHERE address = ? ORDER BY created DESC LIMIT 1", (ip,))
+            seen = db.cursor.fetchone()
+            if seen:
+                mid = seen[0]
+            else:
+                mid = None
 
         # Check if we know this IP.
         if mid:
@@ -1470,7 +1476,7 @@ def send_email_alerts(timeout):
                     previouslySeen = previously_seen(did)
                     lastRequested = last_requested(did)
 
-                    db.cursor.execute("SELECT rid, dst_ip, dst_mac FROM arp WHERE did = ? AND timestamp >= ? GROUP BY rid LIMIT ?", (did, day, TALKED_TO_LIMIT))
+                    db.cursor.execute("SELECT dst_ip, dst_mac FROM arp WHERE src_ip = ? AND timestamp >= ? GROUP BY dst_ip LIMIT ?", (ip, day, TALKED_TO_LIMIT))
                     peers = db.cursor.fetchall()
                     talked_to_text = ""
                     talked_to_html = ""
@@ -1478,9 +1484,11 @@ def send_email_alerts(timeout):
                     if peers:
                         talked_to_count = len(peers)
                         for peer in peers:
-                            dst_did, dst_ip, dst_mac = peer
-                            talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did), dst_ip)
-                            talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did), dst_ip)
+                            dst_ip, dst_mac = peer
+                            dst_mid, dst_iid, dst_did = get_ids(dst_ip, dst_mac)
+                            debugger.debug("ip, mac, mid, iid, did: %s, %s, %s, %s, %s", (dst_ip, dst_mac, dst_mid, dst_iid, dst_did))
+                            talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
+                            talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
 
                     devices = devices_with_ip(ip)
                     devices_with_ip_text = ""
