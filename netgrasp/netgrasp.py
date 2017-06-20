@@ -1476,9 +1476,7 @@ def send_email_alerts(timeout):
                     talked_to_html = ""
                     talked_to_count = 0
                     if peers:
-                        db.cursor.execute("SELECT COUNT(DISTINCT rid) FROM arp WHERE did = ?", (did,))
-                        peer_count = db.cursor.fetchone()
-                        talked_to_count = peer_count[0]
+                        talked_to_count = len(peers)
                         for peer in peers:
                             dst_did, dst_ip, dst_mac = peer
                             talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did), dst_ip)
