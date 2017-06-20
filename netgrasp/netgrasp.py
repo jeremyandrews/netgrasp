@@ -1206,8 +1206,8 @@ def devices_requesting_ip(ip, timeout):
         ips = db.cursor.fetchall()
         if ips:
             for dst_ip in ips:
-                dst_mac = get_mac(dst_ip)
-                mid, iid, did = get_ids(dst_ip, dst_mac)
+                dst_mac = get_mac(dst_ip[0])
+                mid, iid, did = get_ids(dst_ip[0], dst_mac)
                 dids.append(did)
 
         return dids
