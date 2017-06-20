@@ -162,7 +162,7 @@ def main(*pcap):
             detect_anomalies(ng.active_timeout)
             send_notifications()
             send_email_alerts(ng.active_timeout)
-            #send_email_digests()
+            send_email_digests()
             #garbage_collection(ng.garbage_collection, ng.oldest_arplog, ng.oldest_event)
 
             ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
@@ -1628,7 +1628,6 @@ def dns_lookup(ip):
     except Exception as e:
         debugger.dump_exception("dns_lookup() caught exception")
 
-# @TODO Restore functionality
 # Generates daily and weekly email digests.
 def send_email_digests():
     try:
@@ -1685,18 +1684,18 @@ def send_email_digests():
 
             if (digest == "daily"):
                 # PROCESSED_DAILY_DIGEST  = 2
-                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND type = 'requested'", (time_period, now))
-                requested = db.cursor.fetchall()
-                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND type = 'seen'", (time_period, now))
+                db.cursor.execute("SELECT COUNT(DISTINCT rid) FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND type = 'requested_ip'", (time_period, now))
+                requested = db.cursor.fetchone()
+                db.cursor.execute("SELECT DISTINCT mid, iid, did FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND type = 'seen_device'", (time_period, now))
                 seen = db.cursor.fetchall()
             elif (digest == "weekly"):
                 # PROCESSED_WEEKLY_DIGEST = 4
-                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND type = 'requested'", (time_period, now))
-                requested = db.cursor.fetchall()
-                db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND type = 'seen'", (time_period, now))
+                db.cursor.execute("SELECT COUNT(DISTINCT rid) FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND type = 'requested_ip'", (time_period, now))
+                requested = db.cursor.fetchone()
+                db.cursor.execute("SELECT DISTINCT mid, iid, did FROM event WHERE NOT (processed & 4) AND timestamp>=? AND timestamp<=? AND type = 'seen_device'", (time_period, now))
                 seen = db.cursor.fetchall()
 
-            db.cursor.execute("SELECT DISTINCT did, mac, ip FROM event WHERE timestamp>=? AND timestamp<=? AND type = 'seen'", (previous_time_period, time_period))
+            db.cursor.execute("SELECT DISTINCT mid, iid, did FROM event WHERE timestamp>=? AND timestamp<=? AND type = 'seen_device'", (previous_time_period, time_period))
             seen_previous = db.cursor.fetchall()
 
             new = set(seen) - set(seen_previous)
@@ -1707,8 +1706,14 @@ def send_email_digests():
             active_devices_text = ""
             active_devices_html = ""
             for unique_seen in seen:
-                did, mac, ip = unique_seen
-                db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arp WHERE request=1 AND src_ip=? AND timestamp>=? AND timestamp <=?", (ip, time_period, now))
+                mid, iid, did = unique_seen
+                details = get_details(did)
+                if not details:
+                    debugger.warning("invalid device %d, not included in digest")
+                    continue
+                active, counter, ip, mac, hostname, custom_name, vendor = details
+
+                db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arp WHERE rid IS NOT NULL AND src_ip = ? AND timestamp >= ? AND timestamp <= ?", (ip, time_period, now))
                 requests = db.cursor.fetchone()
                 if (requests[0] > 10):
                     noisy.append((mac, ip, requests[0], pretty.name_did(did)))
@@ -1754,7 +1759,7 @@ def send_email_digests():
                     lower = now - datetime.timedelta(hours=range)
                     range = range - 1
                     upper = now - datetime.timedelta(hours=range)
-                    db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE type = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                    db.cursor.execute("SELECT DISTINCT event.did FROM event WHERE event.type = 'seen_ip' AND event.timestamp >= ? AND event.timestamp <? ", (lower, upper))
                     distinct = db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
                     device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%I %p, %x"), len(distinct))
@@ -1764,21 +1769,21 @@ def send_email_digests():
                     lower = now - datetime.timedelta(days=range)
                     range = range - 1
                     upper = now - datetime.timedelta(days=range)
-                    db.cursor.execute("SELECT DISTINCT mac, ip FROM event WHERE type = 'seen' AND timestamp>=? AND timestamp<?", (lower, upper))
+                    db.cursor.execute("SELECT DISTINCT event.did FROM event WHERE event.type = 'seen_ip' AND event.timestamp >= ? AND event.timestamp <? ", (lower, upper))
                     distinct = db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
                     device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%A, %x"), len(distinct))
 
             if (digest == "daily"):
-                db.cursor.execute("SELECT MAX(eid) FROM event WHERE timestamp<=? AND NOT (processed & 2)", (now,))
+                db.cursor.execute("SELECT MAX(eid) FROM event WHERE timestamp <= ? AND NOT (processed & 2)", (now,))
                 processed_type = PROCESSED_DAILY_DIGEST
             elif (digest == "weekly"):
-                db.cursor.execute("SELECT MAX(eid) FROM type WHERE timestamp<=? AND NOT (processed & 4)", (now,))
+                db.cursor.execute("SELECT MAX(eid) FROM event WHERE timestamp <= ? AND NOT (processed & 4)", (now,))
                 processed_type = PROCESSED_WEEKLY_DIGEST
             max_eid = db.cursor.fetchone()
             if max_eid and max_eid[0]:
                 with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_email_digests"):
-                    db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (processed_type, max_eid[0], processed_type))
+                    db.cursor.execute("UPDATE event SET processed = processed + ? WHERE eid <= ? AND NOT (processed & ?)", (processed_type, max_eid[0], processed_type))
 
                     db.connection.commit()
 
@@ -1791,7 +1796,7 @@ def send_email_digests():
                 active_devices_text=active_devices_text,
                 active_devices_html=active_devices_html,
                 new_devices_text=new_devices_text,
-                ips_requested=len(requested),
+                ips_requested=requested[0],
                 noisy_devices_intro=noisy_devices_intro,
                 noisy_devices_text=noisy_devices_text,
                 noisy_devices_html=noisy_devices_html,
