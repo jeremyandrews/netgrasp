@@ -1,0 +1,7 @@
+{
+    "subject": "[netgrasp] not requested recently: ${name}",
+    "body": {
+        "html": "<html><body><p>The following device has not been requested recently on your network:</p><ul><li>${name}</li><li>ip: ${ip} [${mac}]</li><li>last seen: ${last_seen}</li><li>seen ${recently_seen_count} times in ${time_seen}</li><li>first seen: ${first_seen}</li></ul><p>In the past 24 hours, this device talked to ${talked_to_count} devices:<ul>${talked_to_list_html}</ul></p></body></html>",
+        "text": "The following device has not been requested recently on your network:\n - ${name}\n - ip: ${ip} [${mac}]\n - last seen: ${last_seen}\n - seen ${recently_seen_count} times in ${time_seen}\n - first seen: ${first_seen}\n\nIn the past 24 hours, this device talked to ${talked_to_count} devices:\n${talked_to_list_text}\n"
+    }
+}
