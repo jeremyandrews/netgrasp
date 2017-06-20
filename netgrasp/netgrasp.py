@@ -140,7 +140,7 @@ def main(*pcap):
     email.email_instance = email.Email(ng.config, ng.debugger)
 
     ng.garbage_collection = ng.config.GetBoolean("Database", "gcenabled", True, False)
-    ng.oldest_arplog = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_arplog", 60 * 60 * 24 * 7 * 2, False))
+    ng.oldest_arp = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_arp", 60 * 60 * 24 * 7 * 2, False))
     ng.oldest_event = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_event", 60 * 60 * 24 * 7 * 2, False))
 
     if child.is_alive():
@@ -163,7 +163,7 @@ def main(*pcap):
             send_notifications()
             send_email_alerts(ng.active_timeout)
             send_email_digests()
-            #garbage_collection(ng.garbage_collection, ng.oldest_arplog, ng.oldest_event)
+            garbage_collection(ng.garbage_collection, ng.oldest_arp, ng.oldest_event)
 
             ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
             time.sleep(ng.delay)
@@ -471,7 +471,7 @@ def create_database():
             """)
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_updated ON request (active, updated)")
 
-            # Create arplog table.
+            # Create arp table.
             db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS arp(
                 aid INTEGER PRIMARY KEY,
@@ -1815,8 +1815,8 @@ def send_email_digests():
     except Exception as e:
         debugger.dump_exception("send_email_digests() caught exception")
 
-# @TODO Restore functionality
-def garbage_collection(enabled, oldest_arplog, oldest_event):
+# Don't let the arp or event tables grow too big.
+def garbage_collection(enabled, oldest_arp, oldest_event):
     try:
         from utils import exclusive_lock
 
@@ -1847,17 +1847,17 @@ def garbage_collection(enabled, oldest_arplog, oldest_event):
         db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
         with exclusive_lock.ExclusiveFileLock(db.lock, 5, "garbage_collection"):
-            # Purge old arplog entries.
-            db.cursor.execute("SELECT COUNT(*) FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
-            arplog_count = db.cursor.fetchone()
-            db.cursor.execute("DELETE FROM arplog WHERE timestamp < ?", (now - oldest_arplog,))
+            # Purge old arp entries.
+            db.cursor.execute("SELECT COUNT(*) FROM arp WHERE timestamp < ?", (now - oldest_arp,))
+            arp_count = db.cursor.fetchone()
+            db.cursor.execute("DELETE FROM arp WHERE timestamp < ?", (now - oldest_arp,))
             # Purge old event entries.
             db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (now - oldest_event,))
             event_count = db.cursor.fetchone()
             db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (now - oldest_event,))
             db.connection.commit()
 
-        debugger.debug("deleted %d arplog entries older than %s", (arplog_count[0], now - oldest_arplog))
+        debugger.debug("deleted %d arp entries older than %s", (arp_count[0], now - oldest_arp))
         debugger.debug("deleted %d event entries older than %s", (event_count[0], now - oldest_event))
     except Exception as e:
         debugger.dump_exception("garbage_collection() caught exception")
