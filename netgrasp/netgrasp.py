@@ -104,6 +104,9 @@ def main(*pcap):
     # At this point we should no longer have/need root privileges.
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
+    email.email_instance = email.Email(ng.config, ng.debugger)
+    notify.notify_instance = notify.Notify(ng.debugger, ng.config)
+
     ng.debugger.info("initiating wiretap process")
     parent_conn, child_conn = multiprocessing.Pipe()
     child = multiprocessing.Process(name="wiretap", target=wiretap, args=[ng.pcap_instance, child_conn])
@@ -136,8 +139,6 @@ def main(*pcap):
         ng.delay = 30
     elif (ng.delay < 1):
         ng.delay = 1
-
-    email.email_instance = email.Email(ng.config, ng.debugger)
 
     ng.garbage_collection = ng.config.GetBoolean("Database", "gcenabled", True, False)
     ng.oldest_arp = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_arp", 60 * 60 * 24 * 7 * 2, False))
@@ -302,14 +303,22 @@ def log_event(mid, iid, did, rid, event, have_lock = False):
     try:
         db = database.database_instance
         debugger = debug.debugger_instance
+        emailer = email.email_instance
+        notifier = notify.notify_instance
+
         debugger.debug("entering log_event(%s, %s, %s, %s, %s, %s)", (mid, iid, did, rid, event, have_lock))
 
-        if have_lock:
-            _log_event(mid, iid, did, rid, event)
-        else:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "log_event, " + event):
+        # Only log events for which there are subscribers.
+        if (emailer and emailer.enabled and emailer.alerts and event in emailer.alerts) or (notifier and notifier.enabled and notifier.alerts and event in notifier.alerts):
+            if have_lock:
                 _log_event(mid, iid, did, rid, event)
-                db.connection.commit()
+            else:
+                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "log_event, " + event):
+                    _log_event(mid, iid, did, rid, event)
+                    db.connection.commit()
+        else:
+            debugger.debug("log_event: ignoring %s event, no subscribers", (event,))
+
     except Exception as e:
         debugger.dump_exception("log_event() caught exception")
 
@@ -1938,8 +1947,6 @@ def start():
             ng.debugger.error("fatal exception: %s", (e,))
             ng.debugger.critical("failed to import daemonize (as user %s), try 'pip install daemonize', exiting", (ng.debugger.whoami()))
         ng.debugger.info("successfuly imported daemonize")
-
-    notify.notify_instance = notify.Notify(ng.debugger, ng.config)
 
     ng.database_filename = ng.config.GetText('Database', 'filename')
 
