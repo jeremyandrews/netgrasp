@@ -20,7 +20,7 @@ netgrasp_instance = None
 
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
-ALERT_TYPES = ['requested_ip', 'first_requested_ip', 'first_requested_ip_recently', 'seen_device', 'first_seen_device', 'first_seen_device_recently', 'seen_mac', 'first_seen_mac', 'seen_ip', 'first_seen_ip', 'seen_host', 'first_seen_host', 'seen_vendor', 'first_seen_vendor', 'device_stale', 'request_stale', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'network_scan', 'ip_not_on_network', 'mac_broadcast', 'requested_self']
+ALERT_TYPES = ['requested_ip', 'first_requested_ip', 'first_requested_ip_recently', 'seen_device', 'first_seen_device', 'first_seen_device_recently', 'seen_mac', 'first_seen_mac', 'seen_ip', 'first_seen_ip', 'seen_host', 'first_seen_host', 'seen_vendor', 'first_seen_vendor', 'device_stale', 'request_stale', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast', 'requested_self']
 
 EVENT_REQUEST_IP, EVENT_FIRST_REQUEST_IP, EVENT_FIRST_REQUEST_RECENTLY_IP, EVENT_SEEN_DEVICE, EVENT_FIRST_SEEN_DEVICE, EVENT_FIRST_SEEN_DEVICE_RECENTLY, EVENT_SEEN_MAC, EVENT_FIRST_SEEN_MAC, EVENT_SEEN_IP, EVENT_FIRST_SEEN_IP, EVENT_SEEN_HOST, EVENT_FIRST_SEEN_HOST, EVENT_SEEN_VENDOR, EVENT_FIRST_SEEN_VENDOR, EVENT_STALE, EVENT_REQUEST_STALE, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_SCAN, EVENT_IP_NOT_ON_NETWORK, EVENT_SRC_MAC_BROADCAST, EVENT_REQUESTED_SELF = ALERT_TYPES
 
