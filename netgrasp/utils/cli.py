@@ -97,23 +97,23 @@ def list(ng):
 
     if ng.args.type == "device":
         # List devices.
-        query = database.SelectQueryBuilder("seen", ng.debugger, ng.args.verbose)
+        query = database.SelectQueryBuilder("activity", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.did")
-        query.db_select("{%BASE}.mac")
-        query.db_select("{%BASE}.ip")
-        query.db_select("{%BASE}.lastSeen")
+        query.db_select("mac.address")
+        query.db_select("ip.address")
+        query.db_select("{%BASE}.updated")
 
         if ng.args.all:
             description = "All devices"
         else:
             description = "Active devices"
             query.db_where("{%BASE}.active = ?", 1)
-        query.db_where("{%BASE}.lastSeen IS NOT NULL")
+        query.db_where("{%BASE}.updated IS NOT NULL")
 
         if (not ng.args.all or ng.args.all == 1):
             query.db_group("{%BASE}.did")
 
-        query.db_order("{%BASE}.lastSeen DESC")
+        query.db_order("{%BASE}.updated DESC")
 
         rowFormat = "{:>16}{:>34}{:>22}"
         header = ["IP", "Name", "Last seen"]
@@ -122,13 +122,15 @@ def list(ng):
         # List events.
         query = database.SelectQueryBuilder("event", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.did")
-        query.db_select("{%BASE}.mac")
-        query.db_select("{%BASE}.ip")
+        query.db_select("mac.address")
+        query.db_select("ip.address")
         query.db_select("{%BASE}.timestamp")
-        query.db_select("{%BASE}.event")
+        query.db_select("{%BASE}.type")
 
         if ng.args.all:
             description = "All alerts"
+            # @TODO: this is a bogus WHERE, get rid of altogether
+            query.db_where("{%BASE}.timestamp >= ?", 1)
         else:
             description = "Recent alerts"
             ng.active_timeout = ng.config.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
@@ -137,35 +139,33 @@ def list(ng):
 
         if (not ng.args.all or ng.args.all == 1):
             query.db_group("{%BASE}.did")
-            query.db_group("{%BASE}.event")
+            query.db_group("{%BASE}.type")
 
         query.db_order("{%BASE}.timestamp DESC")
 
         rowFormat = "{:>16}{:>24}{:>21}{:>18}"
         header = ["IP", "Name", "Event", "Last seen"]
 
+    query.db_leftjoin("device", "{%BASE}.did = device.did")
+    query.db_leftjoin("ip", "{%BASE}.iid = ip.iid")
+    query.db_leftjoin("mac", "device.mid = mac.mid")
+
     if ng.args.mac:
-        query.db_where("{%BASE}.mac LIKE ?", "%"+ng.args.mac+"%")
-        if not ng.args.mac == netgrasp.BROADCAST:
-            query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
-    else:
-        query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
+        query.db_where("mac.address LIKE ?", "%"+ng.args.mac+"%")
 
     if ng.args.ip:
-        query.db_where("{%BASE}.ip LIKE ?", "%"+ng.args.ip+"%")
+        query.db_where("ip.address LIKE ?", "%"+ng.args.ip+"%")
 
     if ng.args.vendor:
-        query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-        query.db_where("vendor.vendor LIKE ?", "%"+ng.args.vendor+"%")
+        query.db_leftjoin("vendor", "device.vid = vendor.vid")
+        query.db_where("vendor.name LIKE ?", "%"+ng.args.vendor+"%")
 
-    if ng.args.hostname:
-        query.db_leftjoin("host", "{%BASE}.did = host.did")
-        query.db_where("host.hostname LIKE ?", "%"+ng.args.hostname+"%")
-
-    if ng.args.custom:
-        query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-        query.db_leftjoin("host", "{%BASE}.did = host.did")
-        query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+ng.args.custom+"%", "%"+ng.args.custom+"%"], True)
+    if ng.args.hostname or ng.args.custom:
+        query.db_leftjoin("host", "device.hid = host.hid")
+        if ng.args.hostname:
+            query.db_where("host.hostname LIKE ?", "%"+ng.args.hostname+"%")
+        else:
+            query.db_where("host.customname LIKE ?", "%"+ng.args.custom+"%")
 
     ng.db.cursor.execute(query.db_query(), query.db_args())
     rows = ng.db.cursor.fetchall()
