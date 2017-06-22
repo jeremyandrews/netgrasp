@@ -408,6 +408,8 @@ def create_database():
                 value TEXT
               )
             """)
+            # @TODO make this dynamic, define globally netgrasp and schema versions
+            db.cursor.execute("INSERT OR IGNORE INTO state (key, value) VALUES('schema_version', 1)")
 
             # Record of all MAC addresses ever actively seen.
             db.cursor.execute("""

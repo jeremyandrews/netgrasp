@@ -26,14 +26,15 @@ def update_1():
 
     debugger.warning(" running update_1 ...")
 
-    tables = ["event", "vendor", "host", "state", "arplog", "seen"]
+    # redo all tables except for state
+    tables = ["event", "vendor", "host", "arplog", "seen"]
     with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_1: backup tables"):
         for table in tables:
             table_orig = "orig_"+table
             db.cursor.execute("ALTER TABLE %s RENAME TO %s" % (table, table_orig))
             db.connection.commit()
 
-    # Create new schema.
+    # create new schema
     netgrasp.create_database()
 
     db.cursor.execute("SELECT DISTINCT orig_seen.mac, orig_seen.ip FROM orig_seen WHERE orig_seen.mac != 'ff:ff:ff:ff:ff:ff'")
@@ -121,5 +122,13 @@ def update_1():
         debugger.warning("  update_1: migrated %d request records", (migrated,))
         db.connection.commit()
 
-    # @TODO - arplog? : used in digests (past two weeks) and alerts (past 24 hours)
+    # not copying arplog : daily/weekly digests will be inaccurate for 2 days/ 2 weeks
     # not copying events : not necessary
+    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_1: cleanup"):
+        db.cursor.execute("DROP TABLE orig_event")
+        db.cursor.execute("DROP TABLE orig_vendor")
+        db.cursor.execute("DROP TABLE orig_host")
+        db.cursor.execute("DROP TABLE orig_arplog")
+        db.cursor.execute("DROP TABLE orig_seen")
+        db.connection.commit()
+    debugger.warning("  update_1: finished")
