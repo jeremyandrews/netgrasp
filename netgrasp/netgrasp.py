@@ -85,8 +85,10 @@ MAXSECONDS = 2
 
 # This is our main program loop.
 def main(*pcap):
-    import netgrasp
     import multiprocessing
+
+    import netgrasp
+    from update import update
 
     ng = netgrasp.netgrasp_instance
 
@@ -130,8 +132,17 @@ def main(*pcap):
     # http://www.sqlite.org/wal.html
     ng.db.cursor.execute("PRAGMA journal_mode=WAL")
 
+    ng.db.cursor.execute("SELECT value FROM state WHERE key = 'schema_version'")
+    schema_version = ng.db.cursor.fetchone()
+    if schema_version:
+        version = schema_version[0]
+    else:
+        version = 0
+
+    if update.needed(version):
+        ng.debugger.critical("schema updates are required, run 'netgrasp update'")
+
     create_database()
-    #update_database()
 
     ng.active_timeout = ng.config.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
     ng.delay = ng.config.GetInt("Listen", "delay", 15, False)
@@ -409,6 +420,16 @@ def create_database():
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_address ON mac (address)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_vid ON mac (vid)")
+
+            # Record of all vendors ever actively seen.
+            db.cursor.execute("""
+              CREATE TABLE IF NOT EXISTS vendor(
+                vid INTEGER PRIMARY KEY,
+                name VARCHAR UNIQUE,
+                created TIMESTAMP
+              )
+            """)
 
             # Record of all IP addresses ever actively seen.
             db.cursor.execute("""
@@ -426,13 +447,16 @@ def create_database():
               CREATE TABLE IF NOT EXISTS host(
                 hid INTEGER PRIMARY KEY,
                 iid INTEGER,
-                hostname TEXT,
-                customname TEXT,
+                name TEXT,
+                custom_name TEXT,
 		created TIMESTAMP,
 		updated TIMESTAMP
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_iid ON host (iid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_name ON host (name)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_custom ON host (customname)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON host (updated)")
 
             # Record of all devices ever actively seen.
             db.cursor.execute("""
@@ -447,6 +471,9 @@ def create_database():
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mid_iid ON device (mid, iid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_hid ON device (hid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_vid ON device (vid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON device (updated)")
 
             # Record of device activity.
             db.cursor.execute("""
@@ -463,6 +490,8 @@ def create_database():
               )
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_did_iid ON device (did, iid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON activity (updated)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active ON activity (active)")
 
             # Record of all IP addresses ever requested.
             db.cursor.execute("""
@@ -479,6 +508,8 @@ def create_database():
               )
             """)
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_updated ON request (active, updated)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON request (updated)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active ON request (active)")
 
             # Create arp table.
             db.cursor.execute("""
@@ -495,7 +526,7 @@ def create_database():
                 timestamp TIMESTAMP
               )
             """)
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_request ON arp (src_ip, timestamp, request)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_rid ON arp (src_ip, timestamp, rid)")
             #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcmac_timestamp ON arp (src_mac, timestamp)")
             #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_dstdid_srcdid_timestamp ON arp (dst_did, src_did, timestamp)")
 
@@ -518,146 +549,9 @@ def create_database():
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_processed ON event (timestamp, processed)")
             # PRAGMA index_list(event)
 
-            # Create vendor table.
-            db.cursor.execute("""
-              CREATE TABLE IF NOT EXISTS vendor(
-                vid INTEGER PRIMARY KEY,
-                name VARCHAR UNIQUE,
-                created TIMESTAMP
-              )
-            """)
-
-            ## Create host table.
-            #db.cursor.execute("""
-            #  CREATE TABLE IF NOT EXISTS host(
-            #    hid INTEGER PRIMARY KEY,
-            #    did INTEGER,
-            #    mac TEXT,
-            #    ip TEXT,
-            #    timestamp TIMESTAMP,
-            #    hostname TEXT,
-            #    customname TEXT
-            #  )
-            #""")
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_mac ON host (ip, mac)")
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_mac_hostname ON host (mac, hostname)")
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_hostname ON host (did, hostname)")
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_customname ON host (did, customname)")
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_did_hid ON host (did, hid)")
             db.connection.commit()
     except Exception as e:
         debugger.dump_exception("create_database() caught exception")
-
-def update_database():
-    try:
-        from utils import exclusive_lock
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        # Update #1: add did column to seen table, populate
-        try:
-            db.cursor.execute("SELECT did FROM seen LIMIT 1")
-        except Exception as e:
-            debugger.debug("%s", (e,))
-            debugger.info("applying update #1 to database: adding did column to seen, populating")
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
-                db.cursor.execute("ALTER TABLE seen ADD COLUMN did INTEGER")
-                # Prior to this we assumed a new IP was a new device.
-                db.cursor.execute("SELECT DISTINCT ip, mac FROM seen")
-                rows = db.cursor.fetchall()
-                did = 1
-                for row in rows:
-                    ip, mac = row
-                    db.cursor.execute("UPDATE seen SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
-                    did += 1
-                db.connection.commit()
-
-        # Update #2: add did column to host table, populate
-        try:
-            db.cursor.execute("SELECT did FROM host LIMIT 1")
-        except Exception as e:
-            debugger.debug("%s", (e,))
-            debugger.info("applying update #2 to database: adding did column to host, populating")
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
-                db.cursor.execute("ALTER TABLE host ADD COLUMN did INTEGER")
-                # Use did to match devices when their IP changes.
-                # This was a bad update; it gets fixed properly in #4
-                db.connection.commit()
-
-        # Update #3: add did column to event table, populate
-        try:
-            db.cursor.execute("SELECT did FROM event LIMIT 1")
-        except Exception as e:
-            debugger.debug("%s", (e,))
-            debugger.info("applying update #3 to database: adding did column to event, populating")
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
-                db.cursor.execute("ALTER TABLE event ADD COLUMN did INTEGER")
-                # Use did to match devices when their IP changes.
-                db.cursor.execute("SELECT DISTINCT did, ip, mac FROM seen")
-                rows = db.cursor.fetchall()
-                for row in rows:
-                    did, ip, mac = row
-                    db.cursor.execute("UPDATE event SET did = ? WHERE ip = ? AND mac = ?", (did, ip, mac))
-                db.connection.commit()
-
-            db.cursor.execute("SELECT COUNT(did) FROM event WHERE did IS NOT NULL;")
-            count_did = db.cursor.fetchone()
-            db.cursor.execute("SELECT COUNT(did) FROM event WHERE did IS NULL;")
-            count_nodid = db.cursor.fetchone()
-            if count_did and count_nodid:
-                debugger.info("Updated event table, set ? dids, did not set ? dids", (count_did[0], count_nodid[0]))
-            else:
-                debugger.error("Failed to update event table")
-
-        # Update #4: add src_did, dst_did columns to arp table, populate
-        try:
-            db.cursor.execute("SELECT did FROM arplog LIMIT 1")
-        except Exception as e:
-            debugger.debug("%s", (e,))
-            debugger.info("applying update #4 to database: adding src_did, dst_did columns to arplog, populating")
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
-                db.cursor.execute("ALTER TABLE arplog ADD COLUMN src_did INTEGER")
-                db.cursor.execute("ALTER TABLE arplog ADD COLUMN dst_did INTEGER")
-
-                # Populate src_did.
-                db.cursor.execute("SELECT src_ip, src_mac FROM arplog GROUP BY src_ip, src_mac")
-                rows = db.cursor.fetchall()
-                for row in rows:
-                    ip, mac = row
-                    did = get_did(ip, mac)
-                    db.cursor.execute("UPDATE arplog SET src_did = ? WHERE src_ip = ? AND src_mac = ?", (did, ip, mac))
-                debugger.info("Populated arplog.src_did.")
-
-                # Populate dst_did.
-                db.cursor.execute("SELECT dst_ip, dst_mac FROM arplog GROUP BY dst_ip, dst_mac")
-                rows = db.cursor.fetchall()
-                for row in rows:
-                    ip, mac = row
-                    did = get_did(ip, mac)
-                    db.cursor.execute("UPDATE arplog SET dst_did = ? WHERE dst_ip = ? AND dst_mac = ?", (did, ip, mac))
-                debugger.info("Populated arplog.dst_did.")
-
-                # Fix host table.
-                db.cursor.execute("SELECT hid, ip, mac FROM host");
-                hosts = db.cursor.fetchall()
-                if hosts:
-                    for host in hosts:
-                        hid, ip, mac = host
-                        db.cursor.execute("UPDATE host SET did = ? WHERE hid = ?", (get_did(ip, mac), hid))
-
-                db.connection.commit()
-
-        # Update #5: add timestamp column to host table
-        try:
-            db.cursor.execute("SELECT timestamp FROM host LIMIT 1")
-        except Exception as e:
-            debugger.debug("%s", (e,))
-            debugger.info("applying update #5 to database: adding timestamp column to host")
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_database"):
-                db.cursor.execute("ALTER TABLE host ADD COLUMN timestamp TIMESTAMP")
-
-    except Exception as e:
-        debugger.dump_exception("update_database() caught exception")
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
@@ -786,21 +680,21 @@ def device_seen(ip, mac):
             debugger.info("new ip %s [%d]", (ip, iid))
 
         # Get ID for Hostname, creating if necessary.
-        db.cursor.execute("SELECT host.hid, host.hostname, host.customname FROM host WHERE host.iid = ?", (iid,))
+        db.cursor.execute("SELECT host.hid, host.name, host.custom_name FROM host WHERE host.iid = ?", (iid,))
         seen = db.cursor.fetchone()
         if seen:
-            hid, hostname, customname = seen
-            debugger.debug("existing host %s (%s) [%d]", (hostname, customname, hid))
+            hid, host_name, custom_name = seen
+            debugger.debug("existing host %s (%s) [%d]", (host_name, custom_name, hid))
             seen_host = True
         else:
-            hostname = dns_lookup(ip)
+            host_name = dns_lookup(ip)
             with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new host"):
-                db.cursor.execute("INSERT INTO host (iid, hostname, customname, created, updated) VALUES(?, ?, ?, ?, ?)", (iid, hostname, None, now, now))
+                db.cursor.execute("INSERT INTO host (iid, name, custom_name, created, updated) VALUES(?, ?, ?, ?, ?)", (iid, host_name, None, now, now))
 
                 db.connection.commit()
             first_seen_host = True
             hid = db.cursor.lastrowid
-            debugger.info("new hostname %s [%d]", (hostname, hid))
+            debugger.info("new hostname %s [%d]", (host_name, hid))
 
         # Get ID for Device, creating if necessary.
         db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, iid))
@@ -963,10 +857,10 @@ def get_ids(ip, mac):
 
         # Check if we know this Host.
         if iid:
-            db.cursor.execute("SELECT host.hid, host.hostname, host.customname FROM host WHERE host.iid = ?", (iid,))
+            db.cursor.execute("SELECT host.hid, host.name, host.custom_name FROM host WHERE host.iid = ?", (iid,))
             seen = db.cursor.fetchone()
             if seen:
-                hid, hostname, customname = seen
+                hid, host_name, custom_name = seen
             else:
                 hid = None
         else:
@@ -1003,11 +897,11 @@ def get_details(did):
         debugger = debug.debugger_instance
         debugger.debug("entering get_details(%s)", (did,))
 
-        db.cursor.execute("SELECT activity.active, activity.counter, ip.address, mac.address, host.hostname, host.customname, vendor.name FROM activity LEFT JOIN device ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?", (did,))
+        db.cursor.execute("SELECT activity.active, activity.counter, ip.address, mac.address, host.name, host.custom_name, vendor.name FROM activity LEFT JOIN device ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?", (did,))
         info = db.cursor.fetchone()
         if info:
-            active, counter, ip, mac, hostname, custom_name, vendor = info
-            return (active, counter, ip, mac, hostname, custom_name, vendor)
+            active, counter, ip, mac, host_name, custom_name, vendor = info
+            return (active, counter, ip, mac, host_name, custom_name, vendor)
         else:
             debugger.warning("unknown device %d", (did,))
             return False
@@ -1392,7 +1286,7 @@ def send_notifications():
                     if not details:
                         debugger.warning("invalid device %d, unable to generate notification")
                         continue
-                    active, counter, ip, mac, hostname, custom_name, vendor = details
+                    active, counter, ip, mac, host_name, custom_name, vendor = details
 
                     debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
                     firstSeen = first_seen(did)
@@ -1460,7 +1354,7 @@ def send_email_alerts(timeout):
                     if not details:
                         debugger.warning("invalid device %d, unable to generate alert")
                         continue
-                    active, counter, ip, mac, hostname, custom_name, vendor = details
+                    active, counter, ip, mac, host_name, custom_name, vendor = details
 
                     if event == EVENT_DUPLICATE_MAC:
                         if mac in duplicate_macs:
@@ -1530,7 +1424,7 @@ def send_email_alerts(timeout):
                         mac=mac,
                         event_id=eid,
                         vendor=vendor,
-                        hostname=hostname,
+                        hostname=host_name,
                         custom_name=custom_name,
                         first_seen=pretty.time_ago(firstSeen),
                         last_seen=pretty.time_ago(lastSeen),
@@ -1632,13 +1526,13 @@ def dns_lookup(ip):
         debugger.debug("entering dns_lookup(%s)", (ip,))
         try:
             hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
-            debugger.debug("hostname(%s), aliaslist(%s), ipaddrlist(%s)", (hostname, aliaslist, ipaddrlist))
-            return hostname
+            debugger.debug("host_name(%s), aliaslist(%s), ipaddrlist(%s)", (host_name, aliaslist, ipaddrlist))
+            return host_name
 
         except Exception as e:
-            hostname = "unknown"
-            debugger.debug("dns_lookup() socket.gethostbyaddr(%s) failed, hostname = %s: %s", (ip, hostname, e))
-            return hostname
+            host_name = "unknown"
+            debugger.debug("dns_lookup() socket.gethostbyaddr(%s) failed, host_name = %s: %s", (ip, host_name, e))
+            return host_name
 
     except Exception as e:
         debugger.dump_exception("dns_lookup() caught exception")
@@ -1726,7 +1620,7 @@ def send_email_digests():
                 if not details:
                     debugger.warning("invalid device %d, not included in digest")
                     continue
-                active, counter, ip, mac, hostname, custom_name, vendor = details
+                active, counter, ip, mac, host_name, custom_name, vendor = details
 
                 db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arp WHERE rid IS NOT NULL AND src_ip = ? AND timestamp >= ? AND timestamp <= ?", (ip, time_period, now))
                 requests = db.cursor.fetchone()

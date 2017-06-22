@@ -103,9 +103,9 @@ def update(ng):
 
     updates = update.needed(version)
     if updates:
-        ng.debugger.warning("Schema updates required: %s", (updates,))
+        ng.debugger.warning("schema updates required: %s", (updates,))
     else:
-        ng.debugger.critical("No schema updates are required.")
+        ng.debugger.critical("no schema updates are required.")
 
     pid = ng.is_running()
     if pid:
@@ -209,9 +209,9 @@ def list(ng):
     if ng.args.hostname or ng.args.custom:
         query.db_leftjoin("host", "device.hid = host.hid")
         if ng.args.hostname:
-            query.db_where("host.hostname LIKE ?", "%"+ng.args.hostname+"%")
+            query.db_where("host.name LIKE ?", "%"+ng.args.hostname+"%")
         else:
-            query.db_where("host.customname LIKE ?", "%"+ng.args.custom+"%")
+            query.db_where("host.custom_name LIKE ?", "%"+ng.args.custom+"%")
 
     ng.db.cursor.execute(query.db_query(), query.db_args())
     rows = ng.db.cursor.fetchall()
@@ -265,7 +265,7 @@ def identify(ng):
         query.db_order("seen.lastSeen DESC")
 
         if not ng.args.all and not ng.args.custom:
-            query.db_where("{%BASE}.customname IS NULL")
+            query.db_where("{%BASE}.custom_name IS NULL")
 
         if ng.args.mac:
             query.db_where("{%BASE}.mac LIKE ?", "%"+ng.args.mac+"%")
@@ -281,11 +281,11 @@ def identify(ng):
             query.db_where("vendor.vendor LIKE ?", "%"+ng.args.vendor+"%")
 
         if ng.args.hostname:
-            query.db_where("host.hostname LIKE ?", "%"+ng.args.hostname+"%")
+            query.db_where("host.name LIKE ?", "%"+ng.args.hostname+"%")
 
         if ng.args.custom:
             query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-            query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+ng.args.custom+"%", "%"+ng.args.custom+"%"], True)
+            query.db_where("(vendor.custom_name LIKE ? OR host.custom_name LIKE ?)", ["%"+ng.args.custom+"%", "%"+ng.args.custom+"%"], True)
 
         ng.db.cursor.execute(query.db_query(), query.db_args())
         rows = ng.db.cursor.fetchall()
@@ -293,11 +293,11 @@ def identify(ng):
             print """ %s:""" % description
             print rowFormat.format(*header)
         for row in rows:
-            ng.db.cursor.execute("SELECT customname FROM host WHERE did = ? ORDER BY customname DESC", (row[1],))
-            customname = ng.db.cursor.fetchone()
-            if customname and customname[0]:
+            ng.db.cursor.execute("SELECT custom_name FROM host WHERE did = ? ORDER BY custom_name DESC", (row[1],))
+            custom_name = ng.db.cursor.fetchone()
+            if custom_name and custom_name[0]:
                 # Device changed IP and has custom name associated with previous IP.
-                ng.db.cursor.execute("UPDATE host SET customname = ? WHERE did = ?", (customname[0], row[1]))
+                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE did = ?", (custom_name[0], row[1]))
                 continue
             print rowFormat.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
     else:
@@ -309,8 +309,8 @@ def identify(ng):
             with exclusive_lock.ExclusiveFileLock(ng.db.lock, 5, "failed to set custom name, please try again"):
                 db_args = [ng.args.set[1]]
                 db_args.append(ng.args.set[0])
-                ng.db.cursor.execute("UPDATE host SET customname = ? WHERE hid = ?", db_args)
+                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
                 db_args = [ng.args.set[1]]
                 db_args.append(row[0])
-                ng.db.cursor.execute("UPDATE vendor SET customname = ? WHERE vid = ?", db_args)
+                ng.db.cursor.execute("UPDATE vendor SET custom_name = ? WHERE vid = ?", db_args)
                 ng.db.connection.commit()
