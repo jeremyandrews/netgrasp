@@ -255,37 +255,34 @@ def identify(ng):
 
         query = database.SelectQueryBuilder("host", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.hid")
-        query.db_select("{%BASE}.did")
-        query.db_select("{%BASE}.mac")
-        query.db_select("{%BASE}.ip")
-
-        query.db_leftjoin("seen", "{%BASE}.did = seen.did")
-        query.db_select("seen.lastSeen")
-        query.db_group("seen.did")
-        query.db_order("seen.lastSeen DESC")
+        query.db_select("{%BASE}.name")
+        query.db_leftjoin("ip", "{%BASE}.iid = ip.iid")
+        query.db_leftjoin("mac", "ip.mid = mac.mid")
+        query.db_select("mac.address")
+        query.db_select("ip.address")
+        query.db_leftjoin("activity", "{%BASE}.iid = activity.iid")
+        query.db_select("activity.updated")
+        query.db_group("activity.did")
+        query.db_order("activity.updated DESC")
 
         if not ng.args.all and not ng.args.custom:
             query.db_where("{%BASE}.custom_name IS NULL")
 
         if ng.args.mac:
-            query.db_where("{%BASE}.mac LIKE ?", "%"+ng.args.mac+"%")
-
-        if not ng.args.all > 2 and not ng.args.mac == netgrasp.BROADCAST:
-            query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
+            query.db_where("mac.address LIKE ?", "%"+ng.args.mac+"%")
 
         if ng.args.ip:
-            query.db_where("{%BASE}.ip LIKE ?", "%"+ng.args.ip+"%")
+            query.db_where("ip.address LIKE ?", "%"+ng.args.ip+"%")
 
         if ng.args.vendor:
-            query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-            query.db_where("vendor.vendor LIKE ?", "%"+ng.args.vendor+"%")
+            query.db_leftjoin("vendor", "mac.vid = vendor.vid")
+            query.db_where("vendor.name LIKE ?", "%"+ng.args.vendor+"%")
 
         if ng.args.hostname:
             query.db_where("host.name LIKE ?", "%"+ng.args.hostname+"%")
 
         if ng.args.custom:
-            query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-            query.db_where("(vendor.custom_name LIKE ? OR host.custom_name LIKE ?)", ["%"+ng.args.custom+"%", "%"+ng.args.custom+"%"], True)
+            query.db_where("host.custom_name LIKE ?", "%"+ng.args.custom+"%")
 
         ng.db.cursor.execute(query.db_query(), query.db_args())
         rows = ng.db.cursor.fetchall()
@@ -293,11 +290,11 @@ def identify(ng):
             print """ %s:""" % description
             print rowFormat.format(*header)
         for row in rows:
-            ng.db.cursor.execute("SELECT custom_name FROM host WHERE did = ? ORDER BY custom_name DESC", (row[1],))
+            ng.db.cursor.execute("SELECT custom_name FROM host WHERE hid = ? ORDER BY custom_name DESC", (row[0],))
             custom_name = ng.db.cursor.fetchone()
             if custom_name and custom_name[0]:
                 # Device changed IP and has custom name associated with previous IP.
-                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE did = ?", (custom_name[0], row[1]))
+                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", (custom_name[0], row[0]))
                 continue
             print rowFormat.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
     else:
