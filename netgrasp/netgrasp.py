@@ -455,7 +455,7 @@ def create_database():
             """)
             db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_iid ON host (iid)")
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_name ON host (name)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_custom ON host (customname)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_custom ON host (custom_name)")
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON host (updated)")
 
             # Record of all devices ever actively seen.
