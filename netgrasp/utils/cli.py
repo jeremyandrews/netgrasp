@@ -72,6 +72,52 @@ def status(ng):
     else:
         ng.debugger.warning("Netgrasp is not running.")
 
+def update(ng):
+    from netgrasp.database import database
+    from netgrasp.update import update
+    from netgrasp.utils import exclusive_lock
+    from netgrasp.utils import email
+    from netgrasp.notify import notify
+
+    try:
+        ng.database_filename = ng.config.GetText('Database', 'filename')
+        ng.db = database.Database(ng.database_filename, ng.debugger)
+        database.database_instance = ng.db
+    except Exception as e:
+        ng.debugger.error("error: %s", (e,))
+        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database_filename, ng.debugger.whoami()))
+
+    ng.db.cursor = ng.db.connection.cursor()
+    ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', netgrasp.DEFAULT_DBLOCK, False), 5, "identify")
+    ng.db.lock = ng._database_lock
+
+    query = database.SelectQueryBuilder("state", ng.debugger, ng.args.verbose)
+    query.db_select("{%BASE}.value")
+    query.db_where("{%BASE}.key = 'schema_version'")
+    ng.db.cursor.execute(query.db_query(), query.db_args())
+    schema_version = ng.db.cursor.fetchone()
+    if schema_version:
+        version = schema_version[0]
+    else:
+        version = 0
+
+    updates = update.needed(version)
+    if updates:
+        ng.debugger.warning("Schema updates required: %s", (updates,))
+    else:
+        ng.debugger.critical("No schema updates are required.")
+
+    pid = ng.is_running()
+    if pid:
+        ng.debugger.critical("Netgrasp must be stopped before running updates.")
+
+    netgrasp.netgrasp_instance = ng
+
+    email.email_instance = None
+    notify.notify_instance = None
+
+    update.run_updates(version)
+
 def list(ng):
     import datetime
 
