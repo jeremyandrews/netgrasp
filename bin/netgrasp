@@ -46,6 +46,11 @@ if __name__ == "__main__":
     parser_status.add_argument("--verbose", "-v", action="count", help="verbose logging")
     parser_status.set_defaults(func=cli.status)
 
+    # update
+    parser_update = subparsers.add_parser("update", help="update database schema")
+    parser_update.add_argument("--verbose", "-v", action="count", help="verbose logging")
+    parser_update.set_defaults(func=cli.update)
+
     # list
     parser_list = subparsers.add_parser("list", help="list devices")
     parser_list.add_argument("--type", "-t", choices=["device", "event"], default="device", help="type of object to list")

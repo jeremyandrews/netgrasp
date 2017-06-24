@@ -35,34 +35,9 @@ class Debugger:
         self.logger = logger
         self.mode = mode
         self.level = level
+
         if logger:
             self.logger.setLevel(self.level)
-
-    def log(self, message, args, severity):
-        try:
-            level, verbose, fatal = severity
-            if self.mode == FILE:
-                if not self.logger:
-                    self.mode = PRINT
-                    self.log(message, args, logging.CRITICAL)
-                    self.fatal("fatal error, no logger provided, exiting")
-                if args:
-                    self.logger.log(level, message, *args)
-                else:
-                    self.logger.log(level, message)
-
-            if fatal:
-                # if writing to file we log and then print message, otherwise just print
-                self.fatal(message, args)
-
-            if self.mode == PRINT:
-                if ((self.verbose and verbose >= self.verbose) or (verbose == ALWAYS)):
-                    if args:
-                        print message % args
-                    else:
-                        print message
-        except Exception as e:
-            self.logger.dump_exception("debugger FIXME")
 
     def dump_exception(self, message = None, is_error = True):
         import os
@@ -89,6 +64,32 @@ class Debugger:
                 self.error("%s", (message,))
             else:
                 self.info("%s", (message,))
+
+    def log(self, message, args, severity):
+        try:
+            level, verbose, fatal = severity
+            if self.mode == FILE:
+                if not self.logger:
+                    self.mode = PRINT
+                    self.log(message, args, logging.CRITICAL)
+                    self.fatal("fatal error, no logger provided, exiting")
+                if args:
+                    self.logger.log(level, message, *args)
+                else:
+                    self.logger.log(level, message)
+
+            if fatal:
+                # if writing to file we log and then print message, otherwise just print
+                self.fatal(message, args)
+
+            if self.mode == PRINT:
+                if ((self.verbose and verbose >= self.verbose) or (verbose == ALWAYS)):
+                    if args:
+                        print message % args
+                    else:
+                        print message
+        except Exception as e:
+            print "%s" % e
 
     # Determine who we are, for pretty logging.
     def whoami(self):

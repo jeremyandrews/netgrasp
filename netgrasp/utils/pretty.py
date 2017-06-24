@@ -82,10 +82,10 @@ def time_elapsed(elapsed):
             return str(day_diff / 30) + " months"
         return str(day_diff / 365) + " years"
     except Exception as e:
-        debugger.dump_exception("time_elapsed() FIXME")
+        debugger.dump_exception("time_elapsed() caught exception")
 
 # Provides a human-friendly name for a mac-ip pair.
-def name_did(did):
+def name_did(did, ip = None):
     try:
         import datetime
 
@@ -98,34 +98,28 @@ def name_did(did):
 
         debugger.debug("entering name_did(%s)", (did,))
 
-        db.cursor.execute("SELECT ip FROM host WHERE did = ? ORDER BY hid DESC LIMIT 1", (did,))
-        ip = db.cursor.fetchone()
-        detail = None
-        if ip:
-            db.cursor.execute("SELECT did FROM host WHERE ip = ? AND mac != ?", (ip[0], netgrasp.BROADCAST))
-            device_id = db.cursor.fetchone()
-            if device_id:
-                did = device_id[0]
-
-            db.cursor.execute("SELECT h.mac, h.ip, h.customname, h.hostname, v.customname, v.vendor FROM host h LEFT JOIN vendor v ON h.mac = v.mac WHERE h.did=? ORDER BY h.customname DESC LIMIT 1", (did,))
-            detail = db.cursor.fetchone()
-
-        if detail:
-            mac, ip, custom_hostname, hostname, custom_vendorname, vendor = detail
-            if custom_hostname:
-                return custom_hostname
+        details = netgrasp.get_details(did)
+        if details:
+            active, counter, ip, mac, hostname, custom_name, vendor = details
+            if custom_name:
+                return custom_name
             elif hostname and (hostname != "unknown"):
                 return hostname
-            elif custom_vendorname:
-                return custom_vendorname
             elif vendor:
                 return """%s device""" % (vendor)
             else:
                 return """%s [%s]""" % (ip, mac)
-        else:
-            return None
+
+        # This may be a request for a device we've not yet seen.
+        if ip:
+            hostname = netgrasp.dns_lookup(ip)
+            if hostname:
+                return hostname
+
+        return "Unrecognized device"
+
     except Exception as e:
-        debugger.dump_exception("name_did() FIXME")
+        debugger.dump_exception("name_did() caught exception")
 
 # Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):

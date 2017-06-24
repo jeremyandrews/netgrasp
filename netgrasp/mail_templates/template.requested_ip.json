@@ -1,0 +1,7 @@
+{
+    "subject": "[netgrasp] IP requested: ${ip}",
+    "body": {
+        "html": "<html><body><p>IP requested on your network:</p><ul><li>${name}</li><li>ip: ${ip} [${mac}]</li><li>first requested: ${first_requested}</li></ul><p>IP requested by:<ul>${devices_requesting_ip_html}</ul></p></body></html>",
+        "text": "IP requested on your network:\n - ${name}\n - ip: ${ip} [${mac}]\n - first requested: ${first_requested}\n\nIP requested by:\n${devices_requesting_ip_text}\n"
+    }
+}

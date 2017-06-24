@@ -210,25 +210,36 @@ smtp_password = password
 Supported email modes: normal, ssl, tls
 
 The following alert types are supported:
-* first_requested: the first time an IP address is requested on the network
-* requested: any time an IP address is requested on the network
-* first_seen: the first time an IP address is actively seen on the network
-* first_seen_recently: when a stale IP address becomes active again
-* seen: any time an IP address is actively seen on the network
-* changed_ip: a known device has changed IPs
-* duplicate_ip: multiple MACs with the same IP active on the network
-* duplicate_mac: multiple IPs asociated with the same MAC active on the network
-* stale: any time an IP address hasn't been seen for more than active_timeout
-  seconds
-* network_scan: any time a device requests an abnormally large number of IPs
-* ip_not_on_network: an arp claims to have come from an IP not on the monitored
-  device's subnet
-* src_mac_broadcast: an arp packet claims to have come from 'ff:ff:ff:ff:ff:ff'
+
+* seen_device: any time a device is seen on the network
+* first_seen_device: the first time a device is seen on the network
+* first_seen_device_recently: when a stale device becomes active again
+* requested_ip: any time an IP address is requested on the network
+* first_requested_ip: the first time an IP address is requested on the network
+* first_requested_ip_recently: when a stale IP becomes active again
+* seen_mac: any time a MAC address is seen on the network
+* first_seen_mac: the first time a MAC address is seen on the network
+* seen_ip: any time an IP address is seen on the network
+* first_seen_ip: the first time an IP address is seen on the network
+* seen_host: any time a hostname is seen on the network
+* first_seen_host: the first time a hostname is seen on the network
+* seen_vendor: a new device by a previously seen vendor seen on the network
+* first_seen_vendor: a new device by a new vendor seen on the network
+* device_stale: a device hasn't been seen for active_timeout seconds
+* request_stale: a device hasn't been requested for active_timeout seconds
+* changed_ip: a known device joins the network with a new IP address
+* duplicate_ip: multiple active MAC addresses with the same IP address
+* duplicate_mac: multiple active IP addresses with the same MAC address
+* network_scan: a device has requested >50 IPs on the network
+* ip_not_on_network: an ARP packet claims to have come from an IP not
+  on monitored subnet
+* src_mac_broadcast: an ARP packet claims to have come from 'ff:ff:ff:ff:ff:ff'
+* requested_self: a device requested itself
 
 For example:
 ```
 [Email]
-alerts = first_seen_recently,network_scan,duplicate_ip,ip_not_on_network,stale
+alerts = first_seen_device, first_seen_device_recently, network_scan, duplicate_ip, stale
 ```
 
 The following digest types are supported:

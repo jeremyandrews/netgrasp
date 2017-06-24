@@ -72,6 +72,52 @@ def status(ng):
     else:
         ng.debugger.warning("Netgrasp is not running.")
 
+def update(ng):
+    from netgrasp.database import database
+    from netgrasp.update import update
+    from netgrasp.utils import exclusive_lock
+    from netgrasp.utils import email
+    from netgrasp.notify import notify
+
+    try:
+        ng.database_filename = ng.config.GetText('Database', 'filename')
+        ng.db = database.Database(ng.database_filename, ng.debugger)
+        database.database_instance = ng.db
+    except Exception as e:
+        ng.debugger.error("error: %s", (e,))
+        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database_filename, ng.debugger.whoami()))
+
+    ng.db.cursor = ng.db.connection.cursor()
+    ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', netgrasp.DEFAULT_DBLOCK, False), 5, "identify")
+    ng.db.lock = ng._database_lock
+
+    query = database.SelectQueryBuilder("state", ng.debugger, ng.args.verbose)
+    query.db_select("{%BASE}.value")
+    query.db_where("{%BASE}.key = 'schema_version'")
+    ng.db.cursor.execute(query.db_query(), query.db_args())
+    schema_version = ng.db.cursor.fetchone()
+    if schema_version:
+        version = schema_version[0]
+    else:
+        version = 0
+
+    updates = update.needed(version)
+    if updates:
+        ng.debugger.warning("schema updates required: %s", (updates,))
+    else:
+        ng.debugger.critical("no schema updates are required.")
+
+    pid = ng.is_running()
+    if pid:
+        ng.debugger.critical("Netgrasp must be stopped before running updates.")
+
+    netgrasp.netgrasp_instance = ng
+
+    email.email_instance = None
+    notify.notify_instance = None
+
+    update.run_updates(version)
+
 def list(ng):
     import datetime
 
@@ -97,23 +143,23 @@ def list(ng):
 
     if ng.args.type == "device":
         # List devices.
-        query = database.SelectQueryBuilder("seen", ng.debugger, ng.args.verbose)
+        query = database.SelectQueryBuilder("activity", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.did")
-        query.db_select("{%BASE}.mac")
-        query.db_select("{%BASE}.ip")
-        query.db_select("{%BASE}.lastSeen")
+        query.db_select("mac.address")
+        query.db_select("ip.address")
+        query.db_select("{%BASE}.updated")
 
         if ng.args.all:
             description = "All devices"
         else:
             description = "Active devices"
             query.db_where("{%BASE}.active = ?", 1)
-        query.db_where("{%BASE}.lastSeen IS NOT NULL")
+        query.db_where("{%BASE}.updated IS NOT NULL")
 
         if (not ng.args.all or ng.args.all == 1):
             query.db_group("{%BASE}.did")
 
-        query.db_order("{%BASE}.lastSeen DESC")
+        query.db_order("{%BASE}.updated DESC")
 
         rowFormat = "{:>16}{:>34}{:>22}"
         header = ["IP", "Name", "Last seen"]
@@ -122,13 +168,15 @@ def list(ng):
         # List events.
         query = database.SelectQueryBuilder("event", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.did")
-        query.db_select("{%BASE}.mac")
-        query.db_select("{%BASE}.ip")
+        query.db_select("mac.address")
+        query.db_select("ip.address")
         query.db_select("{%BASE}.timestamp")
-        query.db_select("{%BASE}.event")
+        query.db_select("{%BASE}.type")
 
         if ng.args.all:
             description = "All alerts"
+            # @TODO: this is a bogus WHERE, get rid of altogether
+            query.db_where("{%BASE}.timestamp >= ?", 1)
         else:
             description = "Recent alerts"
             ng.active_timeout = ng.config.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
@@ -137,35 +185,33 @@ def list(ng):
 
         if (not ng.args.all or ng.args.all == 1):
             query.db_group("{%BASE}.did")
-            query.db_group("{%BASE}.event")
+            query.db_group("{%BASE}.type")
 
         query.db_order("{%BASE}.timestamp DESC")
 
         rowFormat = "{:>16}{:>24}{:>21}{:>18}"
         header = ["IP", "Name", "Event", "Last seen"]
 
+    query.db_leftjoin("device", "{%BASE}.did = device.did")
+    query.db_leftjoin("ip", "{%BASE}.iid = ip.iid")
+    query.db_leftjoin("mac", "device.mid = mac.mid")
+
     if ng.args.mac:
-        query.db_where("{%BASE}.mac LIKE ?", "%"+ng.args.mac+"%")
-        if not ng.args.mac == netgrasp.BROADCAST:
-            query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
-    else:
-        query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
+        query.db_where("mac.address LIKE ?", "%"+ng.args.mac+"%")
 
     if ng.args.ip:
-        query.db_where("{%BASE}.ip LIKE ?", "%"+ng.args.ip+"%")
+        query.db_where("ip.address LIKE ?", "%"+ng.args.ip+"%")
 
     if ng.args.vendor:
-        query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-        query.db_where("vendor.vendor LIKE ?", "%"+ng.args.vendor+"%")
+        query.db_leftjoin("vendor", "device.vid = vendor.vid")
+        query.db_where("vendor.name LIKE ?", "%"+ng.args.vendor+"%")
 
-    if ng.args.hostname:
-        query.db_leftjoin("host", "{%BASE}.did = host.did")
-        query.db_where("host.hostname LIKE ?", "%"+ng.args.hostname+"%")
-
-    if ng.args.custom:
-        query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-        query.db_leftjoin("host", "{%BASE}.did = host.did")
-        query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+ng.args.custom+"%", "%"+ng.args.custom+"%"], True)
+    if ng.args.hostname or ng.args.custom:
+        query.db_leftjoin("host", "device.hid = host.hid")
+        if ng.args.hostname:
+            query.db_where("host.name LIKE ?", "%"+ng.args.hostname+"%")
+        else:
+            query.db_where("host.custom_name LIKE ?", "%"+ng.args.custom+"%")
 
     ng.db.cursor.execute(query.db_query(), query.db_args())
     rows = ng.db.cursor.fetchall()
@@ -209,37 +255,34 @@ def identify(ng):
 
         query = database.SelectQueryBuilder("host", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.hid")
-        query.db_select("{%BASE}.did")
-        query.db_select("{%BASE}.mac")
-        query.db_select("{%BASE}.ip")
-
-        query.db_leftjoin("seen", "{%BASE}.did = seen.did")
-        query.db_select("seen.lastSeen")
-        query.db_group("seen.did")
-        query.db_order("seen.lastSeen DESC")
+        query.db_select("{%BASE}.name")
+        query.db_leftjoin("ip", "{%BASE}.iid = ip.iid")
+        query.db_leftjoin("mac", "ip.mid = mac.mid")
+        query.db_select("mac.address")
+        query.db_select("ip.address")
+        query.db_leftjoin("activity", "{%BASE}.iid = activity.iid")
+        query.db_select("activity.updated")
+        query.db_group("activity.did")
+        query.db_order("activity.updated DESC")
 
         if not ng.args.all and not ng.args.custom:
-            query.db_where("{%BASE}.customname IS NULL")
+            query.db_where("{%BASE}.custom_name IS NULL")
 
         if ng.args.mac:
-            query.db_where("{%BASE}.mac LIKE ?", "%"+ng.args.mac+"%")
-
-        if not ng.args.all > 2 and not ng.args.mac == netgrasp.BROADCAST:
-            query.db_where("{%BASE}.mac != ?", netgrasp.BROADCAST)
+            query.db_where("mac.address LIKE ?", "%"+ng.args.mac+"%")
 
         if ng.args.ip:
-            query.db_where("{%BASE}.ip LIKE ?", "%"+ng.args.ip+"%")
+            query.db_where("ip.address LIKE ?", "%"+ng.args.ip+"%")
 
         if ng.args.vendor:
-            query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-            query.db_where("vendor.vendor LIKE ?", "%"+ng.args.vendor+"%")
+            query.db_leftjoin("vendor", "mac.vid = vendor.vid")
+            query.db_where("vendor.name LIKE ?", "%"+ng.args.vendor+"%")
 
         if ng.args.hostname:
-            query.db_where("host.hostname LIKE ?", "%"+ng.args.hostname+"%")
+            query.db_where("host.name LIKE ?", "%"+ng.args.hostname+"%")
 
         if ng.args.custom:
-            query.db_leftjoin("vendor", "{%BASE}.mac = vendor.mac")
-            query.db_where("(vendor.customname LIKE ? OR host.customname LIKE ?)", ["%"+ng.args.custom+"%", "%"+ng.args.custom+"%"], True)
+            query.db_where("host.custom_name LIKE ?", "%"+ng.args.custom+"%")
 
         ng.db.cursor.execute(query.db_query(), query.db_args())
         rows = ng.db.cursor.fetchall()
@@ -247,11 +290,11 @@ def identify(ng):
             print """ %s:""" % description
             print rowFormat.format(*header)
         for row in rows:
-            ng.db.cursor.execute("SELECT customname FROM host WHERE did = ? ORDER BY customname DESC", (row[1],))
-            customname = ng.db.cursor.fetchone()
-            if customname and customname[0]:
+            ng.db.cursor.execute("SELECT custom_name FROM host WHERE hid = ? ORDER BY custom_name DESC", (row[0],))
+            custom_name = ng.db.cursor.fetchone()
+            if custom_name and custom_name[0]:
                 # Device changed IP and has custom name associated with previous IP.
-                ng.db.cursor.execute("UPDATE host SET customname = ? WHERE did = ?", (customname[0], row[1]))
+                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", (custom_name[0], row[0]))
                 continue
             print rowFormat.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
     else:
@@ -263,8 +306,8 @@ def identify(ng):
             with exclusive_lock.ExclusiveFileLock(ng.db.lock, 5, "failed to set custom name, please try again"):
                 db_args = [ng.args.set[1]]
                 db_args.append(ng.args.set[0])
-                ng.db.cursor.execute("UPDATE host SET customname = ? WHERE hid = ?", db_args)
+                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
                 db_args = [ng.args.set[1]]
                 db_args.append(row[0])
-                ng.db.cursor.execute("UPDATE vendor SET customname = ? WHERE vid = ?", db_args)
+                ng.db.cursor.execute("UPDATE vendor SET custom_name = ? WHERE vid = ?", db_args)
                 ng.db.connection.commit()
