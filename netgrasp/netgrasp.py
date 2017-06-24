@@ -180,6 +180,7 @@ def main(*pcap):
             send_email_alerts(ng.active_timeout)
             send_email_digests()
             garbage_collection(ng.garbage_collection, ng.oldest_arp, ng.oldest_event)
+            refresh_dns_cache()
 
             ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
             time.sleep(ng.delay)
@@ -1469,7 +1470,6 @@ def mac_lookup(mac):
         from utils import exclusive_lock
 
         debugger = debug.debugger_instance
-        db = database.database_instance
 
         debugger.debug("entering mac_lookup(%s)", (mac,))
 
@@ -1502,26 +1502,30 @@ def mac_lookup(mac):
 
         return vendor
 
-        # @TODO restore functionality
-        # @TODO consider retrieving actual TTL from DNS -- for now refresh active devices every 5 mins
-#        ttl = datetime.datetime.now() - datetime.timedelta(minutes=5)
-#        db.cursor.execute("SELECT host.hid, seen.did, seen.mac, seen.ip FROM seen LEFT JOIN host ON seen.did = host.did WHERE seen.lastSeen NOT NULL AND seen.active = 1 AND (host.timestamp IS NULL OR host.timestamp < ?) LIMIT 50", (ttl,))
-#        rows = db.cursor.fetchall()
-#        for row in rows:
-#            hid, did, mac, ip = row
-#            hostname = dns_lookup(ip)
-#            now = datetime.datetime.now()
-#            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "identify_macs, hostname"):
-#                if hid:
-#                    debugger.debug("Refreshing hostname %s for %s", (hostname, ip))
-#                    db.cursor.execute("UPDATE host SET hostname = ?, timestamp = ? WHERE hid = ?", (hostname, now, hid))
-#                else:
-#                    debugger.debug("Caching hostname %s for ip %s", (hostname, ip))
-#                    db.cursor.execute("INSERT INTO host (did, mac, ip, hostname, timestamp) VALUES (?, ?, ?, ?, ?)", (did, mac, ip, hostname, now))
-#                db.connection.commit()
-
     except Exception as e:
         debugger.dump_exception("mac_lookup() caught exception")
+
+def refresh_dns_cache():
+    # @TODO consider retrieving actual TTL from DNS -- for now refresh active devices regularly
+    try:
+        db = database.database_instance
+        debugger = debug.debugger_instance
+        debugger.debug("entering refresh_dns_cache")
+
+        ttl = datetime.datetime.now() - datetime.timedelta(minutes=15)
+        db.cursor.execute("SELECT host.hid, host.name, activity.did, mac.address, ip.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN host ON activity.iid = host.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.active = 1 AND host.updated < ? LIMIT 10", (ttl,))
+        rows = db.cursor.fetchall()
+        for row in rows:
+            hid, old_name, did, mac, ip = row
+            name = dns_lookup(ip)
+            now = datetime.datetime.now()
+            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "refresh_dns_cache"):
+                debugger.debug("Refreshing hostname from '%s' to '%s' for %s", (old_name, name, ip))
+                db.cursor.execute("UPDATE host SET name = ?, updated = ? WHERE hid = ?", (name, now, hid))
+                db.connection.commit()
+
+    except Exception as e:
+        debugger.dump_exception("refresh_dns_cache() caught exception")
 
 def dns_lookup(ip):
     try:
