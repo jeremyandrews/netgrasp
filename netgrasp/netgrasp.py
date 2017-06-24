@@ -1593,6 +1593,7 @@ def send_email_digests():
             debugger.info("Sending %s digest", (digest,))
             db.set_state(timestamp_string, future_digest_timestamp)
 
+            # @TODO: replace w/ arplog query, we no longer log all events
             if (digest == "daily"):
                 # PROCESSED_DAILY_DIGEST  = 2
                 db.cursor.execute("SELECT COUNT(DISTINCT rid) FROM event WHERE NOT (processed & 2) AND timestamp>=? AND timestamp<=? AND type = 'requested_ip'", (time_period, now))

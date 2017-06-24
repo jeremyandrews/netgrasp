@@ -7,12 +7,24 @@ def needed(active_version):
         return False
 
 def run_updates(active_version):
-    from netgrasp import netgrasp
+    from netgrasp.database import database
+    from netgrasp.utils import exclusive_lock
+    from netgrasp.utils import debug
 
-    ng = netgrasp.netgrasp_instance
+    debugger = debug.debugger_instance
+    db = database.database_instance
+
+    debugger.warning("running updates:")
     
     if active_version < 1:
         update_1()
+
+    debugger.warning("optimizing...")
+    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "run_updates: analyze"):
+        db.cursor.execute("VACUUM")
+        db.cursor.execute("ANALYZE")
+        db.connection.commit()
+    debugger.warning("all updates complete.")
 
 def update_1():
     from netgrasp import netgrasp
@@ -24,7 +36,7 @@ def update_1():
     ng = netgrasp.netgrasp_instance
     db = database.database_instance
 
-    debugger.warning(" running update_1 ...")
+    debugger.warning(" running update_1 (please be patient, we're doing stuff) ...")
 
     # redo all tables except for state
     tables = ["event", "vendor", "host", "arplog", "seen"]
@@ -44,7 +56,7 @@ def update_1():
         counter += 1
         mac, ip = device
         netgrasp.device_seen(ip, mac)
-    debugger.warning("update_1: migrated %d devices", (counter,))
+    debugger.warning("  update_1: migrated %d devices", (counter,))
 
     db.cursor.execute("SELECT ip.address, mac.address, activity.aid, activity.did, activity.iid, device.mid, device.hid, device.vid, host.name, vendor.name FROM device LEFT JOIN activity ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN vendor ON device.vid = vendor.vid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid")
     devices = db.cursor.fetchall()
@@ -124,11 +136,14 @@ def update_1():
 
     # not copying arplog : daily/weekly digests will be inaccurate for 2 days/ 2 weeks
     # not copying events : not necessary
+
     with exclusive_lock.ExclusiveFileLock(db.lock, 5, "update_1: cleanup"):
         db.cursor.execute("DROP TABLE orig_event")
         db.cursor.execute("DROP TABLE orig_vendor")
         db.cursor.execute("DROP TABLE orig_host")
         db.cursor.execute("DROP TABLE orig_arplog")
         db.cursor.execute("DROP TABLE orig_seen")
+        # Update internal sqlite3 table and index statistics
+        db.cursor.execute("ANALYZE")
         db.connection.commit()
     debugger.warning("  update_1: finished")
