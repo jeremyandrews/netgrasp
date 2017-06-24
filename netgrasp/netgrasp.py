@@ -132,15 +132,19 @@ def main(*pcap):
     # http://www.sqlite.org/wal.html
     ng.db.cursor.execute("PRAGMA journal_mode=WAL")
 
-    ng.db.cursor.execute("SELECT value FROM state WHERE key = 'schema_version'")
-    schema_version = ng.db.cursor.fetchone()
-    if schema_version:
-        version = schema_version[0]
-    else:
-        version = 0
+    try:
+        ng.db.cursor.execute("SELECT value FROM state WHERE key = 'schema_version'")
+        schema_version = ng.db.cursor.fetchone()
+        if schema_version:
+            version = schema_version[0]
+        else:
+            version = 0
 
-    if update.needed(version):
-        ng.debugger.critical("schema updates are required, run 'netgrasp update'")
+        if update.needed(version):
+            ng.debugger.critical("schema updates are required, run 'netgrasp update'")
+
+    except:
+        version = 0
 
     create_database()
 
@@ -600,7 +604,7 @@ def received_arp(hdr, data, child_conn):
             if seen:
                 mid, iid, did = device_seen(src_ip, src_mac)
             if requested:
-                mid, iid, did, rid = device_request(dst_ip, dst_mac)
+                rid = device_request(dst_ip, dst_mac)
 
         # ARP REPLY
         elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
@@ -801,7 +805,7 @@ def device_request(ip, mac):
                     log_event(mid, iid, did, rid, EVENT_FIRST_REQUEST_IP, True)
                 db.connection.commit()
 
-        return (mid, iid, did, rid)
+        return rid
 
     except Exception as e:
         debugger.dump_exception("device_request() caught exception")
