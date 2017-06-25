@@ -307,7 +307,4 @@ def identify(ng):
                 db_args = [ng.args.set[1]]
                 db_args.append(ng.args.set[0])
                 ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
-                db_args = [ng.args.set[1]]
-                db_args.append(row[0])
-                ng.db.cursor.execute("UPDATE vendor SET custom_name = ? WHERE vid = ?", db_args)
                 ng.db.connection.commit()
