@@ -1191,7 +1191,7 @@ def detect_netscans(timeout):
         now = datetime.datetime.now()
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout) - datetime.timedelta(minutes=10)
 
-        db.cursor.execute("SELECT COUNT(DISTINCT request.rid) AS count, arp.src_ip, arp.src_mac FROM request LEFT JOIN arp ON request.rid = arp.rid WHERE active = 1 GROUP BY arp.src_ip HAVING count > 50")
+        db.cursor.execute("SELECT COUNT(DISTINCT arp.dst_ip) AS count, arp.src_ip, arp.src_mac FROM arp LEFT JOIN request ON arp.rid = request.rid WHERE request.active = 1 GROUP BY arp.src_ip HAVING count > 50")
         scans = db.cursor.fetchall()
         if scans:
             debugger.debug("scans in progress (count, src ip, src mac): %s", (scans,))

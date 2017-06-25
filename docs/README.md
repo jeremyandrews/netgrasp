@@ -37,6 +37,7 @@ Once netgrasp has been started, you can control it with the following commands:
   netgrasp -h
   netgrasp list -h
   netgrasp identify -h
+  netgrasp update -h
   netgrasp start -h
   netgrasp stop -h
   netgrasp restart -h
