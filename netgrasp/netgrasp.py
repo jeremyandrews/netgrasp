@@ -1068,7 +1068,7 @@ def devices_with_ip(ip):
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
 
         if devices:
@@ -1096,7 +1096,7 @@ def devices_with_mac(mac):
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
 
         if devices:
