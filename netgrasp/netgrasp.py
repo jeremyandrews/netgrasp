@@ -893,6 +893,7 @@ def get_ids(ip, mac):
             else:
                 did = None
 
+        debugger.debug("mid(%s) iid(%s) did(%s)", (mid, iid, did))
         return (mid, iid, did)
 
     except Exception as e:
@@ -1061,13 +1062,14 @@ def devices_with_ip(ip):
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT did FROM activity WHERE iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            db.cursor.execute("SELECT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
 
         if devices:
             dids = []
             for device in devices:
-                dids.append(device[0])
+                _did, _ip, _mac = device
+                dids.append((_did, _ip, _mac))
             return dids
         else:
             return None
@@ -1088,13 +1090,14 @@ def devices_with_mac(mac):
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT did FROM activity WHERE iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            db.cursor.execute("SELECT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
 
         if devices:
             dids = []
             for device in devices:
-                dids.append(device[0])
+                _did, _ip, _mac = device
+                dids.append((_did, _ip, _mac))
             return dids
         else:
             return None
@@ -1117,9 +1120,10 @@ def devices_requesting_ip(ip, timeout):
         if ips:
             for dst_ip in ips:
                 dst_mac = get_mac(dst_ip[0])
-                mid, iid, did = get_ids(dst_ip[0], dst_mac)
-                dids.append(did)
+                _mid, _iid, _did = get_ids(dst_ip[0], dst_mac)
+                dids.append((_did, dst_ip, dst_mac))
 
+        debugger.debug("did, dst_ip, dst_mac(%s)", (dids,))
         return dids
 
     except Exception as e:
@@ -1405,16 +1409,18 @@ def send_email_alerts(timeout):
                     devices_with_ip_html = ""
                     if devices:
                         for device in devices:
-                            devices_with_ip_text += """\n - %s""" % (pretty.name_did(device))
-                            devices_with_ip_html += """<li>%s</li>""" % (pretty.name_did(device))
+                            list_did, list_ip, list_mac = device
+                            devices_with_ip_text += """\n - %s [%s]""" % (pretty.name_did(list_did), list_mac)
+                            devices_with_ip_html += """<li>%s [%s]</li>""" % (pretty.name_did(list_did), list_mac)
 
                     devices = devices_with_mac(mac)
                     devices_with_mac_text = ""
                     devices_with_mac_html = ""
                     if devices:
                         for device in devices:
-                            devices_with_mac_text += """\n - %s""" % (pretty.name_did(device))
-                            devices_with_mac_html += """<li>%s</li>""" % (pretty.name_did(device))
+                            list_did, list_ip, list_mac = device
+                            devices_with_mac_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
+                            devices_with_mac_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
 
                     devices = devices_requesting_ip(ip, timeout)
                     devices_requesting_ip_text = ""
