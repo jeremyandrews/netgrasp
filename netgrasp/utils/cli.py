@@ -255,12 +255,12 @@ def identify(ng):
 
         query = database.SelectQueryBuilder("host", ng.debugger, ng.args.verbose)
         query.db_select("{%BASE}.hid")
-        query.db_select("{%BASE}.name")
         query.db_leftjoin("ip", "{%BASE}.iid = ip.iid")
         query.db_leftjoin("mac", "ip.mid = mac.mid")
+        query.db_leftjoin("activity", "{%BASE}.iid = activity.iid")
+        query.db_select("activity.did")
         query.db_select("mac.address")
         query.db_select("ip.address")
-        query.db_leftjoin("activity", "{%BASE}.iid = activity.iid")
         query.db_select("activity.updated")
         query.db_group("activity.did")
         query.db_order("activity.updated DESC")
@@ -300,7 +300,7 @@ def identify(ng):
     else:
         if ng.args.verbose > 1:
             print "id:", ng.args.set[0], "| custom name:", ng.args.set[1]
-        ng.db.cursor.execute("SELECT vendor.vid FROM vendor LEFT JOIN host ON vendor.mac = host.mac WHERE host.hid = ?", (ng.args.set[0],))
+        ng.db.cursor.execute("SELECT vendor.vid FROM vendor LEFT JOIN mac ON vendor.vid = mac.vid LEFT JOIN host ON mac.mid = host.hid WHERE host.hid = ?", (ng.args.set[0],))
         row = ng.db.cursor.fetchone()
         if row:
             with exclusive_lock.ExclusiveFileLock(ng.db.lock, 5, "failed to set custom name, please try again"):

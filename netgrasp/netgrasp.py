@@ -559,6 +559,9 @@ def create_database():
             db.cursor.execute("CREATE INDEX IF NOT EXISTS idxevent_timestamp_processed ON event (timestamp, processed)")
             # PRAGMA index_list(event)
 
+            # Update internal sqlite3 table and index statistics every time we restart.
+            db.cursor.execute("ANALYZE")
+
             db.connection.commit()
     except Exception as e:
         debugger.dump_exception("create_database() caught exception")

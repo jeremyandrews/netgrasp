@@ -15,13 +15,15 @@ def run_updates(active_version):
     db = database.database_instance
 
     debugger.warning("running updates:")
-    
+
     if active_version < 1:
         update_1()
 
     debugger.warning("optimizing...")
     with exclusive_lock.ExclusiveFileLock(db.lock, 5, "run_updates: analyze"):
+        # Claim back space for any deleted data.
         db.cursor.execute("VACUUM")
+        # Update internal sqlite3 table and index statistics.
         db.cursor.execute("ANALYZE")
         db.connection.commit()
     debugger.warning("all updates complete.")
@@ -143,7 +145,5 @@ def update_1():
         db.cursor.execute("DROP TABLE orig_host")
         db.cursor.execute("DROP TABLE orig_arplog")
         db.cursor.execute("DROP TABLE orig_seen")
-        # Update internal sqlite3 table and index statistics
-        db.cursor.execute("ANALYZE")
         db.connection.commit()
     debugger.warning("  update_1: finished")

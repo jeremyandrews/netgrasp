@@ -1,4 +1,9 @@
-v0.8.4, ???
+v0.9.0, ???
+ * completely reworked schema; simplifies queries
+ * introduced "netgrasp update" to manually trigger updates
+ * added much more granular events; only log events with subscribers
+
+v0.8.4, (unreleased)
  * #7: do not cache DNS forever
 
 v0.8.3, 12-June-2017
