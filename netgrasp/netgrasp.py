@@ -426,8 +426,8 @@ def create_database():
                 self NUMERIC
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_address ON mac (address)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_vid ON mac (vid)")
+            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxmac_address ON mac (address)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxmac_vid ON mac (vid)")
 
             # Record of all vendors ever actively seen.
             db.cursor.execute("""
@@ -447,7 +447,9 @@ def create_database():
                 created TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mid_address ON ip (mid, address)")
+            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxip_mid_iid ON ip (mid, iid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxip_address_mid_created ON ip (address, mid, created)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxip_mid_iid ON ip (mid, iid)")
 
             # Cache DNS lookups.
             db.cursor.execute("""
@@ -460,10 +462,10 @@ def create_database():
 		updated TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_iid ON host (iid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_name ON host (name)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_custom ON host (custom_name)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON host (updated)")
+            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxhost_iid ON host (iid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_name ON host (name)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_custom ON host (custom_name)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_updated ON host (updated)")
 
             # Record of all devices ever actively seen.
             db.cursor.execute("""
@@ -477,10 +479,10 @@ def create_database():
                 updated TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mid_iid ON device (mid, iid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_hid ON device (hid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_vid ON device (vid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON device (updated)")
+            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxdevice_mid_iid ON device (mid, iid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_hid_mid_did ON device (hid, mid, did)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_vid ON device (vid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_updated ON device (updated)")
 
             # Record of device activity.
             db.cursor.execute("""
@@ -496,9 +498,10 @@ def create_database():
                 active NUMERIC
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_did_iid ON device (did, iid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON activity (updated)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active ON activity (active)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_active_did ON activity (active, did)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_did_iid ON activity (did, iid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_did_active_counter ON activity (did, active, counter)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_active_updated ON activity (active, updated)")
 
             # Record of all IP addresses ever requested.
             db.cursor.execute("""
@@ -514,9 +517,10 @@ def create_database():
                 active NUMERIC
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_updated ON request (active, updated)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_updated ON request (updated)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_active ON request (active)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_active_updated ON request (active, updated)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_updated ON request (updated)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_active_ip ON request (active, ip)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_did_created ON request (did, created)")
 
             # Create arp table.
             db.cursor.execute("""
@@ -533,9 +537,8 @@ def create_database():
                 timestamp TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcip_timestamp_rid ON arp (src_ip, timestamp, rid)")
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_srcmac_timestamp ON arp (src_mac, timestamp)")
-            #db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_dstdid_srcdid_timestamp ON arp (dst_did, src_did, timestamp)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxarp_srcip_timestamp_rid ON arp (src_ip, timestamp, rid)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxarp_rid_srcip ON arp (rid, src_ip)")
 
             # Create event table.
             db.cursor.execute("""
@@ -552,8 +555,8 @@ def create_database():
                 type VARCHAR
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_type_timestamp_processed ON event (type, timestamp, processed)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp_processed ON event (timestamp, processed)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxevent_type_timestamp_processed ON event (type, timestamp, processed)")
+            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxevent_timestamp_processed ON event (timestamp, processed)")
             # PRAGMA index_list(event)
 
             db.connection.commit()
@@ -1225,7 +1228,7 @@ def detect_anomalies(timeout):
                 debugger.debug("dupes: %s", (dupes,))
                 for dupe in dupes:
                     mid, iid, did = dupe
-                    db.cursor.execute("SELECT eid FROM event WHERE mid=? AND type=? AND timestamp>?", (mid, EVENT_DUPLICATE_IP, stale))
+                    db.cursor.execute("SELECT eid FROM event WHERE mid = ? AND type = ? AND timestamp > ?", (mid, EVENT_DUPLICATE_IP, stale))
                     already_detected = db.cursor.fetchone()
                     if already_detected:
                         break
@@ -1244,7 +1247,7 @@ def detect_anomalies(timeout):
                 debugger.debug("dupes: %s", (dupes,))
                 for dupe in dupes:
                     mid, iid, did = dupe
-                    db.cursor.execute("SELECT eid FROM event WHERE iid=? AND type=? AND timestamp>?", (iid, EVENT_DUPLICATE_MAC, stale))
+                    db.cursor.execute("SELECT eid FROM event WHERE iid = ? AND type = ? AND timestamp > ?", (iid, EVENT_DUPLICATE_MAC, stale))
                     already_detected = db.cursor.fetchone()
                     debugger.debug("already_detected: %s", (already_detected,))
                     if already_detected:
@@ -1680,7 +1683,7 @@ def send_email_digests():
                     lower = now - datetime.timedelta(hours=range)
                     range = range - 1
                     upper = now - datetime.timedelta(hours=range)
-                    db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ? ", (lower, upper))
+                    db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
                     distinct = db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
                     device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%I %p, %x"), len(distinct))
@@ -1690,7 +1693,7 @@ def send_email_digests():
                     lower = now - datetime.timedelta(days=range)
                     range = range - 1
                     upper = now - datetime.timedelta(days=range)
-                    db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ? ", (lower, upper))
+                    db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
                     distinct = db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
                     device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%A, %x"), len(distinct))
