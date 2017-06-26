@@ -1,5 +1,5 @@
-v0.9.0, ???
- * completely reworked schema; simplifies queries
+v0.9.0, 26-June-2017
+ * completely reworked schema; simplifies/optimizes queries
  * introduced "netgrasp update" to manually trigger updates
  * added much more granular events; only log events with subscribers
 
