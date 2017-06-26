@@ -1614,7 +1614,7 @@ def send_email_digests():
             db.set_state(timestamp_string, future_digest_timestamp)
 
             # how many devices were requested during this time period
-            db.cursor.execute("SELECT COUNT(DISTINCT rid) FROM arp WHERE rid IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (time_period, now))
+            db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) FROM arp WHERE rid IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (time_period, now))
             requested = db.cursor.fetchone()
 
             # all devices that were actively seen during this time period
