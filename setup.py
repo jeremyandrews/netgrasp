@@ -5,7 +5,7 @@ try:
 except ImportError:
     from distutils.core import setup
 
-setup(name="netgrasp",
+setup(name="NetGrasp",
       version="0.9.0",
       author="Jeremy Andrews",
       author_email="jeremy@tag1consulting.com",
