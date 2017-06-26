@@ -301,10 +301,8 @@ def identify(ng):
         if ng.args.verbose > 1:
             print "id:", ng.args.set[0], "| custom name:", ng.args.set[1]
         ng.db.cursor.execute("SELECT vendor.vid FROM vendor LEFT JOIN mac ON vendor.vid = mac.vid LEFT JOIN host ON mac.mid = host.hid WHERE host.hid = ?", (ng.args.set[0],))
-        row = ng.db.cursor.fetchone()
-        if row:
-            with exclusive_lock.ExclusiveFileLock(ng.db.lock, 5, "failed to set custom name, please try again"):
-                db_args = [ng.args.set[1]]
-                db_args.append(ng.args.set[0])
-                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
-                ng.db.connection.commit()
+        with exclusive_lock.ExclusiveFileLock(ng.db.lock, 5, "failed to set custom name, please try again"):
+            db_args = [ng.args.set[1]]
+            db_args.append(ng.args.set[0])
+            ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
+            ng.db.connection.commit()
