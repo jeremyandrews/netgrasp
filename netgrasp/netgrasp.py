@@ -1548,7 +1548,7 @@ def dns_lookup(ip):
 
         debugger.debug("entering dns_lookup(%s)", (ip,))
         try:
-            hostname, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
+            host_name, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
             debugger.debug("host_name(%s), aliaslist(%s), ipaddrlist(%s)", (host_name, aliaslist, ipaddrlist))
             return host_name
 
