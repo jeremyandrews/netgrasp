@@ -790,27 +790,30 @@ def device_request(ip, mac):
         mid, iid, did = get_ids(ip, mac)
 
         # Log request.
-        db.cursor.execute("SELECT request.rid, request.active FROM request WHERE request.ip = ?", (ip,))
+        db.cursor.execute("SELECT request.rid, request.active FROM request WHERE request.ip = ? ORDER BY updated DESC LIMIT 1", (ip,))
         seen = db.cursor.fetchone()
+        debugger.debug("device_request seen: %s", (seen,))
         rid, active = (False, False)
         if seen:
             rid, active = seen
+            debugger.debug("device_request rid, active: %s", (seen,))
             if active:
                 with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_request, update device request"):
                     db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, rid))
                     log_event(mid, iid, did, rid, EVENT_REQUEST_IP, True)
                     db.connection.commit()
+                return rid
 
-        if not seen or not active:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_request, new device request"):
-                # @TODO interface, network
-                db.cursor.execute("INSERT INTO request (did, ip, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, ip, None, None, now, now, 1, 1))
-                rid = db.cursor.lastrowid
-                if seen:
-                    log_event(mid, iid, did, rid, EVENT_FIRST_REQUEST_RECENTLY_IP, True)
-                else:
-                    log_event(mid, iid, did, rid, EVENT_FIRST_REQUEST_IP, True)
-                db.connection.commit()
+        with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_request, new device request"):
+            # @TODO interface, network
+            db.cursor.execute("INSERT INTO request (did, ip, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, ip, None, None, now, now, 1, 1))
+            rid = db.cursor.lastrowid
+            debugger.debug("device_request new rid: %s", (rid,))
+            if seen:
+                log_event(mid, iid, did, rid, EVENT_FIRST_REQUEST_RECENTLY_IP, True)
+            else:
+                log_event(mid, iid, did, rid, EVENT_FIRST_REQUEST_IP, True)
+            db.connection.commit()
 
         return rid
 
