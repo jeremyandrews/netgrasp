@@ -97,7 +97,8 @@ class SelectQueryBuilder():
         query_string = "SELECT " + ", ".join(self.select) + " FROM " + self.table
         if len(self.leftjoin):
             query_string += " ".join(self.leftjoin)
-        query_string += " WHERE " + " AND ".join(self.where)
+        if len(self.where):
+            query_string += " WHERE " + " AND ".join(self.where)
         if len(self.group):
             query_string += " GROUP BY " + ", ".join(self.group)
         if len(self.order):
