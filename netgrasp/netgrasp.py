@@ -747,7 +747,8 @@ def device_seen(ip, mac):
             else:
                 # @TODO interface, network
                 db.cursor.execute("INSERT INTO activity (did, iid, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, iid, None, None, now, now, 1, 1))
-                log_event(mid, iid, did, rid, EVENT_FIRST_SEEN_DEVICE_RECENTLY, True)
+                if not first_seen_device:
+                    log_event(mid, iid, did, rid, EVENT_FIRST_SEEN_DEVICE_RECENTLY, True)
 
             # We delayed logging these events until we know the device id (did).
             if seen_mac:
