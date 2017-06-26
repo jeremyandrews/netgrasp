@@ -1055,10 +1055,10 @@ def previous_ip(did):
     except Exception as e:
         debugger.dump_exception("previous_ip() caught exception")
 
-def devices_with_ip(ip):
+def active_devices_with_ip(ip):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering devices_with_ip(%s)", (ip,))
+        debugger.debug("entering active_devices_with_ip(%s)", (ip,))
         db = database.database_instance
 
         devices = None
@@ -1068,7 +1068,7 @@ def devices_with_ip(ip):
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE active = 1 AND activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
 
         if devices:
@@ -1081,12 +1081,12 @@ def devices_with_ip(ip):
             return None
 
     except Exception as e:
-        debugger.dump_exception("devices_with_ip() caught exception")
+        debugger.dump_exception("active_devices_with_ip() caught exception")
 
-def devices_with_mac(mac):
+def active_devices_with_mac(mac):
     try:
         debugger = debug.debugger_instance
-        debugger.debug("entering devices_with_mac(%s)", (mac,))
+        debugger.debug("entering active_devices_with_mac(%s)", (mac,))
         db = database.database_instance
 
         devices = None
@@ -1096,7 +1096,7 @@ def devices_with_mac(mac):
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE active = 1 AND activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
             devices = db.cursor.fetchall()
 
         if devices:
@@ -1109,7 +1109,7 @@ def devices_with_mac(mac):
             return None
 
     except Exception as e:
-        debugger.dump_exception("devices_with_mac() caught exception")
+        debugger.dump_exception("active_devices_with_mac() caught exception")
 
 def devices_requesting_ip(ip, timeout):
     try:
@@ -1410,7 +1410,7 @@ def send_email_alerts(timeout):
                             talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
                             talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
 
-                    devices = devices_with_ip(ip)
+                    devices = active_devices_with_ip(ip)
                     devices_with_ip_text = ""
                     devices_with_ip_html = ""
                     if devices:
@@ -1419,7 +1419,7 @@ def send_email_alerts(timeout):
                             devices_with_ip_text += """\n - %s [%s]""" % (pretty.name_did(list_did), list_mac)
                             devices_with_ip_html += """<li>%s [%s]</li>""" % (pretty.name_did(list_did), list_mac)
 
-                    devices = devices_with_mac(mac)
+                    devices = active_devices_with_mac(mac)
                     devices_with_mac_text = ""
                     devices_with_mac_html = ""
                     if devices:
