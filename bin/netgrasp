@@ -73,6 +73,12 @@ if __name__ == "__main__":
     parser_identify.add_argument("--custom", "-c", help="filter by custom name (ex. -i iphone)")
     parser_identify.set_defaults(func=cli.identify)
 
+    # template
+    parser_template = subparsers.add_parser("template", help="display templates")
+    parser_template.add_argument("--type", choices=["config", "alert"], default="config", help="type of template to display")
+    parser_template.add_argument("--alert", choices=["requested_ip", "first_requested_ip", "first_requested_ip_recently", "seen_device", "first_seen_device", "first_seen_device_recently", "seen_mac", "first_seen_mac", "seen_ip", "first_seen_ip", "seen_host", "first_seen_host", "seen_vendor", "first_seen_vendor", "device_stale", "request_stale", "changed_ip", "duplicate_ip", "duplicate_mac", "network_scan", "ip_not_on_network", "src_mac_broadcast", "requested_self"], help="which alert template you'd like to display")
+    parser_template.set_defaults(func=cli.template)
+
     args = parser.parse_args()
 
     if args.config:

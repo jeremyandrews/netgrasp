@@ -1,2 +1,3 @@
 include docs/*md
+include netgrasp/template*
 include netgrasp/mail_templates/*json

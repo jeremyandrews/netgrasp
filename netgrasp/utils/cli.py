@@ -306,3 +306,22 @@ def identify(ng):
             db_args.append(ng.args.set[0])
             ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
             ng.db.connection.commit()
+
+def template(ng):
+    from netgrasp.database import database
+    from netgrasp.utils import pretty
+    from netgrasp.utils import exclusive_lock
+
+    import pkg_resources
+
+    if ng.args.alert or ng.args.type == 'alert':
+        template_file = "mail_templates/template." + ng.args.alert + ".json"
+        if ng.args.alert:
+            if not pkg_resources.resource_exists("netgrasp", template_file):
+                template = pkg_resources.resource_string("netgrasp", "mail_templates/template.default.json")
+            else:
+                template = pkg_resources.resource_string("netgrasp", "mail_templates/template." + ng.args.alert + ".json")
+            print template
+    elif ng.args.type == "config":
+        template = pkg_resources.resource_string("netgrasp", "template.netgrasp.cfg")
+        print template
