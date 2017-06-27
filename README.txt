@@ -17,6 +17,19 @@ Run:
 Or:
   sudo ./setup.py install
 
+To configure netgrasp, save the configuration template to any of
+the following paths, as desired for your local configuration:
+ - /usr/local/etc/netgrasp.cfg
+ - /etc/netgrasp.cfg
+ - ~/.netgrasp.cfg
+ - ./netgrasp.cfg
+
+For example:
+  sudo netgrasp template > /usr/local/etc/netgrasp.cfg
+
+Then edit the configuration file for your environment.
+
+
 To start netgrasp:
   sudo netgrasp start
 

@@ -31,7 +31,7 @@ PROCESSED_DAILY_DIGEST  = 2
 PROCESSED_WEEKLY_DIGEST = 4
 PROCESSED_NOTIFICATION  = 8
 
-DEFAULT_CONFIG    = ['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cnf']
+DEFAULT_CONFIG    = ['/etc/netgrasp.cfg', '/usr/local/etc/netgrasp.cfg', '~/.netgrasp.cfg', './netgrasp.cfg']
 DEFAULT_USER      = "daemon"
 DEFAULT_GROUP     = "daemon"
 DEFAULT_LOGLEVEL  = logging.INFO
