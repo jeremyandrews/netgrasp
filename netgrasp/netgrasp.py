@@ -186,8 +186,12 @@ class Netgrasp:
         if self.logging["pidfile"]:
             if os.path.isfile(self.logging["pidfile"]):
                 f = open(self.logging["pidfile"])
-                pid = int(f.readline())
+                pid_string = f.readline()
                 f.close()
+                if pid_string:
+                    pid = int(f.readline())
+                else:
+                    pid = 0
                 if pid > 0:
                     self.debugger.info("Found pidfile %s, contained pid %d", (self.logging["pidfile"], pid))
                     try:

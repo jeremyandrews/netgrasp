@@ -75,15 +75,15 @@ class Debugger:
                 else:
                     self.logger.log(level, message)
 
+            if fatal:
+                self.fatal(message, args)
+
             if self.mode == PRINT:
                 if ((self.verbose and verbose >= self.verbose) or (verbose == ALWAYS)):
                     if args:
                         print message % args
                     else:
                         print message
-
-            if fatal:
-                self.fatal("fatal error: exiting")
 
         except Exception as e:
             print "%s" % e

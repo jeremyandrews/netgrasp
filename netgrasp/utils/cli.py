@@ -24,6 +24,7 @@ def start(ng):
 
     # Start netgrasp.
     if ng.daemonize:
+        import daemonize
         # test that we can write to the pidfile
         try:
             with open(ng.logging["pidfile"], "w"):
@@ -32,16 +33,16 @@ def start(ng):
             ng.debugger.critical("failed to write to pidfile: %s", (ng.logging["pidfile"],))
 
         ng.debugger.warning("daemonizing, output redirected to log file: %s", (ng.logging["filename"],))
-        ng.debugger.info("daemonizing app=netgrasp, pidfile=%s, user=%s, group=%s, verbose=True", (ng.pidfile, username, groupname))
+        ng.debugger.info("daemonizing app=netgrasp, pidfile=%s, user=%s, group=%s, verbose=True", (ng.logging["pidfile"], ng.security["user"], ng.security["group"]))
 
         try:
             ng.debugger.logToFile()
-            daemon = daemonize.Daemonize(app="netgrasp", pid=ng.logging["pidfile"], privileged_action=get_pcap, user=ng.security["user"], group=ng.security["group"], action=main, keep_fds=[ng.debugger.handler.stream.fileno()], logger=ng.logger, verbose=True)
+            daemon = daemonize.Daemonize(app="netgrasp", pid=ng.logging["pidfile"], privileged_action=netgrasp.get_pcap, user=ng.security["user"], group=ng.security["group"], action=netgrasp.main, keep_fds=[ng.debugger.handler.stream.fileno()], logger=ng.logger, verbose=True)
             daemon.start()
         except Exception as e:
             ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))
     else:
-        main()
+        netgrasp.main()
 
 def stop(ng, must_be_running = True):
     import os
