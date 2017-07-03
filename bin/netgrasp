@@ -81,16 +81,41 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Where to look for configuration file.
     if args.config:
         config = args.config
     else:
         config = netgrasp.DEFAULT_CONFIG
 
+    # Instantiate netgrasp instance.
     ng = netgrasp.Netgrasp(config)
-    ng.debugger, ng.config = netgrasp._init(args.verbose, False, debug.PRINT)
-    ng.verbose = args.verbose
 
-    ng.pidfile = ng.config.GetText("Logging", "pidfile", netgrasp.DEFAULT_PIDFILE, False)
+    # Whether or not we will daemonize.
+    try:
+        # Not all subparsers define this option.
+        if args.foreground:
+            ng.daemonize = False
+        else:
+            ng.daemonize = True
+    except:
+        ng.daemonize = True
+
+    # How verbose we should be.
+    if args.verbose:
+        ng.verbose = args.verbose
+    else:
+        ng.verbose = False
+
+    ng._load_debugger()
+    ng._load_configuration()
+    ng._enable_debugger()
+
+    if not ng.daemonize:
+        ng.debugger.warning("output forced to stdout, started with --foreground flag.")
+
+    ng._include_dependencies()
+
     ng.args = args
+    ng.netgrasp_instance = ng
 
     args.func(ng)

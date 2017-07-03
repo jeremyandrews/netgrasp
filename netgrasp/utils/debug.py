@@ -48,19 +48,16 @@ class Debugger:
         if exc_type:
             if message:
                 if is_error:
-                    print """%s: %s [%s]""" % (message, exc_value, exc_traceback.tb_lineno)
                     self.error("%s: %s [%s]", (message, exc_value, exc_traceback.tb_lineno))
                 else:
                     self.info("%s: %s [%s]", (message, exc_value, exc_traceback.tb_lineno))
             else:
                 if is_error:
-                    print """%s [%s]""" % (exc_value, exc_traceback.tb_lineno)
                     self.error("%s [%s]", (exc_value, exc_traceback.tb_lineno))
                 else:
                     self.info("%s [%s]", (exc_value, exc_traceback.tb_lineno))
         elif message:
             if is_error:
-                print """%s""" % message
                 self.error("%s", (message,))
             else:
                 self.info("%s", (message,))
@@ -78,16 +75,16 @@ class Debugger:
                 else:
                     self.logger.log(level, message)
 
-            if fatal:
-                # if writing to file we log and then print message, otherwise just print
-                self.fatal(message, args)
-
             if self.mode == PRINT:
                 if ((self.verbose and verbose >= self.verbose) or (verbose == ALWAYS)):
                     if args:
                         print message % args
                     else:
                         print message
+
+            if fatal:
+                self.fatal("fatal error: exiting")
+
         except Exception as e:
             print "%s" % e
 
@@ -101,6 +98,9 @@ class Debugger:
         self.level = level
         if self.mode == FILE:
             self.logger.setLevel(level)
+
+    def logToFile(self):
+        self.mode = FILE
 
     def debug(self, message, args = None):
         self.log(message, args, DEBUG)

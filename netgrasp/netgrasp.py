@@ -47,6 +47,127 @@ class Netgrasp:
         else:
             self.config = DEFAULT_CONFIG
 
+        self.listen = {}
+        self.security = {}
+        self.database = {}
+        self.logging = {}
+        self.email = {}
+        self.notification = {}
+
+    def _load_debugger(self):
+        import logging
+        import logging.handlers
+
+        # We've not yet loaded configuration, so log to stdout.
+        self.logger = logging.getLogger(__name__)
+        self.debugger = debug.Debugger(self.verbose, self.logger, debug.PRINT)
+        self.debugger.handler = logging.StreamHandler()
+        formatter = logging.Formatter(DEFAULT_LOGFORMAT)
+        self.debugger.handler.setFormatter(formatter)
+        self.logger.addHandler(self.debugger.handler)
+
+    def _enable_debugger(self):
+        import logging
+        import logging.handlers
+
+        if self.daemonize:
+            self.debugger.handler = logging.FileHandler(self.logging["filename"])
+        else:
+            self.debugger.handler = logging.StreamHandler()
+        formatter = logging.Formatter(DEFAULT_LOGFORMAT)
+        self.debugger.handler.setFormatter(formatter)
+        self.logger.addHandler(self.debugger.handler)
+        self.logger.setLevel(self.logging["level"])
+
+    def _load_configuration(self):
+        self.configuration = config.Config(self.debugger)
+        
+        # Load listen parameters.
+        # @TODO: use pcap to set devices
+        #self.listen["interface"] = self.configuration.GetText("Listen", "interface", devices[0], False)
+        self.listen["interface"] = self.configuration.GetText("Listen", "interface")
+        self.listen["active_timeout"] = self.configuration.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
+        delay = self.configuration.GetInt("Listen", "delay", 15, False)
+        if (delay > 30):
+            delay = 30
+        elif (delay < 1):
+            delay = 1
+        self.listen["delay"] = delay
+
+        # Load security parameters.
+        self.security["user"] = self.configuration.GetText("Security", "user", DEFAULT_USER, False)
+        self.security["group"] = self.configuration.GetText("Security", "group", DEFAULT_GROUP, False)
+
+        # Load database parameters.
+        self.database["filename"] = self.configuration.GetText('Database', 'filename')
+        self.database["lock"] = self.configuration.GetText("Database", "lockfile", DEFAULT_DBLOCK, False)
+        self.database["gcenabled"] = self.configuration.GetBoolean("Database", "gcenabled", True, False)
+        if self.database["gcenabled"]:
+            self.database["oldest_arp"] = datetime.timedelta(seconds=self.configuration.GetInt("Database", "oldest_arp", 60 * 60 * 24 * 7 * 2, False))
+            self.database["oldest_event"] = datetime.timedelta(seconds=self.configuration.GetInt("Database", "oldest_event", 60 * 60 * 24 * 7 * 2, False))
+
+        # Load logging parameters.
+        self.logging["filename"] = self.configuration.GetText('Logging', 'filename', DEFAULT_LOGFILE)
+        self.logging["pidfile"] = self.configuration.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
+        self.logging["level"] = self.configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False)
+
+        # Load email parameters.
+        self.email["enabled"] = self.configuration.GetBoolean("Email", "enabled", False, False)
+        if self.email["enabled"]:
+            self.email["to"] = self.configuration.GetEmailList("Email", "to", None)
+            self.email["from"] = self.configuration.GetEmailList("Email", "from", None)
+            self.email["hostname"] = self.configuration.GetText("Email", "smtp_hostname", None)
+            self.email["port"] = self.configuration.GetInt("Email", "smtp_port", 587)
+            self.email["mode"] = self.configuration.GetText("Email", "smtp_mode", None)
+            self.email["username"] = self.configuration.GetText("Email", "smtp_username", None)
+            self.email["password"] = self.configuration.GetText("Email", "smtp_password", None)
+            self.email["alerts"] = self.configuration.GetTextList("Email", "alerts", None, False)
+            self.email["digests"] = self.configuration.GetTextList("Email", "digests", None, False)
+
+        # Load notification parameters.
+        self.notification["enabled"] = self.configuration.GetBoolean("Notification", "enabled", False, False)
+        if self.notification["enabled"]:
+            self.notification["alerts"] = self.configuration.GetTextList("Notification", "alerts", None, False)
+
+    def _include_dependencies(self):
+        try:
+            import sqlite3
+        except Exception as e:
+            self.debugger.error("fatal exception: %s", (e,))
+            self.debugger.critical("failed to import sqlite3 (as user %s), try 'pip install sqlite3', exiting", (ng.debugger.whoami()))
+        self.debugger.info("successfuly imported sqlite3")
+
+        try:
+            import dpkt
+        except Exception as e:
+            self.debugger.error("fatal exception: %s", (e,))
+            self.debugger.critical("failed to import dpkt (as user %s), try 'pip install dpkt', exiting", (self.debugger.whoami()))
+        self.debugger.info("successfuly imported dpkt")
+
+        if self.daemonize:
+            try:
+                import daemonize
+            except Exception as e:
+                self.debugger.error("fatal exception: %s", (e,))
+                self.debugger.critical("failed to import daemonize (as user %s), try 'pip install daemonize', exiting", (self.debugger.whoami()))
+            self.debugger.info("successfuly imported daemonize")
+
+        if self.email["enabled"]:
+            try:
+                import pyzmail
+            except Exception as e:
+                self.debugger.error("fatal exception: %s", (e,))
+                self.debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (self.debugger.whoami(),))
+            self.debugger.info('successfuly imported pyzmail')
+
+        if self.notification["enabled"]:
+            try:
+                import ntfy
+            except Exception as e:
+                self.debugger.error("fatal exception: %s", e)
+                self.debugger.critical("failed to import ntfy (as user %s), try 'pip install ntfy', exiting", (debugger.whoami()))
+            self.debugger.info('successfuly imported ntfy')
+
     # Drop root permissions when no longer needed.
     def drop_root(self, ng):
         import grp
@@ -62,13 +183,13 @@ class Netgrasp:
         import errno
 
         running = False
-        if self.pidfile:
-            if os.path.isfile(self.pidfile):
-                f = open(self.pidfile)
+        if self.logging["pidfile"]:
+            if os.path.isfile(self.logging["pidfile"]):
+                f = open(self.logging["pidfile"])
                 pid = int(f.readline())
                 f.close()
                 if pid > 0:
-                    self.debugger.info("Found pidfile %s, contained pid %d", (self.pidfile, pid))
+                    self.debugger.info("Found pidfile %s, contained pid %d", (self.logging["pidfile"], pid))
                     try:
                         os.kill(pid, 0)
                     except OSError as e:
@@ -1771,95 +1892,3 @@ def garbage_collection(enabled, oldest_arp, oldest_event):
         debugger.debug("deleted %d event entries older than %s", (event_count[0], now - oldest_event))
     except Exception as e:
         debugger.dump_exception("garbage_collection() caught exception")
-
-
-#################
-#################
-#################
-
-def _init(verbose, daemonize, mode = debug.FILE):
-    try:
-        import logging
-
-        # Get a logger and config parser.
-        logger = logging.getLogger(__name__)
-        formatter = logging.Formatter(DEFAULT_LOGFORMAT)
-
-        if mode == debug.FILE and os.getuid() != 0:
-            # We're going to fail, so write to stderr.
-            debugger = debug.Debugger()
-        else:
-            debugger = debug.Debugger(verbose, logger, mode)
-        configuration = config.Config(debugger)
-
-        debug.debugger_instance = debugger
-        config.config_instance = configuration
-
-        # Start logger, reading relevant configuration.
-        if daemonize:
-            try:
-                debugger.handler = logging.FileHandler(configuration.GetText('Logging', 'filename', DEFAULT_LOGFILE))
-            except Exception as e:
-                debugger.critical("Fatal exception setting up log handler: %s", (e,))
-        else:
-            if mode == debug.FILE:
-                debugger.handler = logging.StreamHandler()
-
-        if mode == debug.FILE:
-            debugger.handler.setFormatter(formatter)
-            logger.addHandler(debugger.handler)
-
-        if verbose:
-            debugger.setLevel(logging.DEBUG)
-            debugger.warning("[Logging] level forced to DEBUG, started with -v flag.")
-        else:
-            logger.setLevel(configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False))
-        debugger.info('loaded configuration file: %s', (configuration.found,))
-
-        return (debugger, configuration)
-    except Exception as e:
-        debugger.dump_exception("_init() caught exception")
-
-def start():
-    ng = netgrasp_instance
-    ng.debugger, ng.config = _init(ng.verbose, ng.daemonize)
-
-    if not ng.daemonize:
-        ng.debugger.info("Output forced to stderr, started with --foreground flag.")
-
-    keep_fds=[ng.debugger.handler.stream.fileno()]
-
-    try:
-        import sqlite3
-    except Exception as e:
-        ng.debugger.error("fatal exception: %s", (e,))
-        ng.debugger.critical("failed to import sqlite3 (as user %s), try 'pip install sqlite3', exiting", (ng.debugger.whoami()))
-    ng.debugger.info("successfuly imported sqlite3")
-    try:
-        import dpkt
-    except Exception as e:
-        ng.debugger.error("fatal exception: %s", (e,))
-        ng.debugger.critical("failed to import dpkt (as user %s), try 'pip install dpkt', exiting", (ng.debugger.whoami()))
-    ng.debugger.info("successfuly imported dpkt")
-    if ng.daemonize:
-        try:
-            import daemonize
-        except Exception as e:
-            ng.debugger.error("fatal exception: %s", (e,))
-            ng.debugger.critical("failed to import daemonize (as user %s), try 'pip install daemonize', exiting", (ng.debugger.whoami()))
-        ng.debugger.info("successfuly imported daemonize")
-
-    ng.database_filename = ng.config.GetText('Database', 'filename')
-
-    if ng.daemonize:
-        ng.pidfile = ng.config.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
-        username = ng.config.GetText('Security', 'user', DEFAULT_USER, False)
-        groupname = ng.config.GetText('Security', 'group', DEFAULT_GROUP, False)
-        ng.debugger.info("daemonizing app=netgrasp, pidfile=%s, user=%s, group=%s, verbose=True", (ng.pidfile, username, groupname))
-        try:
-            daemon = daemonize.Daemonize(app="netgrasp", pid=ng.pidfile, privileged_action=get_pcap, user=username, group=groupname, action=main, keep_fds=keep_fds, logger=ng.debugger.logger, verbose=True)
-            daemon.start()
-        except Exception as e:
-            ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))
-    else:
-        main()

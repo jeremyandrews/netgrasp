@@ -8,25 +8,40 @@ def start(ng):
         ng.debugger.critical("Netgrasp is already running with pid %d.", (pid,))
     ng.debugger.info("Starting netgrasp...")
 
+    # @TODO Perform all possible sanity checks here before daemonizing process -- this allows
+    # us to display helpful output to stderr/stdout instead of silently logging failures.
+
     if os.getuid() != 0:
         ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
 
-    # Re-instantiate Netgrasp with proper parameters
-    daemon_ng = netgrasp.Netgrasp(ng.config)
-    daemon_ng.args = ng.args
+    # Test that we can write to the log.
+    try:
+        with open(ng.logging["filename"], "w"):
+            ng.debugger.info("successfully writing to logfile")
+    except Exception as e:
+        ng.debugger.dump_exception("start() exception")
+        ng.debugger.critical("failed to write to logfile: %s", (ng.logging["filename"],))
 
-    if ng.args.verbose:
-        daemon_ng.verbose = ng.args.verbose
+    # Start netgrasp.
+    if ng.daemonize:
+        # test that we can write to the pidfile
+        try:
+            with open(ng.logging["pidfile"], "w"):
+                ng.debugger.info("successfully writing to pidfile")
+        except IOError:
+            ng.debugger.critical("failed to write to pidfile: %s", (ng.logging["pidfile"],))
+
+        ng.debugger.warning("daemonizing, output redirected to log file: %s", (ng.logging["filename"],))
+        ng.debugger.info("daemonizing app=netgrasp, pidfile=%s, user=%s, group=%s, verbose=True", (ng.pidfile, username, groupname))
+
+        try:
+            ng.debugger.logToFile()
+            daemon = daemonize.Daemonize(app="netgrasp", pid=ng.logging["pidfile"], privileged_action=get_pcap, user=ng.security["user"], group=ng.security["group"], action=main, keep_fds=[ng.debugger.handler.stream.fileno()], logger=ng.logger, verbose=True)
+            daemon.start()
+        except Exception as e:
+            ng.debugger.critical("Failed to daemonize: %s, exiting", (e,))
     else:
-        daemon_ng.verbose = False
-
-    if ng.args.foreground:
-        daemon_ng.daemonize = False
-    else:
-        daemon_ng.daemonize = True
-
-    netgrasp.netgrasp_instance = daemon_ng
-    netgrasp.start()
+        main()
 
 def stop(ng, must_be_running = True):
     import os
