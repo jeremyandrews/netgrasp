@@ -1,61 +1,52 @@
 from netgrasp.utils import debug
 
-email_instance = None
-
 class Email:
     def __init__(self):
         from netgrasp import netgrasp
-
         ng = netgrasp.netgrasp_instance
 
         if not ng.email["enabled"]:
-            debugger.warning("email is disabled")
+            ng.debugger.warning("email is disabled")
             return
 
         try:
             import pyzmail
         except Exception as e:
-            self.debugger.error("fatal exception: %s", (e,))
-            self.debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (self.debugger.whoami(),))
+            ng.debugger.error("fatal exception: %s", (e,))
+            ng.debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (ng.debugger.whoami(),))
 
         if not len(ng.email["to"]):
-            self.debugger.warning("no valid to address configured, email is disabled")
-            self.enabled = False
+            ng.debugger.warning("no valid to address configured, email is disabled")
+            ng.email["enabled"] = False
             return
 
-        email_from = config.GetEmailList("Email", "from")
-        if len(email_from) > 1:
-            self.debugger.warning("only able to send from one address, using %s", (email_from[0],))
-        elif not len(email_from):
-            self.debugger.warning("no valid from address configured, email is disabled")
-            self.enabled = False
+        if len(ng.email["from"]) > 1:
+            ng.debugger.warning("only able to send from one address, using %s", (ng.email["from"][0],))
+        elif not len(ng.email["from"]):
+            ng.debugger.warning("no valid from address configured, email is disabled")
+            ng.email["enabled"] = False
             return
-        self.email_from = email_from[0]
+        ng.email["from"] = ng.email["from"][0]
 
-        self.email_hostname = config.GetText("Email", "smtp_hostname")
-        self.email_port = config.GetText("Email", "smtp_port", None, False)
-        self.email_mode = config.GetText("Email", "smtp_mode", "normal", False)
-        if not self.email_mode in ["normal", "ssl", "tls"]:
-            self.debugger.warning("ignoring invalid email mode (%s), must be one of: normal, ssl, tls", (self.email_mode,))
-            self.email_mode = "normal"
+        if not ng.email["mode"] in ["normal", "ssl", "tls"]:
+            ng.debugger.warning("ignoring invalid email mode (%s), must be one of: normal, ssl, tls", (ng.email["mode"],))
+            ng.email["mode"] = "normal"
 
-        self.email_username = config.GetText("Email", "smtp_username", None, False)
-        self.email_password = config.GetText("Email", "smtp_password", None, False, True)
-
-        self.alerts = []
-        self.digest = []
-        alerts = config.GetTextList("Email", "alerts", None, False)
-        digests = config.GetTextList("Email", "digests", None, False)
-        for alert in alerts:
+        alerts = []
+        for alert in ng.email["alerts"]:
             if alert in netgrasp.ALERT_TYPES:
-                self.alerts.append(alert)
+                alerts.append(alert)
             else:
-                self.debugger.warning("ignoring unrecognized alert type (%s), supported types: %s", (alert, netgrasp.ALERT_TYPES))
-        for digest in digests:
+                ng.debugger.warning("ignoring unrecognized alert type (%s), supported types: %s", (alert, netgrasp.ALERT_TYPES))
+        ng.email["alerts"] = alerts
+
+        digests = []
+        for digest in ng.email["digests"]:
             if digest in netgrasp.DIGEST_TYPES:
-                self.digest.append(digest)
+                digests.append(digest)
             else:
-                self.debugger.warning("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
+                ng.debugger.warning("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
+        ng.email["digests"] = digests
 
     def LoadTemplate(self, template):
         try:
@@ -85,9 +76,10 @@ class Email:
             debugger.dump_exception("LoadTemplate() FIXME")
 
     def MailSend(self, template, replace):
+        from netgrasp import netgrasp
+        ng = netgrasp.netgrasp_instance
         try:
-            debugger = debug.debugger_instance
-            debugger.debug("entering email.MailSend(%s, %s)", (template, replace))
+            ng.debugger.debug("entering email.MailSend(%s, %s)", (template, replace))
 
             from string import Template
 
@@ -98,15 +90,15 @@ class Email:
             body_html = Template(template_body_html).substitute(replace)
             body_text = Template(template_body_text).substitute(replace)
 
-            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(self.email_from, self.email_to, subject, "iso-8859-1", (body_text, "us-ascii"), (body_html, "us-ascii"))
-            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, self.email_hostname, self.email_port, self.email_mode, self.email_username, self.email_password)
+            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email["from"], ng.email["to"], subject, "iso-8859-1", (body_text, "us-ascii"), (body_html, "us-ascii"))
+            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email["hostname"], ng.email["port"], ng.email["mode"], ng.email["username"], ng.email["password"])
 
             if isinstance(ret, dict):
                 if ret:
                     failed_recipients = ", ".join(ret.keys())
-                    debugger.warning("failed to send email, failed receipients: %s", (failed_recipients,))
+                    ng.debugger.warning("failed to send email, failed receipients: %s", (failed_recipients,))
                 else:
-                    debugger.debug("email sent: %s", (ret,))
+                    ng.debugger.debug("email sent: %s", (ret,))
 
         except Exception as e:
-            debugger.dump_exception("MailSend() FIXME")
+            ng.debugger.dump_exception("MailSend() FIXME")
