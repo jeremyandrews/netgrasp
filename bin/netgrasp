@@ -116,6 +116,5 @@ if __name__ == "__main__":
     ng._include_dependencies()
 
     ng.args = args
-    ng.netgrasp_instance = ng
 
     args.func(ng)

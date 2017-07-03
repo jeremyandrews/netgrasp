@@ -54,6 +54,8 @@ class Netgrasp:
         self.email = {}
         self.notification = {}
 
+        self.pcap = {}
+
     def _load_debugger(self):
         import logging
         import logging.handlers
@@ -173,8 +175,8 @@ class Netgrasp:
         import grp
 
         os.setgroups([])
-        os.setgid(grp.getgrnam(self.config.GetText('Security', 'group', DEFAULT_GROUP, False)).gr_gid)
-        os.setuid(pwd.getpwnam(self.config.GetText('Security', 'user', DEFAULT_USER, False)).pw_uid)
+        os.setgid(grp.getgrnam(ng.security["group"]).gr_gid)
+        os.setuid(pwd.getpwnam(ng.security["user"]).pw_uid)
         ng.debugger.info('running as user %s',  (self.debugger.whoami(),))
 
     # Determine if pid in pidfile is a running process.
@@ -219,24 +221,20 @@ def main(*pcap):
 
     ng.debugger.info("main process running as user %s", (ng.debugger.whoami(),))
 
-    if pcap:
-        # We have daemonized and are not running as root.
-        ng.pcap_instance, ng.interface, ng.network, ng.netmask = pcap
-    else:
+    if not pcap:
         # We are running in the foreground as root.
-        pcap = get_pcap()
-        ng.pcap_instance, ng.interface, ng.network, ng.netmask = pcap
+        get_pcap()
         ng.drop_root(ng)
 
     # At this point we should no longer have/need root privileges.
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
-    email.email_instance = email.Email(ng.config, ng.debugger)
-    notify.notify_instance = notify.Notify(ng.debugger, ng.config)
+    email.email_instance = email.Email()
+    notify.notify_instance = notify.Notify()
 
     ng.debugger.info("initiating wiretap process")
     parent_conn, child_conn = multiprocessing.Pipe()
-    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[ng.pcap_instance, child_conn])
+    child = multiprocessing.Process(name="wiretap", target=wiretap, args=[ng.pcap["instance"], child_conn])
 
     child.daemon = True
     child.start()
@@ -336,29 +334,33 @@ def main(*pcap):
 def get_pcap():
     import sys
     import socket
+
+    import netgrasp
+
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
+
+    ng = netgrasp.netgrasp_instance
 
     try:
         import pcap
     except Exception as e:
-        debug.debugger.error("fatal exception: %s", (e,))
-        debug.debugger.critical("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
+        ng.debugger.error("fatal exception: %s", (e,))
+        ng.debugger.critical("Fatal error: failed to import pcap, try: 'pip install pypcap', exiting")
 
     devices = pcap.findalldevs()
     if len(devices) <= 0:
-      debug.debugger.critical("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
+      ng.debugger.critical("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
 
-    interface = config.config_instance.GetText('Listen', 'interface', devices[0], False)
-    local_net, local_mask = pcap.lookupnet(interface)
+    ng.pcap["local_net"], ng.pcap["local_mask"] = pcap.lookupnet(ng.listen["interface"])
 
     try:
-        pc = pcap.pcap(name=interface, snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
-        pc.setfilter('arp')
+        ng.pcap["pc"] = pcap.pcap(name=ng.listen["interface"], snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+        ng.pcap["pc"].setfilter('arp')
     except Exception as e:
-        debug.debugger.critical("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
+        ng.debugger.critical("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
-    debug.debugger_instance.warning("listening for arp traffic on %s: %s/%s", (interface, socket.inet_ntoa(local_net), socket.inet_ntoa(local_mask)))
-    return [pc, interface, local_net, local_mask]
+    ng.debugger.warning("listening for arp traffic on %s: %s/%s", (ng.listen["interface"], socket.inet_ntoa(ng.pcap["local_net"]), socket.inet_ntoa(ng.pcap["local_mask"])))
+    return ng.pcap
 
 # Child process: wiretap, uses pcap to sniff arp packets.
 def wiretap(pc, child_conn):
@@ -429,15 +431,14 @@ def ip_on_network(ip):
 
         ng = netgrasp_instance
 
-        debugger = debug.debugger_instance
-        debugger.debug("entering address_on_network(%s)", (ip,))
+        ng.debugger.debug("entering address_on_network(%s)", (ip,))
 
         numeric_ip = struct.unpack("<L", socket.inet_aton(ip))[0]
         cidr = sum([bin(int(x)).count("1") for x in socket.inet_ntoa(ng.netmask).split(".")])
         netmask = struct.unpack("<L", ng.network)[0] & ((2L<<int(cidr) - 1) - 1)
         return numeric_ip & netmask == netmask
     except:
-        debugger.dump_exception("address_in_network() caught exception")
+        ng.debugger.dump_exception("address_in_network() caught exception")
 
 # Assumes we already have the database lock.
 def log_event(mid, iid, did, rid, event, have_lock = False):

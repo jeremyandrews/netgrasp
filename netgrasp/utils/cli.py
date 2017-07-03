@@ -22,6 +22,8 @@ def start(ng):
         ng.debugger.dump_exception("start() exception")
         ng.debugger.critical("failed to write to logfile: %s", (ng.logging["filename"],))
 
+    netgrasp.netgrasp_instance = ng
+
     # Start netgrasp.
     if ng.daemonize:
         import daemonize

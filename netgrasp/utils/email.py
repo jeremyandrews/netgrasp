@@ -3,13 +3,12 @@ from netgrasp.utils import debug
 email_instance = None
 
 class Email:
-    def __init__(self, config, debugger):
+    def __init__(self):
         from netgrasp import netgrasp
-        self.debugger = debugger
-        self.config = config
 
-        self.enabled = config.GetBoolean("Email", "enabled", False, False)
-        if not self.enabled:
+        ng = netgrasp.netgrasp_instance
+
+        if not ng.email["enabled"]:
             debugger.warning("email is disabled")
             return
 
@@ -19,8 +18,7 @@ class Email:
             self.debugger.error("fatal exception: %s", (e,))
             self.debugger.critical("failed to import pyzmail (as user %s), try: 'pip install pyzmail' or disable [Email], exiting.", (self.debugger.whoami(),))
 
-        self.email_to = config.GetEmailList("Email", "to")
-        if not len(self.email_to):
+        if not len(ng.email["to"]):
             self.debugger.warning("no valid to address configured, email is disabled")
             self.enabled = False
             return
