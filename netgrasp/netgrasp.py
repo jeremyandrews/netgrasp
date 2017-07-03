@@ -589,7 +589,7 @@ def received_arp(hdr, data, child_conn):
         dst_ip = socket.inet_ntoa(packet.data.tpa)
         dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
 
-        seen, requested, did, rid, src_mac_broadcast, ip_not_on_network, requested_self = (True, True, None, None, False, False, False)
+        seen, requested, mid, iid, did, rid, src_mac_broadcast, ip_not_on_network, requested_self = (True, True, None, None, None, None, False, False, False)
         if (src_mac == BROADCAST):
             seen = False
             debugger.info("Ignoring arp source of %s [%s], destination %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
