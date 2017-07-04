@@ -90,15 +90,17 @@ def status(ng):
 def update(ng):
     from netgrasp.update import update
 
+    netgrasp.netgrasp_instance = ng
+
     try:
-        ng.db = database.Database(ng.database["filename"], ng.debugger)
+        ng.db = database.Database()
     except Exception as e:
         ng.debugger.error("error: %s", (e,))
         ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database["filename"], ng.debugger.whoami()))
 
     ng.db.cursor = ng.db.connection.cursor()
 
-    query = database.SelectQueryBuilder("state", ng.debugger, ng.args.verbose)
+    query = database.SelectQueryBuilder("state")
     query.db_select("{%BASE}.value")
     query.db_where("{%BASE}.key = 'schema_version'")
     ng.db.cursor.execute(query.db_query(), query.db_args())
@@ -131,12 +133,14 @@ def list(ng):
     from netgrasp.database import database
     from netgrasp.utils import pretty
 
+    netgrasp.netgrasp_instance = ng
+
     pid = ng.is_running()
     if not pid:
         ng.debugger.critical("Netgrasp is not running.")
 
     try:
-        ng.db = database.Database(ng.database["filename"], ng.debugger)
+        ng.db = database.Database()
     except Exception as e:
         ng.debugger.error("error: %s", (e,))
         ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database["filename"], ng.debugger.whoami()))
@@ -147,7 +151,7 @@ def list(ng):
 
     if ng.args.type == "device":
         # List devices.
-        query = database.SelectQueryBuilder("activity", ng.debugger, ng.args.verbose)
+        query = database.SelectQueryBuilder("activity")
         query.db_select("{%BASE}.did")
         query.db_select("mac.address")
         query.db_select("ip.address")
@@ -170,7 +174,7 @@ def list(ng):
 
     elif ng.args.type == 'event':
         # List events.
-        query = database.SelectQueryBuilder("event", ng.debugger, ng.args.verbose)
+        query = database.SelectQueryBuilder("event")
         query.db_select("{%BASE}.did")
         query.db_select("mac.address")
         query.db_select("ip.address")
@@ -232,12 +236,14 @@ def identify(ng):
     from netgrasp.utils import pretty
     from netgrasp.utils import exclusive_lock
 
+    netgrasp.netgrasp_instance = ng
+
     pid = ng.is_running()
     if not pid:
         ng.debugger.critical("Netgrasp is not running.")
 
     try:
-        ng.db = database.Database(ng.database["filename"], ng.debugger)
+        ng.db = database.Database()
     except Exception as e:
         ng.debugger.error("%s", (e,))
         ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database["filename"], ng.debugger.whoami()))
@@ -251,7 +257,7 @@ def identify(ng):
         header = ["ID", "IP", "Name", "Last seen"]
         rowFormat = "{:>7}{:>16}{:>34}{:>22}"
 
-        query = database.SelectQueryBuilder("host", ng.debugger, ng.args.verbose)
+        query = database.SelectQueryBuilder("host")
         query.db_select("{%BASE}.hid")
         query.db_leftjoin("ip", "{%BASE}.iid = ip.iid")
         query.db_leftjoin("mac", "ip.mid = mac.mid")

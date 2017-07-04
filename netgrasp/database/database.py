@@ -55,7 +55,10 @@ class Database:
             ng.debugger.dump_exception("get_state() exception")
 
 class SelectQueryBuilder():
-    def __init__(self, table, verbose):
+    def __init__(self, table):
+        from netgrasp import netgrasp
+        ng = netgrasp.netgrasp_instance
+
         self.table = table
         self.select = []
         self.where = []
@@ -63,7 +66,7 @@ class SelectQueryBuilder():
         self.group = []
         self.order = []
         self.leftjoin = []
-        self.verbose = verbose
+        self.verbose = ng.verbose
 
     def _base_table(self, value):
         if isinstance(value, basestring):
