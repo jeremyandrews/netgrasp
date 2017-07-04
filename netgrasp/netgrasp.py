@@ -214,10 +214,9 @@ MAXSECONDS = 2
 def main(*pcap):
     import multiprocessing
 
-    import netgrasp
     from update import update
 
-    ng = netgrasp.netgrasp_instance
+    ng = netgrasp_instance
 
     ng.debugger.info("main process running as user %s", (ng.debugger.whoami(),))
 
@@ -244,13 +243,11 @@ def main(*pcap):
         ng.debugger.debug("wiretap failed to start")
 
     try:
-        ng.db = database.Database(ng.database_filename, ng.debugger)
-        database.database_instance = ng.db
+        ng.db = database.Database(ng.database["filename"], ng.debugger)
     except Exception as e:
         ng.debugger.dump_exception("main() caught exception creating database")
-        ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database_filename, ng.whoami()))
-    ng.db.lock = ng.config.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False)
-    ng.debugger.info("opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
+        ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database["filename"], ng.debugger.whoami()))
+    ng.debugger.info("opened %s as user %s", (ng.database["filename"], ng.debugger.whoami()))
     ng.db.cursor = ng.db.connection.cursor()
     # http://www.sqlite.org/wal.html
     ng.db.cursor.execute("PRAGMA journal_mode=WAL")
@@ -271,16 +268,10 @@ def main(*pcap):
 
     create_database()
 
-    ng.active_timeout = ng.config.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
-    ng.delay = ng.config.GetInt("Listen", "delay", 15, False)
-    if (ng.delay > 30):
-        ng.delay = 30
-    elif (ng.delay < 1):
-        ng.delay = 1
-
-    ng.garbage_collection = ng.config.GetBoolean("Database", "gcenabled", True, False)
-    ng.oldest_arp = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_arp", 60 * 60 * 24 * 7 * 2, False))
-    ng.oldest_event = datetime.timedelta(seconds=ng.config.GetInt("Database", "oldest_event", 60 * 60 * 24 * 7 * 2, False))
+    if (ng.listen["delay"] > 30):
+        ng.listen["delay"] = 30
+    elif (ng.listen["delay"] < 1):
+        ng.listen["delay"] = 1
 
     if child.is_alive():
         run = True
@@ -302,7 +293,7 @@ def main(*pcap):
             send_notifications()
             send_email_alerts(ng.active_timeout)
             send_email_digests()
-            garbage_collection(ng.garbage_collection, ng.oldest_arp, ng.oldest_event)
+            garbage_collection()
             refresh_dns_cache()
 
             ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
@@ -335,11 +326,9 @@ def get_pcap():
     import sys
     import socket
 
-    import netgrasp
-
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
 
-    ng = netgrasp.netgrasp_instance
+    ng = netgrasp_instance
 
     try:
         import pcap
@@ -354,8 +343,8 @@ def get_pcap():
     ng.pcap["local_net"], ng.pcap["local_mask"] = pcap.lookupnet(ng.listen["interface"])
 
     try:
-        ng.pcap["pc"] = pcap.pcap(name=ng.listen["interface"], snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
-        ng.pcap["pc"].setfilter('arp')
+        ng.pcap["instance"] = pcap.pcap(name=ng.listen["interface"], snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
+        ng.pcap["instance"].setfilter('arp')
     except Exception as e:
         ng.debugger.critical("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
@@ -366,40 +355,38 @@ def get_pcap():
 def wiretap(pc, child_conn):
     import sys
 
-    netgrasp_instance.debugger.debug('top of wiretap')
+    ng = netgrasp_instance
+    ng.debugger.debug('top of wiretap')
 
     try:
         import dpkt
     except Exception as e:
-        netgrasp_instance.debugger.error("fatal exception: %s", (e,))
-        netgrasp_instance.debugger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
+        ng.debugger.error("fatal exception: %s", (e,))
+        ng.debugger.critical("failed to import dpkt, try: 'pip install dpkt', exiting")
     try:
 
         import pcap
     except Exception as e:
-        netgrasp_instance.debugger.error("fatal exception: %s", (e,))
-        netgrasp_instance.debugger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
+        ng.debugger.error("fatal exception: %s", (e,))
+        ng.debugger.critical("failed to import pcap, try: 'pip install pypcap', exiting")
 
     assert (os.getuid() != 0) and (os.getgid() != 0), "Failed to drop root privileges, aborting."
 
-    database_filename = config.config_instance.GetText("Database", "filename")
-
     try:
-        db = database.Database(database_filename, netgrasp_instance.debugger)
-        db.lock = config.config_instance.GetText('Database', 'lockfile', DEFAULT_DBLOCK, False)
+        ng.db = database.Database(ng.database["filename"], ng.debugger)
     except Exception as e:
-        netgrasp_instance.debugger.error("%s", (e,))
-        netgrasp_instance.debugger.critical("failed to open or create %s (as user %s), exiting", (database_filename, netgrasp_instance.debugger.whoami()))
-    netgrasp_instance.debugger.info("opened %s as user %s", (database_filename, netgrasp_instance.debugger.whoami()))
-    db.cursor = db.connection.cursor()
-    database.database_instance = db
+        ng.debugger.error("%s", (e,))
+        ng.debugger.critical("failed to open or create %s (as user %s), exiting", (database["filename"], ng.debugger.whoami()))
+
+    ng.debugger.info("opened %s as user %s", (database["filename"], ng.debugger.whoami()))
+    ng.db.cursor = ngdb.connection.cursor()
 
     run = True
     last_heartbeat = datetime.datetime.now()
     while run:
         try:
             now = datetime.datetime.now()
-            netgrasp_instance.debugger.debug("[%d] top of while loop: %s", (run, now))
+            ng.debugger.debug("[%d] top of while loop: %s", (run, now))
 
             child_conn.send(HEARTBEAT)
 
@@ -413,7 +400,7 @@ def wiretap(pc, child_conn):
                     heartbeat = True
             # It's possible to receive multiple heartbeats, but many or one is the same to us.
             if heartbeat:
-                netgrasp_instance.debugger.debug("received heartbeat from main process")
+                ng.debugger.debug("received heartbeat from main process")
                 last_heartbeat = now
 
             # If we haven't heard from the main process in >1 minute, exit.
@@ -421,8 +408,8 @@ def wiretap(pc, child_conn):
             if (now >= time_to_exit):
                 run = False
         except Exception as e:
-            netgrasp_instance.debugger.dump_exception("wiretap() while loop caught exception")
-    netgrasp_instance.debugger.critical("No heartbeats from main process for >3 minutes, exiting.")
+            ng.debugger.dump_exception("wiretap() while loop caught exception")
+    ng.debugger.critical("No heartbeats from main process for >3 minutes, exiting.")
 
 def ip_on_network(ip):
     try:
@@ -443,96 +430,87 @@ def ip_on_network(ip):
 # Assumes we already have the database lock.
 def log_event(mid, iid, did, rid, event, have_lock = False):
     try:
-        db = database.database_instance
-        debugger = debug.debugger_instance
-        emailer = email.email_instance
-        notifier = notify.notify_instance
-
-        debugger.debug("entering log_event(%s, %s, %s, %s, %s, %s)", (mid, iid, did, rid, event, have_lock))
+        ng.debugger.debug("entering log_event(%s, %s, %s, %s, %s, %s)", (mid, iid, did, rid, event, have_lock))
 
         # Only log events for which there are subscribers.
-        if (emailer and emailer.enabled and emailer.alerts and event in emailer.alerts) or (notifier and notifier.enabled and notifier.alerts and event in notifier.alerts):
+        if ((ng.email["enabled"] and event in ng.email["alerts"]) or (ng.notification["enabled"] and event in ng.notification["alerts"])):
             if have_lock:
                 _log_event(mid, iid, did, rid, event)
             else:
-                with exclusive_lock.ExclusiveFileLock(db.lock, 5, "log_event, " + event):
+                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "log_event, " + event):
                     _log_event(mid, iid, did, rid, event)
-                    db.connection.commit()
+                    ng.db.connection.commit()
         else:
-            debugger.debug("log_event: ignoring %s event, no subscribers", (event,))
+            ng.debugger.debug("log_event: ignoring %s event, no subscribers", (event,))
 
     except Exception as e:
-        debugger.dump_exception("log_event() caught exception")
+        ng.debugger.dump_exception("log_event() caught exception")
 
 def _log_event(mid, iid, did, rid, event):
-    try:
-        debugger = debug.debugger_instance
-        db = database.database_instance
+    ng = netgrasp_instance
 
+    try:
         now = datetime.datetime.now()
 
-        db.connection.execute("INSERT INTO event (mid, iid, did, rid, timestamp, processed, type) VALUES(?, ?, ?, ?, ?, ?, ?)", (mid, iid, did, rid, now, 0, event))
+        ng.db.connection.execute("INSERT INTO event (mid, iid, did, rid, timestamp, processed, type) VALUES(?, ?, ?, ?, ?, ?, ?)", (mid, iid, did, rid, now, 0, event))
 
     except Exception as e:
-        debugger.dump_exception("_log_event() caught exception")
+        ng.debugger.dump_exception("_log_event() caught exception")
 
 def ip_is_mine(ip):
+    ng = netgrasp_instance
+
     try:
         import socket
-        debugger = debug.debugger_instance
-        debugger.debug("entering ip_is_mine(%s)", (ip,))
+        ng.debugger.debug("entering ip_is_mine(%s)", (ip,))
 
         return (ip == socket.gethostbyname(socket.gethostname()))
     except Exception as e:
-        debugger.dump_exception("ip_is_mine() caught exception")
+        ng.debugger.dump_exception("ip_is_mine() caught exception")
 
 def ip_has_changed(did):
     try:
-        debugger = debug.debugger_instance
-        db = database.database_instance
+        ng.debugger.debug("entering ip_has_changed(%s)", (did,))
 
-        debugger.debug("entering ip_has_changed(%s)", (did,))
-
-        db.cursor.execute("SELECT DISTINCT iid FROM activity WHERE did = ? ORDER BY updated DESC LIMIT 2", (did))
-        iids = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT DISTINCT iid FROM activity WHERE did = ? ORDER BY updated DESC LIMIT 2", (did))
+        iids = ng.db.cursor.fetchall()
         #debugger.debug("ips: %s", (ips,))
         if iids and len(iids) == 2:
-            db.cursor.execute("SELECT address FROM ip WHERE iid IN(?, ?)", (iids[0], iids[1]))
-            ips = db.cursor.fetchall()
+            ng.db.cursor.execute("SELECT address FROM ip WHERE iid IN(?, ?)", (iids[0], iids[1]))
+            ips = ng.db.cursor.fetchall()
             if ips:
                 ip_a = ips[0]
                 ip_b = ips[1]
-                debugger.debug("ips: %s, %s", (ip_a, ip_b))
+                ng.debugger.debug("ips: %s, %s", (ip_a, ip_b))
 
                 if ip_a != ip_b:
-                    debugger.info("ip for did %s changed from %s to %s", (did, ip_a[0], ip_b[0]))
+                    ng.debugger.info("ip for did %s changed from %s to %s", (did, ip_a[0], ip_b[0]))
                     return True
                 else:
-                    debugger.debug("ip for did %s has not changed from %s", (did, ip_a[0]))
+                    ng.debugger.debug("ip for did %s has not changed from %s", (did, ip_a[0]))
                     return False
             else:
-                debugger.info("[%d] failed to load ips for iids: %s, %s", (did, iids[0], iids[1]))
+                ng.debugger.info("[%d] failed to load ips for iids: %s, %s", (did, iids[0], iids[1]))
                 return False
         else:
-            debugger.debug("ip for did %s has not changed", (did,))
+            ng.debugger.debug("ip for did %s has not changed", (did,))
             return False
 
     except Exception as e:
-        debugger.dump_exception("ip_has_changed() caught exception")
+        ng.debugger.dump_exception("ip_has_changed() caught exception")
 
 # Database definitions.
 def create_database():
-    try:
-        from utils import exclusive_lock
-        debugger = debug.debugger_instance
-        db = database.database_instance
+    from utils import exclusive_lock
+    ng = netgrasp_instance
 
-        debugger.debug("Creating database tables, if not already existing.")
+    try:
+        ng.debugger.debug("Creating database tables, if not already existing.")
 
         # PRAGMA index_list(TABLE)
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "create_database"):
+        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "create_database"):
             # Create state table.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS state(
                 id INTEGER PRIMARY KEY,
                 key VARCHAR UNIQUE,
@@ -540,10 +518,10 @@ def create_database():
               )
             """)
             # @TODO make this dynamic, define globally netgrasp and schema versions
-            db.cursor.execute("INSERT OR IGNORE INTO state (key, value) VALUES('schema_version', 1)")
+            ng.db.cursor.execute("INSERT OR IGNORE INTO state (key, value) VALUES('schema_version', 1)")
 
             # Record of all MAC addresses ever actively seen.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS mac(
                 mid INTEGER PRIMARY KEY,
                 vid TEXT,
@@ -552,11 +530,11 @@ def create_database():
                 self NUMERIC
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxmac_address ON mac (address)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxmac_vid ON mac (vid)")
+            ng.db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxmac_address ON mac (address)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxmac_vid ON mac (vid)")
 
             # Record of all vendors ever actively seen.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS vendor(
                 vid INTEGER PRIMARY KEY,
                 name VARCHAR UNIQUE,
@@ -565,7 +543,7 @@ def create_database():
             """)
 
             # Record of all IP addresses ever actively seen.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS ip(
                 iid INTEGER PRIMARY KEY,
                 mid INTEGER,
@@ -573,12 +551,12 @@ def create_database():
                 created TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxip_mid_iid ON ip (mid, iid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxip_address_mid_created ON ip (address, mid, created)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxip_mid_iid ON ip (mid, iid)")
+            ng.db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxip_mid_iid ON ip (mid, iid)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxip_address_mid_created ON ip (address, mid, created)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxip_mid_iid ON ip (mid, iid)")
 
             # Cache DNS lookups.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS host(
                 hid INTEGER PRIMARY KEY,
                 iid INTEGER,
@@ -588,13 +566,13 @@ def create_database():
 		updated TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxhost_iid ON host (iid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_name ON host (name)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_custom ON host (custom_name)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_updated ON host (updated)")
+            ng.db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxhost_iid ON host (iid)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_name ON host (name)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_custom ON host (custom_name)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxhost_updated ON host (updated)")
 
             # Record of all devices ever actively seen.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS device(
                 did INTEGER PRIMARY KEY,
                 mid INTEGER,
@@ -605,13 +583,13 @@ def create_database():
                 updated TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxdevice_mid_iid ON device (mid, iid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_hid_mid_did ON device (hid, mid, did)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_vid ON device (vid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_updated ON device (updated)")
+            ng.db.cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idxdevice_mid_iid ON device (mid, iid)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_hid_mid_did ON device (hid, mid, did)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_vid ON device (vid)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxdevice_updated ON device (updated)")
 
             # Record of device activity.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS activity(
                 aid INTEGER PRIMARY KEY,
                 did INTEGER,
@@ -624,13 +602,13 @@ def create_database():
                 active NUMERIC
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_active_did ON activity (active, did)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_did_iid ON activity (did, iid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_did_active_counter ON activity (did, active, counter)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_active_updated ON activity (active, updated)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_active_did ON activity (active, did)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_did_iid ON activity (did, iid)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_did_active_counter ON activity (did, active, counter)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxactivity_active_updated ON activity (active, updated)")
 
             # Record of all IP addresses ever requested.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS request(
                 rid INTEGER PRIMARY KEY,
                 did INTEGER,
@@ -643,13 +621,13 @@ def create_database():
                 active NUMERIC
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_active_updated ON request (active, updated)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_updated ON request (updated)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_active_ip ON request (active, ip)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_did_created ON request (did, created)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_active_updated ON request (active, updated)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_updated ON request (updated)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_active_ip ON request (active, ip)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxrequest_did_created ON request (did, created)")
 
             # Create arp table.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS arp(
                 aid INTEGER PRIMARY KEY,
                 did INT,
@@ -663,11 +641,11 @@ def create_database():
                 timestamp TIMESTAMP
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxarp_srcip_timestamp_rid ON arp (src_ip, timestamp, rid)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxarp_rid_srcip ON arp (rid, src_ip)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxarp_srcip_timestamp_rid ON arp (src_ip, timestamp, rid)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxarp_rid_srcip ON arp (rid, src_ip)")
 
             # Create event table.
-            db.cursor.execute("""
+            ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS event(
                 eid INTEGER PRIMARY KEY,
                 mid INTEGER,
@@ -681,19 +659,21 @@ def create_database():
                 type VARCHAR
               )
             """)
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxevent_type_timestamp_processed ON event (type, timestamp, processed)")
-            db.cursor.execute("CREATE INDEX IF NOT EXISTS idxevent_timestamp_processed ON event (timestamp, processed)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxevent_type_timestamp_processed ON event (type, timestamp, processed)")
+            ng.db.cursor.execute("CREATE INDEX IF NOT EXISTS idxevent_timestamp_processed ON event (timestamp, processed)")
             # PRAGMA index_list(event)
 
             # Update internal sqlite3 table and index statistics every time we restart.
-            db.cursor.execute("ANALYZE")
+            ng.db.cursor.execute("ANALYZE")
 
-            db.connection.commit()
+            ng.db.connection.commit()
     except Exception as e:
-        debugger.dump_exception("create_database() caught exception")
+        ng.debugger.dump_exception("create_database() caught exception")
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
+    ng = netgrasp_instance
+
     try:
         import socket
         import struct
@@ -701,10 +681,7 @@ def received_arp(hdr, data, child_conn):
 
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering received_arp")
+        ng.debugger.debug("entering received_arp")
 
         now = datetime.datetime.now()
 
@@ -718,22 +695,22 @@ def received_arp(hdr, data, child_conn):
         seen, requested, mid, iid, did, rid, src_mac_broadcast, ip_not_on_network, requested_self = (True, True, None, None, None, None, False, False, False)
         if (src_mac == BROADCAST):
             seen = False
-            debugger.info("Ignoring arp source of %s [%s], destination %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
+            ng.debugger.info("Ignoring arp source of %s [%s], destination %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
             src_mac_broadcast = True
 
         if not ip_on_network(src_ip):
             seen = False
-            debugger.info("IP not on network, source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
+            ng.debugger.info("IP not on network, source of %s [%s], dst %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
             ip_not_on_network = True
 
         if (dst_ip == src_ip) or (dst_mac == src_mac):
             requested = False
-            debugger.info("requesting self %s [%s], ignoring", (src_ip, src_mac))
+            ng.debugger.info("requesting self %s [%s], ignoring", (src_ip, src_mac))
             requested_self = True
 
         # ARP REQUEST
         if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
-            debugger.debug('ARP REQUEST from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
+            ng.debugger.debug('ARP REQUEST from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
             if seen:
                 mid, iid, did = device_seen(src_ip, src_mac)
             if requested:
@@ -741,138 +718,137 @@ def received_arp(hdr, data, child_conn):
 
         # ARP REPLY
         elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
-            debugger.debug('ARP REPLY from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
+            ng.debugger.debug('ARP REPLY from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
             if seen:
                 mid, iid, did = device_seen(src_ip, src_mac)
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "received_arp, arp"):
-            db.cursor.execute("INSERT INTO arp (did, rid, src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
-            debugger.debug("inserted into arp (%s, %s, %s, %s, %s, %s, %s)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
+        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "received_arp, arp"):
+            ng.db.cursor.execute("INSERT INTO arp (did, rid, src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
+            ng.debugger.debug("inserted into arp (%s, %s, %s, %s, %s, %s, %s)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
             if src_mac_broadcast:
                 log_event(mid, iid, did, rid, EVENT_SRC_MAC_BROADCAST, True)
             if ip_not_on_network:
                 log_event(mid, iid, did, rid, EVENT_IP_NOT_ON_NETWORK, True)
             if requested_self:
                 log_event(mid, iid, did, rid, EVENT_REQUESTED_SELF, True)
-            db.connection.commit()
+            ng.db.connection.commit()
 
     except Exception as e:
-        debugger.dump_exception("received_arp() caught exception")
+        ng.debugger.dump_exception("received_arp() caught exception")
 
 def device_seen(ip, mac):
+    ng = netgrasp_instance
+
     try:
         import datetime
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering device_seen(%s, %s)", (ip, mac))
+        ng.debugger.debug("entering device_seen(%s, %s)", (ip, mac))
 
         now = datetime.datetime.now()
 
         rid, seen_mac, first_seen_mac, seen_ip, first_seen_ip, first_seen_host, seen_host, first_seen_device, seen_vendor, first_seen_vendor = (None, False, False, False, False, False, False, False, False, False)
 
         # Get ID for MAC, creating if necessary.
-        db.cursor.execute("SELECT mid, vid FROM mac WHERE address = ?", (mac,))
-        seen = db.cursor.fetchone()
+        ng.db.cursor.execute("SELECT mid, vid FROM mac WHERE address = ?", (mac,))
+        seen = ng.db.cursor.fetchone()
         if seen:
             mid, vid = seen
-            debugger.debug("existing mac %s [%d, %d]", (mac, mid, vid))
+            ng.debugger.debug("existing mac %s [%d, %d]", (mac, mid, vid))
             seen_mac = True
         else:
             vendor = mac_lookup(mac)
-            db.cursor.execute("SELECT vendor.vid FROM vendor WHERE vendor.name = ?", (vendor,))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT vendor.vid FROM vendor WHERE vendor.name = ?", (vendor,))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 vid = seen[0]
-                debugger.debug("existing vendor %s [%d]", (vendor, vid))
+                ng.debugger.debug("existing vendor %s [%d]", (vendor, vid))
                 seen_vendor = True
             else:
-                with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new vendor"):
-                    db.cursor.execute("INSERT INTO vendor (name, created) VALUES(?, ?)", (vendor, now))
+                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new vendor"):
+                    ng.db.cursor.execute("INSERT INTO vendor (name, created) VALUES(?, ?)", (vendor, now))
 
-                    db.connection.commit()
+                    ng.db.connection.commit()
                 first_seen_vendor = True
-                vid = db.cursor.lastrowid
-                debugger.info("new vendor %s [%d]", (vendor, vid))
+                vid = ng.db.cursor.lastrowid
+                ng.debugger.info("new vendor %s [%d]", (vendor, vid))
 
-            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new mac"):
-                db.cursor.execute("INSERT INTO mac (vid, address, created, self) VALUES(?, ?, ?, ?)", (vid, mac, now, ip_is_mine(ip)))
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new mac"):
+                ng.db.cursor.execute("INSERT INTO mac (vid, address, created, self) VALUES(?, ?, ?, ?)", (vid, mac, now, ip_is_mine(ip)))
                 first_seen_mac = True
-                db.connection.commit()
-            mid = db.cursor.lastrowid
-            debugger.info("new mac %s [%d]", (mac, mid))
+                ng.db.connection.commit()
+            mid = ng.db.cursor.lastrowid
+            ng.debugger.info("new mac %s [%d]", (mac, mid))
 
         # Get ID for IP, creating if necessary.
-        db.cursor.execute("SELECT ip.iid FROM ip WHERE ip.mid = ? AND ip.address = ?", (mid, ip))
-        seen = db.cursor.fetchone()
+        ng.db.cursor.execute("SELECT ip.iid FROM ip WHERE ip.mid = ? AND ip.address = ?", (mid, ip))
+        seen = ng.db.cursor.fetchone()
         if seen:
             iid = seen[0]
-            debugger.debug("existing ip %s [%d]", (ip, iid))
+            ng.debugger.debug("existing ip %s [%d]", (ip, iid))
             seen_ip = True
         else:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new ip"):
-                db.cursor.execute("INSERT INTO ip (mid, address, created) VALUES(?, ?, ?)", (mid, ip, now))
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new ip"):
+                ng.db.cursor.execute("INSERT INTO ip (mid, address, created) VALUES(?, ?, ?)", (mid, ip, now))
                 first_seen_ip = True
-                db.connection.commit()
-            iid = db.cursor.lastrowid
-            debugger.info("new ip %s [%d]", (ip, iid))
+                ng.db.connection.commit()
+            iid = ng.db.cursor.lastrowid
+            ng.debugger.info("new ip %s [%d]", (ip, iid))
 
         # Get ID for Hostname, creating if necessary.
-        db.cursor.execute("SELECT host.hid, host.name, host.custom_name FROM host WHERE host.iid = ?", (iid,))
-        seen = db.cursor.fetchone()
+        ng.db.cursor.execute("SELECT host.hid, host.name, host.custom_name FROM host WHERE host.iid = ?", (iid,))
+        seen = ng.db.cursor.fetchone()
         if seen:
             hid, host_name, custom_name = seen
-            debugger.debug("existing host %s (%s) [%d]", (host_name, custom_name, hid))
+            ng.debugger.debug("existing host %s (%s) [%d]", (host_name, custom_name, hid))
             seen_host = True
         else:
             host_name = dns_lookup(ip)
-            with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new host"):
-                db.cursor.execute("INSERT INTO host (iid, name, custom_name, created, updated) VALUES(?, ?, ?, ?, ?)", (iid, host_name, None, now, now))
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new host"):
+                ng.db.cursor.execute("INSERT INTO host (iid, name, custom_name, created, updated) VALUES(?, ?, ?, ?, ?)", (iid, host_name, None, now, now))
 
-                db.connection.commit()
+                ng.db.connection.commit()
             first_seen_host = True
-            hid = db.cursor.lastrowid
-            debugger.info("new hostname %s [%d]", (host_name, hid))
+            hid = ng.db.cursor.lastrowid
+            ng.debugger.info("new hostname %s [%d]", (host_name, hid))
 
         # Get ID for Device, creating if necessary.
-        db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, iid))
-        seen = db.cursor.fetchone()
+        ng.db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, iid))
+        seen = ng.db.cursor.fetchone()
         if seen:
             did = seen[0]
-            debugger.debug("existing device %s (%s) [%d]", (ip, mac, did))
+            ng.debugger.debug("existing device %s (%s) [%d]", (ip, mac, did))
         else:
             # The IP may have changed for this Device.
-            db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.hid = ?", (mid, hid))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.hid = ?", (mid, hid))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 did = seen[0]
-                debugger.debug("existing device %s (%s) [%d] (new ip)", (ip, mac, did))
-                with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, update device (new ip)"):
-                    db.cursor.execute("UPDATE device SET iid = ?, updated = ? WHERE did = ?", (iid, now, did))
+                ng.debugger.debug("existing device %s (%s) [%d] (new ip)", (ip, mac, did))
+                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, update device (new ip)"):
+                    ng.db.cursor.execute("UPDATE device SET iid = ?, updated = ? WHERE did = ?", (iid, now, did))
                     log_event(mid, iid, did, rid, EVENT_SEEN_DEVICE, True)
                     log_event(mid, iid, did, rid, EVENT_CHANGED_IP, True)
-                    db.connection.commit()
+                    ng.db.connection.commit()
             else:
-                with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, new device"):
-                    db.cursor.execute("INSERT INTO device (mid, iid, hid, vid, created, updated) VALUES(?, ?, ?, ?, ?, ?)", (mid, iid, hid, vid, now, now))
-                    db.connection.commit()
+                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new device"):
+                    ng.db.cursor.execute("INSERT INTO device (mid, iid, hid, vid, created, updated) VALUES(?, ?, ?, ?, ?, ?)", (mid, iid, hid, vid, now, now))
+                    ng.db.connection.commit()
                 first_seen_device = True
-                did = db.cursor.lastrowid
-                debugger.info("new device %s (%s) [%d]", (ip, mac, did))
+                did = ng.db.cursor.lastrowid
+                ng.debugger.info("new device %s (%s) [%d]", (ip, mac, did))
 
         # Finally, log activity.
-        db.cursor.execute("SELECT activity.aid FROM activity WHERE activity.did = ? AND activity.active = 1", (did,))
-        seen = db.cursor.fetchone()
+        ng.db.cursor.execute("SELECT activity.aid FROM activity WHERE activity.did = ? AND activity.active = 1", (did,))
+        seen = ng.db.cursor.fetchone()
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_seen, log activity"):
+        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, log activity"):
             if seen:
                 aid = seen[0]
-                db.cursor.execute("UPDATE activity SET updated = ?, iid = ?, counter = counter + 1 WHERE aid = ?", (now, iid, aid))
+                ng.db.cursor.execute("UPDATE activity SET updated = ?, iid = ?, counter = counter + 1 WHERE aid = ?", (now, iid, aid))
                 log_event(mid, iid, did, rid, EVENT_SEEN_DEVICE, True)
             else:
                 # @TODO interface, network
-                db.cursor.execute("INSERT INTO activity (did, iid, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, iid, None, None, now, now, 1, 1))
+                ng.db.cursor.execute("INSERT INTO activity (did, iid, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, iid, None, None, now, now, 1, 1))
                 if not first_seen_device:
                     log_event(mid, iid, did, rid, EVENT_FIRST_SEEN_DEVICE_RECENTLY, True)
 
@@ -895,90 +871,88 @@ def device_seen(ip, mac):
                 log_event(mid, iid, did, rid, EVENT_FIRST_SEEN_VENDOR, True)
             if first_seen_device:
                 log_event(mid, iid, did, rid, EVENT_FIRST_SEEN_DEVICE, True)
-            db.connection.commit()
+            ng.db.connection.commit()
 
         return (mid, iid, did)
 
     except Exception as e:
-        debugger.dump_exception("device_seen() caught exception")
+        ng.debugger.dump_exception("device_seen() caught exception")
 
 def device_request(ip, mac):
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
         import datetime
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering device_request(%s, %s)", (ip, mac))
+        ng.debugger.debug("entering device_request(%s, %s)", (ip, mac))
 
         now = datetime.datetime.now()
 
         mid, iid, did = get_ids(ip, mac)
 
         # Log request.
-        db.cursor.execute("SELECT request.rid, request.active FROM request WHERE request.ip = ? ORDER BY updated DESC LIMIT 1", (ip,))
-        seen = db.cursor.fetchone()
+        ng.db.cursor.execute("SELECT request.rid, request.active FROM request WHERE request.ip = ? ORDER BY updated DESC LIMIT 1", (ip,))
+        seen = ng.db.cursor.fetchone()
         rid, active = (False, False)
         if seen:
             rid, active = seen
             if active:
-                with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_request, update device request"):
-                    db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, rid))
+                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_request, update device request"):
+                    ng.db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, rid))
                     log_event(mid, iid, did, rid, EVENT_REQUEST_IP, True)
-                    db.connection.commit()
+                    ng.db.connection.commit()
                 return rid
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 6, "device_request, new device request"):
+        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_request, new device request"):
             # @TODO interface, network
-            db.cursor.execute("INSERT INTO request (did, ip, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, ip, None, None, now, now, 1, 1))
-            rid = db.cursor.lastrowid
+            ng.db.cursor.execute("INSERT INTO request (did, ip, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, ip, None, None, now, now, 1, 1))
+            rid = ng.db.cursor.lastrowid
             if seen:
                 log_event(mid, iid, did, rid, EVENT_FIRST_REQUEST_RECENTLY_IP, True)
             else:
                 log_event(mid, iid, did, rid, EVENT_FIRST_REQUEST_IP, True)
-            db.connection.commit()
+            ng.db.connection.commit()
 
         return rid
 
     except Exception as e:
-        debugger.dump_exception("device_request() caught exception")
+        ng.debugger.dump_exception("device_request() caught exception")
 
 def get_mac(ip):
+    ng = netgrasp_instance
+
     try:
-        db = database.database_instance
-        debugger = debug.debugger_instance
+        ng.debugger.debug("entering get_mac(%s)", (ip,))
 
-        debugger.debug("entering get_mac(%s)", (ip,))
-
-        db.cursor.execute("SELECT mac.address FROM mac LEFT JOIN ip ON ip.mid = mac.mid WHERE ip.address = ?", (ip,))
-        mac = db.cursor.fetchone()
+        ng.db.cursor.execute("SELECT mac.address FROM mac LEFT JOIN ip ON ip.mid = mac.mid WHERE ip.address = ?", (ip,))
+        mac = ng.db.cursor.fetchone()
         if mac:
             return mac[0]
         else:
             return None
 
     except Exception as e:
-        debugger.dump_exception("get_mac() caught exception")
+        ng.debugger.dump_exception("get_mac() caught exception")
 
 def get_ids(ip, mac):
+    ng = netgrasp_instance
+
     try:
-        db = database.database_instance
-        debugger = debug.debugger_instance
-        debugger.debug("entering get_ids(%s, %s)", (ip, mac))
+        ng.debugger.debug("entering get_ids(%s, %s)", (ip, mac))
 
         # Check if we know this MAC.
         if mac != BROADCAST:
-            db.cursor.execute("SELECT mid FROM mac WHERE address = ?", (mac,))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT mid FROM mac WHERE address = ?", (mac,))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 mid = seen[0]
             else:
                 mid = None
         else:
             # Look the MAC up in our arp cache.
-            db.cursor.execute("SELECT mid FROM ip WHERE address = ? ORDER BY created DESC LIMIT 1", (ip,))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT mid FROM ip WHERE address = ? ORDER BY created DESC LIMIT 1", (ip,))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 mid = seen[0]
             else:
@@ -986,8 +960,8 @@ def get_ids(ip, mac):
 
         # Check if we know this IP.
         if mid:
-            db.cursor.execute("SELECT ip.iid FROM ip WHERE ip.mid = ? AND ip.address = ?", (mid, ip))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT ip.iid FROM ip WHERE ip.mid = ? AND ip.address = ?", (mid, ip))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 iid = seen[0]
             else:
@@ -997,8 +971,8 @@ def get_ids(ip, mac):
 
         # Check if we know this Host.
         if iid:
-            db.cursor.execute("SELECT host.hid, host.name, host.custom_name FROM host WHERE host.iid = ?", (iid,))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT host.hid, host.name, host.custom_name FROM host WHERE host.iid = ?", (iid,))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 hid, host_name, custom_name = seen
             else:
@@ -1008,56 +982,56 @@ def get_ids(ip, mac):
 
         # Check if we know this Device.
         if mid and iid:
-            db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, iid))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.iid = ?", (mid, iid))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 did = seen[0]
-                debugger.debug("existing device %s (%s) [%d]", (ip, mac, did))
+                ng.debugger.debug("existing device %s (%s) [%d]", (ip, mac, did))
             else:
                 did = None
         else:
             did = None
         if not did and mid and hid:
-            db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.hid = ?", (mid, hid))
-            seen = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT device.did FROM device WHERE device.mid = ? AND device.hid = ?", (mid, hid))
+            seen = ng.db.cursor.fetchone()
             if seen:
                 did = seen[0]
-                debugger.debug("existing device %s (%s) [%d] (new ip)", (ip, mac, did))
+                ng.debugger.debug("existing device %s (%s) [%d] (new ip)", (ip, mac, did))
             else:
                 did = None
 
-        debugger.debug("mid(%s) iid(%s) did(%s)", (mid, iid, did))
+        ng.debugger.debug("mid(%s) iid(%s) did(%s)", (mid, iid, did))
         return (mid, iid, did)
 
     except Exception as e:
-        debugger.dump_exception("get_ids() caught exception")
+        ng.debugger.dump_exception("get_ids() caught exception")
 
 def get_details(did):
-    try:
-        db = database.database_instance
-        debugger = debug.debugger_instance
-        debugger.debug("entering get_details(%s)", (did,))
+    ng = netgrasp_instance
 
-        db.cursor.execute("SELECT activity.active, activity.counter, ip.address, mac.address, host.name, host.custom_name, vendor.name FROM activity LEFT JOIN device ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?", (did,))
-        info = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering get_details(%s)", (did,))
+
+        ng.db.cursor.execute("SELECT activity.active, activity.counter, ip.address, mac.address, host.name, host.custom_name, vendor.name FROM activity LEFT JOIN device ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?", (did,))
+        info = ng.db.cursor.fetchone()
         if info:
             active, counter, ip, mac, host_name, custom_name, vendor = info
             return (active, counter, ip, mac, host_name, custom_name, vendor)
         else:
-            debugger.warning("unknown device %d", (did,))
+            ng.debugger.warning("unknown device %d", (did,))
             return False
 
     except Exception as e:
-        debugger.dump_exception("get_details() caught exception")
+        ng.debugger.dump_exception("get_details() caught exception")
 
 def first_seen(did):
-    try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering first_seen(did)", (did,))
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        db.cursor.execute("SELECT created FROM activity WHERE did = ? AND created NOT NULL ORDER BY created ASC LIMIT 1", (did,))
-        active = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering first_seen(did)", (did,))
+
+        ng.db.cursor.execute("SELECT created FROM activity WHERE did = ? AND created NOT NULL ORDER BY created ASC LIMIT 1", (did,))
+        active = ng.db.cursor.fetchone()
         if active:
             active = active[0]
 
@@ -1065,17 +1039,18 @@ def first_seen(did):
             return active
         else:
             return False
+
     except Exception as e:
-        debugger.dump_exception("first_seen() caught exception")
+        ng.debugger.dump_exception("first_seen() caught exception")
 
 def first_seen_recently(did):
-    try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering last_seen_recently(%s)", (did,))
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        db.cursor.execute('SELECT created FROM activity WHERE did = ? AND created NOT NULL ORDER BY created DESC LIMIT 1', (did,))
-        recent = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering last_seen_recently(%s)", (did,))
+
+        ng.db.cursor.execute('SELECT created FROM activity WHERE did = ? AND created NOT NULL ORDER BY created DESC LIMIT 1', (did,))
+        recent = ng.db.cursor.fetchone()
         if recent:
             recent = recent[0]
 
@@ -1083,120 +1058,126 @@ def first_seen_recently(did):
             return recent
         else:
             return False
+
     except Exception as e:
-        debugger.dump_exception("first_seen_recently() caught exception")
+        ng.debugger.dump_exception("first_seen_recently() caught exception")
 
 def last_seen(did):
-    try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering last_seen(%s)", (did,))
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        db.cursor.execute('SELECT updated FROM activity WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
-        active = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering last_seen(%s)", (did,))
+
+        ng.db.cursor.execute('SELECT updated FROM activity WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
+        active = ng.db.cursor.fetchone()
         if active:
             return active[0]
         else:
             return False
+
     except Exception as e:
-        debugger.dump_exception("last_seen() caught exception")
+        ng.debugger.dump_exception("last_seen() caught exception")
 
 def previously_seen(did):
-    try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering previously_seen(%s)", (did,))
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        db.cursor.execute('SELECT updated FROM activity WHERE did=? AND updated NOT NULL AND active != 1 ORDER BY updated DESC LIMIT 1', (did,))
-        previous = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering previously_seen(%s)", (did,))
+
+        ng.db.cursor.execute('SELECT updated FROM activity WHERE did=? AND updated NOT NULL AND active != 1 ORDER BY updated DESC LIMIT 1', (did,))
+        previous = ng.db.cursor.fetchone()
         if previous:
             return previous[0]
         else:
             return False
+
     except Exception as e:
-        debugger.dump_exception("previously_seen() caught exception")
+        ng.debugger.dump_exception("previously_seen() caught exception")
 
 def first_requested(did):
-    try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering first_requested(%s)", (did,))
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        db.cursor.execute('SELECT created FROM request WHERE did=? AND created NOT NULL ORDER BY created ASC LIMIT 1', (did,))
-        active = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering first_requested(%s)", (did,))
+
+        ng.db.cursor.execute('SELECT created FROM request WHERE did=? AND created NOT NULL ORDER BY created ASC LIMIT 1', (did,))
+        active = ng.db.cursor.fetchone()
         if active:
             return active[0]
         else:
             return False
+
     except Exception as e:
-        debugger.dump_exception("first_requested() caught exception")
+        ng.debugger.dump_exception("first_requested() caught exception")
 
 def last_requested(did):
-    try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering last_requested(%s)", (did,))
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        db.cursor.execute('SELECT updated FROM request WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
-        last = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering last_requested(%s)", (did,))
+
+        ng.db.cursor.execute('SELECT updated FROM request WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
+        last = ng.db.cursor.fetchone()
         if last:
             return last[0]
         else:
             return False
+
     except Exception as e:
-        debugger.dump_exception("last_requested() caught exception")
+        ng.debugger.dump_exception("last_requested() caught exception")
 
 def time_seen(did):
-    try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering time_seen(%s)", (did,))
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        db.cursor.execute('SELECT created, updated FROM activity WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
-        active = db.cursor.fetchone()
+    try:
+        ng.debugger.debug("entering time_seen(%s)", (did,))
+
+        ng.db.cursor.execute('SELECT created, updated FROM activity WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
+        active = ng.db.cursor.fetchone()
         if active:
             firstSeen, lastSeen = active
             return lastSeen - firstSeen
         else:
             return False
+
     except Exception as e:
-        debugger.dump_exception("time_seen() caught exception")
+        ng.debugger.dump_exception("time_seen() caught exception")
 
 def previous_ip(did):
+    ng = netgrasp_instance
+
     try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering previous_ip(%s)", (did,))
-        db = database.database_instance
+        ng.debugger.debug("entering previous_ip(%s)", (did,))
 
         previous_ip = None
-        db.cursor.execute("SELECT DISTINCT iid FROM activity WHERE did = ? ORDER BY updated DESC LIMIT 2", (did,))
-        ips = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT DISTINCT iid FROM activity WHERE did = ? ORDER BY updated DESC LIMIT 2", (did,))
+        ips = ng.db.cursor.fetchall()
         if ips and len(ips) == 2:
-            db.cursor.execute("SELECT address FROM ip WHERE iid = ?", (ips[1]))
-            previous_ip = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT address FROM ip WHERE iid = ?", (ips[1]))
+            previous_ip = ng.db.cursor.fetchone()
         if previous_ip:
             return previous_ip[0]
         else:
             return None
 
     except Exception as e:
-        debugger.dump_exception("previous_ip() caught exception")
+        ng.debugger.dump_exception("previous_ip() caught exception")
 
 def active_devices_with_ip(ip):
+    ng = netgrasp_instance
+
     try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering active_devices_with_ip(%s)", (ip,))
-        db = database.database_instance
+        ng.debugger.debug("entering active_devices_with_ip(%s)", (ip,))
 
         devices = None
-        db.cursor.execute("SELECT iid FROM ip WHERE address = ?", (ip,))
-        ids = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT iid FROM ip WHERE address = ?", (ip,))
+        ids = ng.db.cursor.fetchall()
         if ids:
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE active = 1 AND activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
-            devices = db.cursor.fetchall()
+            ng.db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE active = 1 AND activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            devices = ng.db.cursor.fetchall()
 
         if devices:
             dids = []
@@ -1208,23 +1189,23 @@ def active_devices_with_ip(ip):
             return None
 
     except Exception as e:
-        debugger.dump_exception("active_devices_with_ip() caught exception")
+        ng.debugger.dump_exception("active_devices_with_ip() caught exception")
 
 def active_devices_with_mac(mac):
+    ng = netgrasp_instance
+
     try:
-        debugger = debug.debugger_instance
-        debugger.debug("entering active_devices_with_mac(%s)", (mac,))
-        db = database.database_instance
+        ng.debugger.debug("entering active_devices_with_mac(%s)", (mac,))
 
         devices = None
-        db.cursor.execute("SELECT ip.iid FROM mac LEFT JOIN ip ON mac.mid = ip.mid WHERE mac.address = ?", (mac,))
-        ids = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT ip.iid FROM mac LEFT JOIN ip ON mac.mid = ip.mid WHERE mac.address = ?", (mac,))
+        ids = ng.db.cursor.fetchall()
         if ids:
             iids = []
             for iid in ids:
                 iids.append(iid[0])
-            db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE active = 1 AND activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
-            devices = db.cursor.fetchall()
+            ng.db.cursor.execute("SELECT DISTINCT activity.did, ip.address, mac.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE active = 1 AND activity.iid IN ("+ ",".join("?"*len(iids)) + ")", iids)
+            devices = ng.db.cursor.fetchall()
 
         if devices:
             dids = []
@@ -1236,174 +1217,168 @@ def active_devices_with_mac(mac):
             return None
 
     except Exception as e:
-        debugger.dump_exception("active_devices_with_mac() caught exception")
+        ng.debugger.dump_exception("active_devices_with_mac() caught exception")
 
 def devices_requesting_ip(ip, timeout):
-    try:
-        debugger = debug.debugger_instance
-        db = database.database_instance
+    ng = netgrasp_instance
 
-        debugger.debug("entering devices_requesting_ip(%s, %s)", (ip, timeout))
+    try:
+        ng.debugger.debug("entering devices_requesting_ip(%s, %s)", (ip, timeout))
 
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
         dids = []
-        db.cursor.execute("SELECT dst_ip FROM arp WHERE src_ip = ? AND rid IS NOT NULL AND timestamp < ? GROUP BY src_ip ORDER BY timestamp DESC", (ip, stale))
-        ips = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT dst_ip FROM arp WHERE src_ip = ? AND rid IS NOT NULL AND timestamp < ? GROUP BY src_ip ORDER BY timestamp DESC", (ip, stale))
+        ips = ng.db.cursor.fetchall()
         if ips:
             for dst_ip in ips:
                 dst_mac = get_mac(dst_ip[0])
                 _mid, _iid, _did = get_ids(dst_ip[0], dst_mac)
                 dids.append((_did, dst_ip, dst_mac))
 
-        debugger.debug("did, dst_ip, dst_mac(%s)", (dids,))
+        ng.debugger.debug("did, dst_ip, dst_mac(%s)", (dids,))
         return dids
 
     except Exception as e:
-        debugger.dump_exception("devices_requesting_ip() caught exception")
+        ng.debugger.dump_exception("devices_requesting_ip() caught exception")
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips(timeout):
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering detect_stale_ips()")
+        ng.debugger.debug("entering detect_stale_ips()")
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
         # Mark no-longer active devices stale.
-        db.cursor.execute("SELECT aid, did, iid FROM activity WHERE active = 1 AND updated < ?", (stale,))
-        rows = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT aid, did, iid FROM activity WHERE active = 1 AND updated < ?", (stale,))
+        rows = ng.db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "detect_stale_ips, activity"):
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "detect_stale_ips, activity"):
                 for row in rows:
                     aid, did, iid = row
-                    db.cursor.execute("SELECT ip.address, mac.mid, mac.address FROM ip LEFT JOIN mac ON ip.mid = mac.mid WHERE iid = ? LIMIT 1", (iid,))
-                    address = db.cursor.fetchone()
+                    ng.db.cursor.execute("SELECT ip.address, mac.mid, mac.address FROM ip LEFT JOIN mac ON ip.mid = mac.mid WHERE iid = ? LIMIT 1", (iid,))
+                    address = ng.db.cursor.fetchone()
                     if address:
                         ip, mid, mac = address
                         log_event(mid, iid, did, None, EVENT_STALE, True)
-                        debugger.info("%s [%s] is no longer active)", (ip, mac))
+                        ng.debugger.info("%s [%s] is no longer active)", (ip, mac))
                     else:
-                        debugger.error("aid(%d) did(%d) is no longer active, no ip/mac found)", (aid, did))
-                    db.cursor.execute("UPDATE activity SET active = 0 WHERE aid = ?", (aid,))
-                db.connection.commit()
+                        ng.debugger.error("aid(%d) did(%d) is no longer active, no ip/mac found)", (aid, did))
+                    ng.db.cursor.execute("UPDATE activity SET active = 0 WHERE aid = ?", (aid,))
+                ng.db.connection.commit()
 
         # Mark no-longer active requests stale.
-        db.cursor.execute("SELECT rid, did, ip FROM request WHERE active = 1 AND updated < ?", (stale,))
-        rows = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT rid, did, ip FROM request WHERE active = 1 AND updated < ?", (stale,))
+        rows = ng.db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "detect_stale_ips, request"):
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "detect_stale_ips, request"):
                 for row in rows:
                     rid, did, ip = row
                     mid, iid = (None, None)
                     log_event(mid, iid, did, rid, EVENT_REQUEST_STALE, True)
-                    debugger.info("%s (%d) is no longer active)", (ip, did))
-                    db.cursor.execute("UPDATE request SET active = 0 WHERE rid = ?", (rid,))
-                db.connection.commit()
+                    ng.debugger.info("%s (%d) is no longer active)", (ip, did))
+                    ng.db.cursor.execute("UPDATE request SET active = 0 WHERE rid = ?", (rid,))
+                ng.db.connection.commit()
 
     except Exception as e:
-        debugger.dump_exception("detect_stale_ips() caught exception")
+        ng.debugger.dump_exception("detect_stale_ips() caught exception")
 
 def detect_netscans(timeout):
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering detect_netscans()")
+        ng.debugger.debug("entering detect_netscans()")
         now = datetime.datetime.now()
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout) - datetime.timedelta(minutes=10)
 
-        db.cursor.execute("SELECT COUNT(DISTINCT arp.dst_ip) AS count, arp.src_ip, arp.src_mac FROM arp LEFT JOIN request ON arp.rid = request.rid WHERE request.active = 1 GROUP BY arp.src_ip HAVING count > 50")
-        scans = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT COUNT(DISTINCT arp.dst_ip) AS count, arp.src_ip, arp.src_mac FROM arp LEFT JOIN request ON arp.rid = request.rid WHERE request.active = 1 GROUP BY arp.src_ip HAVING count > 50")
+        scans = ng.db.cursor.fetchall()
         if scans:
-            debugger.debug("scans in progress (count, src ip, src mac): %s", (scans,))
+            ng.debugger.debug("scans in progress (count, src ip, src mac): %s", (scans,))
             for scan in scans:
                 count, src_ip, src_mac = scan
                 mid, iid, did = get_ids(src_ip, src_mac)
-                db.cursor.execute("SELECT eid FROM event WHERE did = ? AND type = ? AND timestamp > ?", (did, EVENT_SCAN, stale))
-                already_detected = db.cursor.fetchone()
+                ng.db.cursor.execute("SELECT eid FROM event WHERE did = ? AND type = ? AND timestamp > ?", (did, EVENT_SCAN, stale))
+                already_detected = ng.db.cursor.fetchone()
                 if not already_detected:
                     # logging rid doesn't make sense, as there's 1 rid per IP requested.
                     log_event(mid, iid, did, None, EVENT_SCAN)
-                    debugger.info("network scan by %s [%s]", (src_ip, src_mac))
+                    ng.debugger.info("network scan by %s [%s]", (src_ip, src_mac))
 
     except Exception as e:
-        debugger.dump_exception("detect_netscans() caught exception")
+        ng.debugger.dump_exception("detect_netscans() caught exception")
 
 def detect_anomalies(timeout):
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering detect_anomalies()")
+        ng.debugger.debug("entering detect_anomalies()")
         now = datetime.datetime.now()
         stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
 
         # Multiple MACs with the same IP.
-        db.cursor.execute("SELECT COUNT(activity.iid) AS count, ip.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE activity.active = 1 GROUP BY activity.iid HAVING count > 1 ORDER BY ip.iid ASC")
-        duplicates = db.cursor.fetchall()
-        debugger.debug("duplicate ips: %s", (duplicates,))
+        ng.db.cursor.execute("SELECT COUNT(activity.iid) AS count, ip.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE activity.active = 1 GROUP BY activity.iid HAVING count > 1 ORDER BY ip.iid ASC")
+        duplicates = ng.db.cursor.fetchall()
+        ng.debugger.debug("duplicate ips: %s", (duplicates,))
         if duplicates:
             for duplicate in duplicates:
                 count, ip = duplicate
-                db.cursor.execute("SELECT ip.mid, ip.iid, activity.did FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE ip.address = ? AND active = 1", (ip,))
-                dupes = db.cursor.fetchall()
-                debugger.debug("dupes: %s", (dupes,))
+                ng.db.cursor.execute("SELECT ip.mid, ip.iid, activity.did FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE ip.address = ? AND active = 1", (ip,))
+                dupes = ng.db.cursor.fetchall()
+                ng.debugger.debug("dupes: %s", (dupes,))
                 for dupe in dupes:
                     mid, iid, did = dupe
-                    db.cursor.execute("SELECT eid FROM event WHERE mid = ? AND type = ? AND timestamp > ?", (mid, EVENT_DUPLICATE_IP, stale))
-                    already_detected = db.cursor.fetchone()
+                    ng.db.cursor.execute("SELECT eid FROM event WHERE mid = ? AND type = ? AND timestamp > ?", (mid, EVENT_DUPLICATE_IP, stale))
+                    already_detected = ng.db.cursor.fetchone()
                     if already_detected:
                         break
                     log_event(mid, iid, did, None, EVENT_DUPLICATE_IP)
-                    debugger.info("multiple MACs with same IP: mid=%d, iid=%d", (mid, iid))
+                    ng.debugger.info("multiple MACs with same IP: mid=%d, iid=%d", (mid, iid))
 
         # Multiple IPs with the same MAC.
-        db.cursor.execute("SELECT COUNT(ip.mid) AS count, ip.mid FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE activity.active = 1 GROUP BY ip.mid HAVING count > 1 ORDER BY ip.mid ASC")
-        duplicates = db.cursor.fetchall()
-        debugger.debug("duplicate macs: %s", (duplicates,))
+        ng.db.cursor.execute("SELECT COUNT(ip.mid) AS count, ip.mid FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE activity.active = 1 GROUP BY ip.mid HAVING count > 1 ORDER BY ip.mid ASC")
+        duplicates = ng.db.cursor.fetchall()
+        ng.debugger.debug("duplicate macs: %s", (duplicates,))
         if duplicates:
             for duplicate in duplicates:
                 count, mid = duplicate
-                db.cursor.execute("SELECT ip.mid, ip.iid, activity.did FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE ip.mid = ? AND active = 1", (mid,))
-                dupes = db.cursor.fetchall()
-                debugger.debug("dupes: %s", (dupes,))
+                ng.db.cursor.execute("SELECT ip.mid, ip.iid, activity.did FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE ip.mid = ? AND active = 1", (mid,))
+                dupes = ng.db.cursor.fetchall()
+                ng.debugger.debug("dupes: %s", (dupes,))
                 for dupe in dupes:
                     mid, iid, did = dupe
-                    db.cursor.execute("SELECT eid FROM event WHERE iid = ? AND type = ? AND timestamp > ?", (iid, EVENT_DUPLICATE_MAC, stale))
-                    already_detected = db.cursor.fetchone()
-                    debugger.debug("already_detected: %s", (already_detected,))
+                    ng.db.cursor.execute("SELECT eid FROM event WHERE iid = ? AND type = ? AND timestamp > ?", (iid, EVENT_DUPLICATE_MAC, stale))
+                    already_detected = ng.db.cursor.fetchone()
+                    ng.debugger.debug("already_detected: %s", (already_detected,))
                     if already_detected:
                         break
                     log_event(mid, iid, did, None, EVENT_DUPLICATE_MAC)
-                    debugger.info("multiple IPs with same MAC: mid=%d, iid=%d", (mid, iid))
+                    ng.debugger.info("multiple IPs with same MAC: mid=%d, iid=%d", (mid, iid))
 
     except Exception as e:
-        debugger.dump_exception("detect_anomalies() caught exception")
+        ng.debugger.dump_exception("detect_anomalies() caught exception")
 
 def send_notifications():
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-        notifier = notify.notify_instance
+        ng.debugger.debug("entering send_notifications()")
 
-        debugger.debug("entering send_notifications()")
-
-        if not notifier.enabled:
-            debugger.debug("notifications disabled")
+        if not ng.notification["enabled"]:
+            ng.debugger.debug("notifications disabled")
             return False
 
-        if not notifier.alerts:
-            debugger.debug("no notification alerts configured")
+        if not ng.notification["alerts"]:
+            ng.debugger.debug("no notification alerts configured")
             return False
 
         import ntfy
@@ -1412,27 +1387,26 @@ def send_notifications():
         timer = simple_timer.Timer()
 
         # only send notifications for configured events
-        db.cursor.execute("SELECT eid, mid, iid, did, timestamp, type, processed FROM event WHERE NOT (processed & 8) AND type IN ("+ ",".join("?"*len(notifier.alerts)) + ")", notifier.alerts)
+        ng.db.cursor.execute("SELECT eid, mid, iid, did, timestamp, type, processed FROM event WHERE NOT (processed & 8) AND type IN ("+ ",".join("?"*len(ng.notification["alerts"])) + ")", ng.notification["alerts"])
 
-        rows = db.cursor.fetchall()
+        rows = ng.db.cursor.fetchall()
         if rows:
             counter = 0
             max_eid = 0
             for row in rows:
                 eid, mid, iid, did, timestamp, event, processed = row
-                #debugger.debug("processing event %d for %s [%s] at %s", (eid, ip, mac, timestamp))
 
                 if eid > max_eid:
                     max_eid = eid
 
-                if event in notifier.alerts:
+                if event in ng.notification["alerts"]:
                     details = get_details(did)
                     if not details:
-                        debugger.warning("invalid device %d, unable to generate notification")
+                        ng.debugger.warning("invalid device %d, unable to generate notification")
                         continue
                     active, counter, ip, mac, host_name, custom_name, vendor = details
 
-                    debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, notifier.alerts))
+                    ng.debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, ng.notification["alerts"]))
                     firstSeen = first_seen(did)
                     lastSeen = first_seen_recently(did)
                     previouslySeen = previously_seen(did)
@@ -1440,45 +1414,43 @@ def send_notifications():
                     body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_did(did), ip, mac, pretty.time_ago(lastSeen), pretty.time_ago(previouslySeen), pretty.time_ago(firstSeen))
                     ntfy.notify(body, title)
                 else:
-                    debugger.debug("event %s [%d] NOT in %s", (event, eid, notifier.alerts))
+                    ng.debugger.debug("event %s [%d] NOT in %s", (event, eid, ng.notification["alerts"]))
 
                 if (timer.elapsed() > MAXSECONDS):
-                    debugger.debug("processing notifications >%d seconds, aborting", (MAXSECONDS,))
-                    with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_notifications, aborting"):
-                        db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
-                        db.connection.commit()
+                    ng.debugger.debug("processing notifications >%d seconds, aborting", (MAXSECONDS,))
+                    with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "send_notifications, aborting"):
+                        ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
+                        ng.db.connection.commit()
                     return
 
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_notifications"):
-                db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
-                db.connection.commit()
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "send_notifications"):
+                ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
+                ng.db.connection.commit()
 
     except Exception as e:
-        debugger.dump_exception("send_notifications() caught exception")
+        ng.debugger.dump_exception("send_notifications() caught exception")
 
 TALKED_TO_LIMIT = 50
 def send_email_alerts(timeout):
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-        emailer = email.email_instance
+        ng.debugger.debug("entering send_email_alerts()")
 
-        debugger.debug("entering send_email_alerts()")
-
-        if not emailer.enabled:
-            debugger.debug("email disabled")
+        if not ng.email["enabled"]:
+            ng.debugger.debug("email disabled")
             return False
 
-        if not emailer.alerts:
-            debugger.debug("no email alerts configured")
+        if not ng.email["alerts"]:
+            ng.debugger.debug("no email alerts configured")
             return False
 
         day = datetime.datetime.now() - datetime.timedelta(days=1)
 
-        db.cursor.execute("SELECT eid, mid, iid, did, timestamp, type, processed FROM event WHERE NOT (processed & 1) AND type IN ("+ ",".join("?"*len(emailer.alerts)) + ")", emailer.alerts)
-        rows = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT eid, mid, iid, did, timestamp, type, processed FROM event WHERE NOT (processed & 1) AND type IN ("+ ",".join("?"*len(ng.email["alerts"])) + ")", ng.email["alerts"])
+        rows = ng.db.cursor.fetchall()
         if rows:
             max_eid = 0
             processed_events = 0
@@ -1486,36 +1458,36 @@ def send_email_alerts(timeout):
             duplicate_ips = []
             for row in rows:
                 eid, mid, iid, did, timestamp, event, processed = row
-                debugger.debug("processing event %d for iid[%d] mid[%d] at %s", (eid, iid, mid, timestamp))
+                ng.debugger.debug("processing event %d for iid[%d] mid[%d] at %s", (eid, iid, mid, timestamp))
 
                 if eid > max_eid:
                     max_eid = eid
                 processed_events += 1
 
                 # only send emails for configured events
-                if event in emailer.alerts:
+                if event in ng.email["alerts"]:
                     details = get_details(did)
                     if not details:
-                        debugger.warning("invalid device %d, unable to generate alert")
+                        ng.debugger.warning("invalid device %d, unable to generate alert")
                         continue
                     active, counter, ip, mac, host_name, custom_name, vendor = details
 
                     if event == EVENT_DUPLICATE_MAC:
                         if mac in duplicate_macs:
-                            debugger.debug("event %s [%d], notification email already sent", (event, eid))
+                            ng.debugger.debug("event %s [%d], notification email already sent", (event, eid))
                             continue
                         else:
-                            debugger.debug("event %s [%d], first time seeing %s", (event, eid, mac))
+                            ng.debugger.debug("event %s [%d], first time seeing %s", (event, eid, mac))
                             duplicate_macs.append(mac)
                     elif event == EVENT_DUPLICATE_IP:
                         if ip in duplicate_macs:
-                            debugger.debug("event %s [%d], notification email already sent", (event, eid))
+                            ng.debugger.debug("event %s [%d], notification email already sent", (event, eid))
                             continue
                         else:
-                            debugger.debug("event %s [%d], first time seeing %s", (event, eid, ip))
+                            ng.debugger.debug("event %s [%d], first time seeing %s", (event, eid, ip))
                             duplicate_ips.append(ip)
 
-                    debugger.info("event %s [%d] in %s, generating notification email", (event, eid, emailer.alerts))
+                    ng.debugger.info("event %s [%d] in %s, generating notification email", (event, eid, ng.email["alerts"]))
                     firstSeen = first_seen(did)
                     firstRequested = first_requested(did)
                     lastSeen = last_seen(did)
@@ -1523,8 +1495,8 @@ def send_email_alerts(timeout):
                     previouslySeen = previously_seen(did)
                     lastRequested = last_requested(did)
 
-                    db.cursor.execute("SELECT dst_ip, dst_mac FROM arp WHERE src_ip = ? AND timestamp >= ? GROUP BY dst_ip LIMIT ?", (ip, day, TALKED_TO_LIMIT))
-                    peers = db.cursor.fetchall()
+                    ng.db.cursor.execute("SELECT dst_ip, dst_mac FROM arp WHERE src_ip = ? AND timestamp >= ? GROUP BY dst_ip LIMIT ?", (ip, day, TALKED_TO_LIMIT))
+                    peers = ng.db.cursor.fetchall()
                     talked_to_text = ""
                     talked_to_html = ""
                     talked_to_count = 0
@@ -1533,7 +1505,7 @@ def send_email_alerts(timeout):
                         for peer in peers:
                             dst_ip, dst_mac = peer
                             dst_mid, dst_iid, dst_did = get_ids(dst_ip, dst_mac)
-                            debugger.debug("ip, mac, mid, iid, did: %s, %s, %s, %s, %s", (dst_ip, dst_mac, dst_mid, dst_iid, dst_did))
+                            ng.debugger.debug("ip, mac, mid, iid, did: %s, %s, %s, %s, %s", (dst_ip, dst_mac, dst_mid, dst_iid, dst_did))
                             talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
                             talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
 
@@ -1564,7 +1536,8 @@ def send_email_alerts(timeout):
                             devices_requesting_ip_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
                             devices_requesting_ip_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
 
-                    emailer.MailSend(event, dict(
+                    # @TODO: fixme
+                    ng.email.MailSend(event, dict(
                         name=pretty.name_did(did),
                         ip=ip,
                         mac=mac,
@@ -1593,24 +1566,24 @@ def send_email_alerts(timeout):
                         event=event
                         ))
                 else:
-                    debugger.debug("event %s [%d] NOT in %s", (event, eid, emailer.alerts))
+                    ng.debugger.debug("event %s [%d] NOT in %s", (event, eid, ng.email["alerts"]))
 
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "send_email_alerts"):
-                db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_ALERT, max_eid, PROCESSED_ALERT))
-                db.connection.commit()
-            debugger.debug("send_email_alerts: processed %d events", (processed_events,))
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "send_email_alerts"):
+                ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_ALERT, max_eid, PROCESSED_ALERT))
+                ng.db.connection.commit()
+            ng.debugger.debug("send_email_alerts: processed %d events", (processed_events,))
 
     except Exception as e:
-        debugger.dump_exception("send_email_alerts() caught exception")
+        ng.debugger.dump_exception("send_email_alerts() caught exception")
 
 # Identify vendor associated with MAC.
 def mac_lookup(mac):
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-
-        debugger.debug("entering mac_lookup(%s)", (mac,))
+        ng.debugger.debug("entering mac_lookup(%s)", (mac,))
 
         import re
         import httplib
@@ -1626,7 +1599,7 @@ def mac_lookup(mac):
                 fixed_mac.append(piece)
             fixed_mac = ":".join(fixed_mac)
             mac = fixed_mac
-        debugger.debug("Looking up vendor for %s", (mac,))
+        ng.debugger.debug("Looking up vendor for %s", (mac,))
         http = httplib.HTTPConnection("api.macvendors.com", 80)
         url = """/%s""" % mac
         http.request("GET", url)
@@ -1634,83 +1607,82 @@ def mac_lookup(mac):
 
         if response.status == 200 and response.reason == "OK":
             vendor = response.read()
-            debugger.debug("identified %s as %s", (mac, vendor))
+            ng.debugger.debug("identified %s as %s", (mac, vendor))
         else:
             vendor = None
-            debugger.info("failed to identify %s", (mac,))
+            ng.debugger.info("failed to identify %s", (mac,))
 
         return vendor
 
     except Exception as e:
-        debugger.dump_exception("mac_lookup() caught exception")
+        ng.debugger.dump_exception("mac_lookup() caught exception")
 
 def refresh_dns_cache():
+    ng = netgrasp_instance
+
     # @TODO consider retrieving actual TTL from DNS -- for now refresh active devices regularly
     try:
-        db = database.database_instance
-        debugger = debug.debugger_instance
-        debugger.debug("entering refresh_dns_cache")
+        ng.debugger.debug("entering refresh_dns_cache")
 
         ttl = datetime.datetime.now() - datetime.timedelta(minutes=15)
-        db.cursor.execute("SELECT host.hid, host.name, activity.did, mac.address, ip.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN host ON activity.iid = host.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.active = 1 AND host.updated < ? LIMIT 10", (ttl,))
-        rows = db.cursor.fetchall()
+        ng.db.cursor.execute("SELECT host.hid, host.name, activity.did, mac.address, ip.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid LEFT JOIN host ON activity.iid = host.iid LEFT JOIN mac ON ip.mid = mac.mid WHERE activity.active = 1 AND host.updated < ? LIMIT 10", (ttl,))
+        rows = ng.db.cursor.fetchall()
         for row in rows:
             hid, old_name, did, mac, ip = row
             name = dns_lookup(ip)
             now = datetime.datetime.now()
-            with exclusive_lock.ExclusiveFileLock(db.lock, 5, "refresh_dns_cache"):
-                debugger.debug("Refreshing hostname from '%s' to '%s' for %s", (old_name, name, ip))
-                db.cursor.execute("UPDATE host SET name = ?, updated = ? WHERE hid = ?", (name, now, hid))
-                db.connection.commit()
+            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "refresh_dns_cache"):
+                ng.debugger.debug("Refreshing hostname from '%s' to '%s' for %s", (old_name, name, ip))
+                ng.db.cursor.execute("UPDATE host SET name = ?, updated = ? WHERE hid = ?", (name, now, hid))
+                ng.db.connection.commit()
 
     except Exception as e:
-        debugger.dump_exception("refresh_dns_cache() caught exception")
+        ng.debugger.dump_exception("refresh_dns_cache() caught exception")
 
 def dns_lookup(ip):
+    ng = netgrasp_instance
+
     try:
         import socket
 
-        debugger = debug.debugger_instance
-
-        debugger.debug("entering dns_lookup(%s)", (ip,))
+        ng.debugger.debug("entering dns_lookup(%s)", (ip,))
         try:
             host_name, aliaslist, ipaddrlist = socket.gethostbyaddr(ip)
-            debugger.debug("host_name(%s), aliaslist(%s), ipaddrlist(%s)", (host_name, aliaslist, ipaddrlist))
+            ng.debugger.debug("host_name(%s), aliaslist(%s), ipaddrlist(%s)", (host_name, aliaslist, ipaddrlist))
             return host_name
 
         except Exception as e:
             host_name = "unknown"
-            debugger.debug("dns_lookup() socket.gethostbyaddr(%s) failed, host_name = %s: %s", (ip, host_name, e))
+            ng.debugger.debug("dns_lookup() socket.gethostbyaddr(%s) failed, host_name = %s: %s", (ip, host_name, e))
             return host_name
 
     except Exception as e:
-        debugger.dump_exception("dns_lookup() caught exception")
+        ng.debugger.dump_exception("dns_lookup() caught exception")
 
 # Generates daily and weekly email digests.
 def send_email_digests():
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
-        emailer = email.email_instance
+        ng.debugger.debug("entering send_email_digests()")
 
-        debugger.debug("entering send_email_digests()")
-
-        if not emailer.enabled:
+        if not ng.email["enabled"]:
+            ng.debugger.debug("email disabled")
             return False
 
-        if not emailer.digest:
-            debugger.debug("no digests configured")
+        if not ng.email["digests"]:
+            ng.debugger.debug("no digests configured")
             return False
 
         timer = simple_timer.Timer()
         now = datetime.datetime.now()
 
-        digests = ["daily", "weekly"]
-        for digest in digests:
+        # @TODO make sure we validate available digests
+        for digest in ng.email["digests"]:
             if (timer.elapsed() > MAXSECONDS):
-                debugger.debug("processing digests >%d seconds, aborting digest", (MAXSECONDS,))
+                ng.debugger.debug("processing digests >%d seconds, aborting digest", (MAXSECONDS,))
                 return
 
             if (digest == "daily"):
@@ -1726,10 +1698,10 @@ def send_email_digests():
                 time_period_description = "7 days"
                 previous_time_period = now - datetime.timedelta(weeks=2)
 
-            next_digest_timestamp = db.get_state(timestamp_string, "", True)
+            next_digest_timestamp = ng.db.get_state(timestamp_string, "", True)
             if not next_digest_timestamp:
                 # first time here, schedule a digest for appropriate time in future
-                db.set_state(timestamp_string, future_digest_timestamp)
+                ng.db.set_state(timestamp_string, future_digest_timestamp)
                 next_digest_timestamp = future_digest_timestamp
 
             if now < next_digest_timestamp:
@@ -1737,20 +1709,20 @@ def send_email_digests():
                 continue
 
             # time to send a digest
-            debugger.info("Sending %s digest", (digest,))
-            db.set_state(timestamp_string, future_digest_timestamp)
+            ng.debugger.info("Sending %s digest", (digest,))
+            ng.db.set_state(timestamp_string, future_digest_timestamp)
 
             # how many devices were requested during this time period
-            db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) FROM arp WHERE rid IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (time_period, now))
-            requested = db.cursor.fetchone()
+            ng.db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) FROM arp WHERE rid IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (time_period, now))
+            requested = ng.db.cursor.fetchone()
 
             # all devices that were actively seen during this time period
-            db.cursor.execute("SELECT DISTINCT did FROM arp WHERE did IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (time_period, now))
-            seen = db.cursor.fetchall()
+            ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE did IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (time_period, now))
+            seen = ng.db.cursor.fetchall()
 
             # all devices that were actively seen during the previous time period
-            db.cursor.execute("SELECT DISTINCT did FROM arp WHERE did IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (previous_time_period, time_period))
-            seen_previous = db.cursor.fetchall()
+            ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE did IS NOT NULL AND timestamp >= ? AND timestamp <= ?", (previous_time_period, time_period))
+            seen_previous = ng.db.cursor.fetchall()
 
             new = set(seen) - set(seen_previous)
             gone_away = set(seen_previous) - set(seen)
@@ -1763,12 +1735,12 @@ def send_email_digests():
                 did = unique_seen[0]
                 details = get_details(did)
                 if not details:
-                    debugger.warning("invalid device %d, not included in digest")
+                    ng.debugger.warning("invalid device %d, not included in digest")
                     continue
                 active, counter, ip, mac, host_name, custom_name, vendor = details
 
-                db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arp WHERE rid IS NOT NULL AND src_ip = ? AND timestamp >= ? AND timestamp <= ?", (ip, time_period, now))
-                requests = db.cursor.fetchone()
+                ng.db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arp WHERE rid IS NOT NULL AND src_ip = ? AND timestamp >= ? AND timestamp <= ?", (ip, time_period, now))
+                requests = ng.db.cursor.fetchone()
                 if (requests[0] > 10):
                     noisy.append((mac, ip, requests[0], pretty.name_did(did)))
                 if unique_seen in new:
@@ -1814,8 +1786,8 @@ def send_email_digests():
                     lower = now - datetime.timedelta(hours=range)
                     range = range - 1
                     upper = now - datetime.timedelta(hours=range)
-                    db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
-                    distinct = db.cursor.fetchall()
+                    ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
+                    distinct = ng.db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
                     device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%I %p, %x"), len(distinct))
             elif (digest == "weekly"):
@@ -1824,14 +1796,15 @@ def send_email_digests():
                     lower = now - datetime.timedelta(days=range)
                     range = range - 1
                     upper = now - datetime.timedelta(days=range)
-                    db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
-                    distinct = db.cursor.fetchall()
+                    ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
+                    distinct = ng.db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
                     device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%A, %x"), len(distinct))
 
-            debugger.info("Sending %s digest", (digest,))
+            ng.debugger.info("Sending %s digest", (digest,))
 
-            emailer.MailSend('digest', dict(
+            # @TODO fixme
+            ng.email.MailSend('digest', dict(
                 type=digest,
                 time_period=time_period_description,
                 active_devices_count=len(seen),
@@ -1848,27 +1821,27 @@ def send_email_digests():
                 device_breakdown_text=device_breakdown_text,
                 device_breakdown_html=device_breakdown_html
                 ))
+
     except Exception as e:
-        debugger.dump_exception("send_email_digests() caught exception")
+        ng.debugger.dump_exception("send_email_digests() caught exception")
 
 # Don't let the arp or event tables grow too big.
-def garbage_collection(enabled, oldest_arp, oldest_event):
+def garbage_collection():
+    ng = netgrasp_instance
+
     try:
         from utils import exclusive_lock
 
-        debugger = debug.debugger_instance
-        db = database.database_instance
+        ng.debugger.debug("entering garbage_collection()")
 
-        debugger.debug("entering garbage_collection()")
-
-        if not enabled:
-            debugger.debug("garbage collection disabled")
+        if not self.database["gcenabled"]:
+            ng.db.debugger.debug("garbage collection disabled")
             return
 
         garbage_collection_string = "garbage collection"
 
         now = datetime.datetime.now()
-        next_garbage_collection = db.get_state(garbage_collection_string, "", True)
+        next_garbage_collection = ng.db.get_state(garbage_collection_string, "", True)
 
         if not next_garbage_collection:
             # perform first garbage collection now
@@ -1878,22 +1851,23 @@ def garbage_collection(enabled, oldest_arp, oldest_event):
             # it's not yet time to send this digest
             return False
 
-        debugger.info("performing garbage collection")
+        ng.debugger.info("performing garbage collection")
         # schedule next garbage collection
-        db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
+        ng.db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
-        with exclusive_lock.ExclusiveFileLock(db.lock, 5, "garbage_collection"):
+        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "garbage_collection"):
             # Purge old arp entries.
-            db.cursor.execute("SELECT COUNT(*) FROM arp WHERE timestamp < ?", (now - oldest_arp,))
-            arp_count = db.cursor.fetchone()
-            db.cursor.execute("DELETE FROM arp WHERE timestamp < ?", (now - oldest_arp,))
+            ng.db.cursor.execute("SELECT COUNT(*) FROM arp WHERE timestamp < ?", (now - ng.database["oldest_arp"],))
+            arp_count = ng.db.cursor.fetchone()
+            ng.db.cursor.execute("DELETE FROM arp WHERE timestamp < ?", (now - ng.database["oldest_arp"],))
             # Purge old event entries.
-            db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (now - oldest_event,))
-            event_count = db.cursor.fetchone()
-            db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (now - oldest_event,))
-            db.connection.commit()
+            ng.db.cursor.execute("SELECT COUNT(*) FROM event WHERE timestamp < ?", (now - ng.database["oldest_event"],))
+            event_count = ng.db.cursor.fetchone()
+            ng.db.cursor.execute("DELETE FROM event WHERE timestamp < ?", (now - ng.database["oldest_event"],))
+            ng.db.connection.commit()
 
-        debugger.debug("deleted %d arp entries older than %s", (arp_count[0], now - oldest_arp))
-        debugger.debug("deleted %d event entries older than %s", (event_count[0], now - oldest_event))
+        ng.debugger.debug("deleted %d arp entries older than %s", (arp_count[0], now - ng.database["oldest_arp"]))
+        ng.debugger.debug("deleted %d event entries older than %s", (event_count[0], now - ng.database["oldest_event"]))
+
     except Exception as e:
-        debugger.dump_exception("garbage_collection() caught exception")
+        ng.debugger.dump_exception("garbage_collection() caught exception")
