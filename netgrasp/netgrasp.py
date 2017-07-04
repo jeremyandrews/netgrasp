@@ -191,7 +191,7 @@ class Netgrasp:
                 pid_string = f.readline()
                 f.close()
                 if pid_string:
-                    pid = int(f.readline())
+                    pid = int(pid_string)
                 else:
                     pid = 0
                 if pid > 0:
@@ -243,7 +243,7 @@ def main(*pcap):
         ng.debugger.debug("wiretap failed to start")
 
     try:
-        ng.db = database.Database(ng.database["filename"], ng.debugger)
+        ng.db = database.Database()
     except Exception as e:
         ng.debugger.dump_exception("main() caught exception creating database")
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database["filename"], ng.debugger.whoami()))
@@ -335,7 +335,7 @@ def get_pcap():
     if len(devices) <= 0:
       ng.debugger.critical("Fatal error: pcap identified no devices, try running tcpdump manually to debug.")
 
-    ng.pcap["local_net"], ng.pcap["local_mask"] = pcap.lookupnet(ng.listen["interface"])
+    ng.pcap["network"], ng.pcap["netmask"] = pcap.lookupnet(ng.listen["interface"])
 
     try:
         ng.pcap["instance"] = pcap.pcap(name=ng.listen["interface"], snaplen=256, promisc=True, timeout_ms = 100, immediate=True)
@@ -343,7 +343,7 @@ def get_pcap():
     except Exception as e:
         ng.debugger.critical("""Failed to invoke pcap. Fatal exception: %s, exiting.""" % e)
 
-    ng.debugger.warning("listening for arp traffic on %s: %s/%s", (ng.listen["interface"], socket.inet_ntoa(ng.pcap["local_net"]), socket.inet_ntoa(ng.pcap["local_mask"])))
+    ng.debugger.warning("listening for arp traffic on %s: %s/%s", (ng.listen["interface"], socket.inet_ntoa(ng.pcap["network"]), socket.inet_ntoa(ng.pcap["netmask"])))
     return ng.pcap
 
 # Child process: wiretap, uses pcap to sniff arp packets.
@@ -368,12 +368,12 @@ def wiretap(pc, child_conn):
     assert (os.getuid() != 0) and (os.getgid() != 0), "Failed to drop root privileges, aborting."
 
     try:
-        ng.db = database.Database(ng.database["filename"], ng.debugger)
+        ng.db = database.Database()
     except Exception as e:
         ng.debugger.error("%s", (e,))
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (database["filename"], ng.debugger.whoami()))
 
-    ng.debugger.info("opened %s as user %s", (database["filename"], ng.debugger.whoami()))
+    ng.debugger.info("opened %s as user %s", (ng.database["filename"], ng.debugger.whoami()))
     ng.db.cursor = ng.db.connection.cursor()
 
     run = True
@@ -407,23 +407,26 @@ def wiretap(pc, child_conn):
     ng.debugger.critical("No heartbeats from main process for >3 minutes, exiting.")
 
 def ip_on_network(ip):
+    ng = netgrasp_instance
+
     try:
         import struct
         import socket
 
-        ng = netgrasp_instance
-
         ng.debugger.debug("entering address_on_network(%s)", (ip,))
 
         numeric_ip = struct.unpack("<L", socket.inet_aton(ip))[0]
-        cidr = sum([bin(int(x)).count("1") for x in socket.inet_ntoa(ng.netmask).split(".")])
-        netmask = struct.unpack("<L", ng.network)[0] & ((2L<<int(cidr) - 1) - 1)
+        cidr = sum([bin(int(x)).count("1") for x in socket.inet_ntoa(ng.pcap["netmask"]).split(".")])
+        netmask = struct.unpack("<L", ng.pcap["network"])[0] & ((2L<<int(cidr) - 1) - 1)
         return numeric_ip & netmask == netmask
+
     except:
         ng.debugger.dump_exception("address_in_network() caught exception")
 
 # Assumes we already have the database lock.
 def log_event(mid, iid, did, rid, event, have_lock = False):
+    ng = netgrasp_instance
+
     try:
         ng.debugger.debug("entering log_event(%s, %s, %s, %s, %s, %s)", (mid, iid, did, rid, event, have_lock))
 
@@ -432,7 +435,7 @@ def log_event(mid, iid, did, rid, event, have_lock = False):
             if have_lock:
                 _log_event(mid, iid, did, rid, event)
             else:
-                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "log_event, " + event):
+                with exclusive_lock.ExclusiveFileLock(ng, 5, "log_event, " + event):
                     _log_event(mid, iid, did, rid, event)
                     ng.db.connection.commit()
         else:
@@ -717,7 +720,7 @@ def received_arp(hdr, data, child_conn):
             if seen:
                 mid, iid, did = device_seen(src_ip, src_mac)
 
-        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "received_arp, arp"):
+        with exclusive_lock.ExclusiveFileLock(ng, 5, "received_arp, arp"):
             ng.db.cursor.execute("INSERT INTO arp (did, rid, src_mac, src_ip, dst_mac, dst_ip, timestamp) VALUES(?, ?, ?, ?, ?, ?, ?)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
             ng.debugger.debug("inserted into arp (%s, %s, %s, %s, %s, %s, %s)", (did, rid, src_mac, src_ip, dst_mac, dst_ip, now))
             if src_mac_broadcast:
@@ -759,7 +762,7 @@ def device_seen(ip, mac):
                 ng.debugger.debug("existing vendor %s [%d]", (vendor, vid))
                 seen_vendor = True
             else:
-                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new vendor"):
+                with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, new vendor"):
                     ng.db.cursor.execute("INSERT INTO vendor (name, created) VALUES(?, ?)", (vendor, now))
 
                     ng.db.connection.commit()
@@ -767,7 +770,7 @@ def device_seen(ip, mac):
                 vid = ng.db.cursor.lastrowid
                 ng.debugger.info("new vendor %s [%d]", (vendor, vid))
 
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new mac"):
+            with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, new mac"):
                 ng.db.cursor.execute("INSERT INTO mac (vid, address, created, self) VALUES(?, ?, ?, ?)", (vid, mac, now, ip_is_mine(ip)))
                 first_seen_mac = True
                 ng.db.connection.commit()
@@ -782,7 +785,7 @@ def device_seen(ip, mac):
             ng.debugger.debug("existing ip %s [%d]", (ip, iid))
             seen_ip = True
         else:
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new ip"):
+            with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, new ip"):
                 ng.db.cursor.execute("INSERT INTO ip (mid, address, created) VALUES(?, ?, ?)", (mid, ip, now))
                 first_seen_ip = True
                 ng.db.connection.commit()
@@ -798,7 +801,7 @@ def device_seen(ip, mac):
             seen_host = True
         else:
             host_name = dns_lookup(ip)
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new host"):
+            with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, new host"):
                 ng.db.cursor.execute("INSERT INTO host (iid, name, custom_name, created, updated) VALUES(?, ?, ?, ?, ?)", (iid, host_name, None, now, now))
 
                 ng.db.connection.commit()
@@ -819,13 +822,13 @@ def device_seen(ip, mac):
             if seen:
                 did = seen[0]
                 ng.debugger.debug("existing device %s (%s) [%d] (new ip)", (ip, mac, did))
-                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, update device (new ip)"):
+                with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, update device (new ip)"):
                     ng.db.cursor.execute("UPDATE device SET iid = ?, updated = ? WHERE did = ?", (iid, now, did))
                     log_event(mid, iid, did, rid, EVENT_SEEN_DEVICE, True)
                     log_event(mid, iid, did, rid, EVENT_CHANGED_IP, True)
                     ng.db.connection.commit()
             else:
-                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, new device"):
+                with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, new device"):
                     ng.db.cursor.execute("INSERT INTO device (mid, iid, hid, vid, created, updated) VALUES(?, ?, ?, ?, ?, ?)", (mid, iid, hid, vid, now, now))
                     ng.db.connection.commit()
                 first_seen_device = True
@@ -836,7 +839,7 @@ def device_seen(ip, mac):
         ng.db.cursor.execute("SELECT activity.aid FROM activity WHERE activity.did = ? AND activity.active = 1", (did,))
         seen = ng.db.cursor.fetchone()
 
-        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_seen, log activity"):
+        with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, log activity"):
             if seen:
                 aid = seen[0]
                 ng.db.cursor.execute("UPDATE activity SET updated = ?, iid = ?, counter = counter + 1 WHERE aid = ?", (now, iid, aid))
@@ -893,13 +896,13 @@ def device_request(ip, mac):
         if seen:
             rid, active = seen
             if active:
-                with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_request, update device request"):
+                with exclusive_lock.ExclusiveFileLock(ng, 6, "device_request, update device request"):
                     ng.db.cursor.execute("UPDATE request SET updated = ?, ip = ?, counter = counter + 1 WHERE rid = ?", (now, ip, rid))
                     log_event(mid, iid, did, rid, EVENT_REQUEST_IP, True)
                     ng.db.connection.commit()
                 return rid
 
-        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 6, "device_request, new device request"):
+        with exclusive_lock.ExclusiveFileLock(ng, 6, "device_request, new device request"):
             # @TODO interface, network
             ng.db.cursor.execute("INSERT INTO request (did, ip, interface, network, created, updated, counter, active) VALUES(?, ?, ?, ?, ?, ?, ?, ?)", (did, ip, None, None, now, now, 1, 1))
             rid = ng.db.cursor.lastrowid
@@ -1251,7 +1254,7 @@ def detect_stale_ips():
         ng.db.cursor.execute("SELECT aid, did, iid FROM activity WHERE active = 1 AND updated < ?", (stale,))
         rows = ng.db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "detect_stale_ips, activity"):
+            with exclusive_lock.ExclusiveFileLock(ng, 5, "detect_stale_ips, activity"):
                 for row in rows:
                     aid, did, iid = row
                     ng.db.cursor.execute("SELECT ip.address, mac.mid, mac.address FROM ip LEFT JOIN mac ON ip.mid = mac.mid WHERE iid = ? LIMIT 1", (iid,))
@@ -1269,7 +1272,7 @@ def detect_stale_ips():
         ng.db.cursor.execute("SELECT rid, did, ip FROM request WHERE active = 1 AND updated < ?", (stale,))
         rows = ng.db.cursor.fetchall()
         if rows:
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "detect_stale_ips, request"):
+            with exclusive_lock.ExclusiveFileLock(ng, 5, "detect_stale_ips, request"):
                 for row in rows:
                     rid, did, ip = row
                     mid, iid = (None, None)
@@ -1413,12 +1416,12 @@ def send_notifications():
 
                 if (timer.elapsed() > MAXSECONDS):
                     ng.debugger.debug("processing notifications >%d seconds, aborting", (MAXSECONDS,))
-                    with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "send_notifications, aborting"):
+                    with exclusive_lock.ExclusiveFileLock(ng, 5, "send_notifications, aborting"):
                         ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                         ng.db.connection.commit()
                     return
 
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "send_notifications"):
+            with exclusive_lock.ExclusiveFileLock(ng, 5, "send_notifications"):
                 ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                 ng.db.connection.commit()
 
@@ -1563,7 +1566,7 @@ def send_email_alerts():
                 else:
                     ng.debugger.debug("event %s [%d] NOT in %s", (event, eid, ng.email["alerts"]))
 
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "send_email_alerts"):
+            with exclusive_lock.ExclusiveFileLock(ng, 5, "send_email_alerts"):
                 ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_ALERT, max_eid, PROCESSED_ALERT))
                 ng.db.connection.commit()
             ng.debugger.debug("send_email_alerts: processed %d events", (processed_events,))
@@ -1626,7 +1629,7 @@ def refresh_dns_cache():
             hid, old_name, did, mac, ip = row
             name = dns_lookup(ip)
             now = datetime.datetime.now()
-            with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "refresh_dns_cache"):
+            with exclusive_lock.ExclusiveFileLock(ng, 5, "refresh_dns_cache"):
                 ng.debugger.debug("Refreshing hostname from '%s' to '%s' for %s", (old_name, name, ip))
                 ng.db.cursor.execute("UPDATE host SET name = ?, updated = ? WHERE hid = ?", (name, now, hid))
                 ng.db.connection.commit()
@@ -1850,7 +1853,7 @@ def garbage_collection():
         # schedule next garbage collection
         ng.db.set_state(garbage_collection_string, now + datetime.timedelta(days=1))
 
-        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "garbage_collection"):
+        with exclusive_lock.ExclusiveFileLock(ng, 5, "garbage_collection"):
             # Purge old arp entries.
             ng.db.cursor.execute("SELECT COUNT(*) FROM arp WHERE timestamp < ?", (now - ng.database["oldest_arp"],))
             arp_count = ng.db.cursor.fetchone()

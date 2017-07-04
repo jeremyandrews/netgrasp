@@ -34,8 +34,8 @@ def start(ng):
         except IOError:
             ng.debugger.critical("failed to write to pidfile: %s", (ng.logging["pidfile"],))
 
-        ng.debugger.warning("daemonizing, output redirected to log file: %s", (ng.logging["filename"],))
         ng.debugger.info("daemonizing app=netgrasp, pidfile=%s, user=%s, group=%s, verbose=True", (ng.logging["pidfile"], ng.security["user"], ng.security["group"]))
+        ng.debugger.warning("daemonizing, output redirected to log file: %s", (ng.logging["filename"],))
 
         try:
             ng.debugger.logToFile()
