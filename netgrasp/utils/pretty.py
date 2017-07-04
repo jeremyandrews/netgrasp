@@ -96,21 +96,18 @@ def name_did(did, ip = None):
 
         ng.debugger.debug("entering name_did(%s, %s)", (did, ip))
 
-        if not did and not ip:
-            return "Unrecgonized device"
-
         if did:
-        details = netgrasp.get_details(did)
-        if details:
-            active, counter, ip, mac, hostname, custom_name, vendor = details
-            if custom_name:
-                return custom_name
-            elif hostname and (hostname != "unknown"):
-                return hostname
-            elif vendor:
-                return """%s device""" % (vendor)
-            else:
-                return """%s [%s]""" % (ip, mac)
+            details = netgrasp.get_details(did)
+            if details:
+                active, counter, ip, mac, hostname, custom_name, vendor = details
+                if custom_name:
+                    return custom_name
+                elif hostname and (hostname != "unknown"):
+                    return hostname
+                elif vendor:
+                    return """%s device""" % (vendor)
+                else:
+                    return """%s [%s]""" % (ip, mac)
 
         # This may be a request for a device we've not yet seen.
         if ip:
