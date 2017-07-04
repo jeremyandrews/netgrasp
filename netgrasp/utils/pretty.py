@@ -94,8 +94,12 @@ def name_did(did, ip = None):
     try:
         import datetime
 
-        ng.debugger.debug("entering name_did(%s)", (did,))
+        ng.debugger.debug("entering name_did(%s, %s)", (did, ip))
 
+        if not did and not ip:
+            return "Unrecgonized device"
+
+        if did:
         details = netgrasp.get_details(did)
         if details:
             active, counter, ip, mac, hostname, custom_name, vendor = details

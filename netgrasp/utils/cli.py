@@ -8,9 +8,6 @@ def start(ng):
         ng.debugger.critical("Netgrasp is already running with pid %d.", (pid,))
     ng.debugger.info("Starting netgrasp...")
 
-    # @TODO Perform all possible sanity checks here before daemonizing process -- this allows
-    # us to display helpful output to stderr/stdout instead of silently logging failures.
-
     if os.getuid() != 0:
         ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
 

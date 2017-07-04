@@ -228,8 +228,8 @@ def main(*pcap):
     # At this point we should no longer have/need root privileges.
     assert (os.getuid() != 0) and (os.getgid() != 0), 'Failed to drop root privileges, aborting.'
 
-    email.email_instance = email.Email()
-    notify.notify_instance = notify.Notify()
+    ng.email["instance"] = email.Email()
+    ng.notification["instance"] = notify.Notify()
 
     ng.debugger.info("initiating wiretap process")
     parent_conn, child_conn = multiprocessing.Pipe()
