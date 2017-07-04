@@ -268,11 +268,6 @@ def main(*pcap):
 
     create_database()
 
-    if (ng.listen["delay"] > 30):
-        ng.listen["delay"] = 30
-    elif (ng.listen["delay"] < 1):
-        ng.listen["delay"] = 1
-
     if child.is_alive():
         run = True
     else:
@@ -287,17 +282,17 @@ def main(*pcap):
 
             parent_conn.send(HEARTBEAT)
 
-            detect_stale_ips(ng.active_timeout)
-            detect_netscans(ng.active_timeout)
-            detect_anomalies(ng.active_timeout)
+            detect_stale_ips()
+            detect_netscans()
+            detect_anomalies()
             send_notifications()
-            send_email_alerts(ng.active_timeout)
+            send_email_alerts()
             send_email_digests()
             garbage_collection()
             refresh_dns_cache()
 
-            ng.debugger.debug("sleeping for %d seconds", (ng.delay,))
-            time.sleep(ng.delay)
+            ng.debugger.debug("sleeping for %d seconds", (ng.listen["delay"],))
+            time.sleep(ng.listen["delay"])
 
             heartbeat = False
             while parent_conn.poll():
@@ -379,7 +374,7 @@ def wiretap(pc, child_conn):
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (database["filename"], ng.debugger.whoami()))
 
     ng.debugger.info("opened %s as user %s", (database["filename"], ng.debugger.whoami()))
-    ng.db.cursor = ngdb.connection.cursor()
+    ng.db.cursor = ng.db.connection.cursor()
 
     run = True
     last_heartbeat = datetime.datetime.now()
@@ -508,7 +503,7 @@ def create_database():
         ng.debugger.debug("Creating database tables, if not already existing.")
 
         # PRAGMA index_list(TABLE)
-        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "create_database"):
+        with exclusive_lock.ExclusiveFileLock(ng, 5, "create_database"):
             # Create state table.
             ng.db.cursor.execute("""
               CREATE TABLE IF NOT EXISTS state(
@@ -1243,14 +1238,14 @@ def devices_requesting_ip(ip, timeout):
         ng.debugger.dump_exception("devices_requesting_ip() caught exception")
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
-def detect_stale_ips(timeout):
+def detect_stale_ips():
     ng = netgrasp_instance
 
     try:
         from utils import exclusive_lock
 
         ng.debugger.debug("entering detect_stale_ips()")
-        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"])
 
         # Mark no-longer active devices stale.
         ng.db.cursor.execute("SELECT aid, did, iid FROM activity WHERE active = 1 AND updated < ?", (stale,))
@@ -1286,7 +1281,7 @@ def detect_stale_ips(timeout):
     except Exception as e:
         ng.debugger.dump_exception("detect_stale_ips() caught exception")
 
-def detect_netscans(timeout):
+def detect_netscans():
     ng = netgrasp_instance
 
     try:
@@ -1294,7 +1289,7 @@ def detect_netscans(timeout):
 
         ng.debugger.debug("entering detect_netscans()")
         now = datetime.datetime.now()
-        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout) - datetime.timedelta(minutes=10)
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"]) - datetime.timedelta(minutes=10)
 
         ng.db.cursor.execute("SELECT COUNT(DISTINCT arp.dst_ip) AS count, arp.src_ip, arp.src_mac FROM arp LEFT JOIN request ON arp.rid = request.rid WHERE request.active = 1 GROUP BY arp.src_ip HAVING count > 50")
         scans = ng.db.cursor.fetchall()
@@ -1313,7 +1308,7 @@ def detect_netscans(timeout):
     except Exception as e:
         ng.debugger.dump_exception("detect_netscans() caught exception")
 
-def detect_anomalies(timeout):
+def detect_anomalies():
     ng = netgrasp_instance
 
     try:
@@ -1321,7 +1316,7 @@ def detect_anomalies(timeout):
 
         ng.debugger.debug("entering detect_anomalies()")
         now = datetime.datetime.now()
-        stale = datetime.datetime.now() - datetime.timedelta(seconds=timeout)
+        stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"])
 
         # Multiple MACs with the same IP.
         ng.db.cursor.execute("SELECT COUNT(activity.iid) AS count, ip.address FROM activity LEFT JOIN ip ON activity.iid = ip.iid WHERE activity.active = 1 GROUP BY activity.iid HAVING count > 1 ORDER BY ip.iid ASC")
@@ -1431,7 +1426,7 @@ def send_notifications():
         ng.debugger.dump_exception("send_notifications() caught exception")
 
 TALKED_TO_LIMIT = 50
-def send_email_alerts(timeout):
+def send_email_alerts():
     ng = netgrasp_instance
 
     try:
@@ -1527,7 +1522,7 @@ def send_email_alerts(timeout):
                             devices_with_mac_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
                             devices_with_mac_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
 
-                    devices = devices_requesting_ip(ip, timeout)
+                    devices = devices_requesting_ip(ip, ng.listen["active_timeout"])
                     devices_requesting_ip_text = ""
                     devices_requesting_ip_html = ""
                     if devices:
@@ -1834,7 +1829,7 @@ def garbage_collection():
 
         ng.debugger.debug("entering garbage_collection()")
 
-        if not self.database["gcenabled"]:
+        if not ng.database["gcenabled"]:
             ng.db.debugger.debug("garbage collection disabled")
             return
 
