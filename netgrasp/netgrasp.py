@@ -1434,6 +1434,7 @@ def send_email_alerts():
 
     try:
         from utils import exclusive_lock
+        from utils import email
 
         ng.debugger.debug("entering send_email_alerts()")
 
@@ -1535,7 +1536,7 @@ def send_email_alerts():
                             devices_requesting_ip_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
 
                     # @TODO: fixme
-                    ng.email.MailSend(event, dict(
+                    email.MailSend(event, dict(
                         name=pretty.name_did(did),
                         ip=ip,
                         mac=mac,
@@ -1663,6 +1664,7 @@ def send_email_digests():
 
     try:
         from utils import exclusive_lock
+        from utils import email
 
         ng.debugger.debug("entering send_email_digests()")
 
@@ -1802,7 +1804,7 @@ def send_email_digests():
             ng.debugger.info("Sending %s digest", (digest,))
 
             # @TODO fixme
-            ng.email.MailSend('digest', dict(
+            email.MailSend('digest', dict(
                 type=digest,
                 time_period=time_period_description,
                 active_devices_count=len(seen),

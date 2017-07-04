@@ -48,57 +48,58 @@ class Email:
                 ng.debugger.warning("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
         ng.email["digests"] = digests
 
-    def LoadTemplate(self, template):
-        try:
-            debugger = debug.debugger_instance
-            debugger.debug("entering email.LoadTemplate(%s)", (template,))
+def LoadTemplate(template):
+    from netgrasp import netgrasp
+    ng = netgrasp.netgrasp_instance
 
-            import pkg_resources
-            import json
+    try:
+        ng.debugger.debug("entering email.LoadTemplate(%s)", (template,))
 
-            import netgrasp
+        import pkg_resources
+        import json
 
-            # @TODO allow template overrides
+        # @TODO allow template overrides
 
-            specific_template = "mail_templates/template." + template + ".json"
-            default_template = "mail_templates/template.default.json"
-            if pkg_resources.resource_exists("netgrasp", specific_template):
-                json_template = pkg_resources.resource_string("netgrasp", specific_template)
-            elif pkg_resources.resource_exists("netgrasp", default_template):
-                json_template = pkg_resources.resource_string("netgrasp", default_template)
+        specific_template = "mail_templates/template." + template + ".json"
+        default_template = "mail_templates/template.default.json"
+        if pkg_resources.resource_exists("netgrasp", specific_template):
+            json_template = pkg_resources.resource_string("netgrasp", specific_template)
+        elif pkg_resources.resource_exists("netgrasp", default_template):
+            json_template = pkg_resources.resource_string("netgrasp", default_template)
 
-            debugger.debug("template loaded: %s", (json_template,))
-            data = json.loads(json_template)
+        ng.debugger.debug("template loaded: %s", (json_template,))
+        data = json.loads(json_template)
 
-            debugger.debug("template parsed: %s", (data,))
-            return (data["subject"], data["body"]["html"], data["body"]["text"])
-        except:
-            debugger.dump_exception("LoadTemplate() FIXME")
+        ng.debugger.debug("template parsed: %s", (data,))
+        return (data["subject"], data["body"]["html"], data["body"]["text"])
+    except:
+        ng.debugger.dump_exception("LoadTemplate() exception")
 
-    def MailSend(self, template, replace):
-        from netgrasp import netgrasp
-        ng = netgrasp.netgrasp_instance
-        try:
-            ng.debugger.debug("entering email.MailSend(%s, %s)", (template, replace))
+def MailSend(template, replace):
+    from netgrasp import netgrasp
+    ng = netgrasp.netgrasp_instance
 
-            from string import Template
+    try:
+        ng.debugger.debug("entering email.MailSend(%s, %s)", (template, replace))
 
-            import pyzmail
-            template_subject, template_body_html, template_body_text = self.LoadTemplate(template)
+        from string import Template
 
-            subject = Template(template_subject).substitute(replace)
-            body_html = Template(template_body_html).substitute(replace)
-            body_text = Template(template_body_text).substitute(replace)
+        import pyzmail
+        template_subject, template_body_html, template_body_text = LoadTemplate(template)
 
-            payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email["from"], ng.email["to"], subject, "iso-8859-1", (body_text, "us-ascii"), (body_html, "us-ascii"))
-            ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email["hostname"], ng.email["port"], ng.email["mode"], ng.email["username"], ng.email["password"])
+        subject = Template(template_subject).substitute(replace)
+        body_html = Template(template_body_html).substitute(replace)
+        body_text = Template(template_body_text).substitute(replace)
 
-            if isinstance(ret, dict):
-                if ret:
-                    failed_recipients = ", ".join(ret.keys())
-                    ng.debugger.warning("failed to send email, failed receipients: %s", (failed_recipients,))
-                else:
-                    ng.debugger.debug("email sent: %s", (ret,))
+        payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email["from"], ng.email["to"], subject, "iso-8859-1", (body_text, "us-ascii"), (body_html, "us-ascii"))
+        ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email["hostname"], ng.email["port"], ng.email["mode"], ng.email["username"], ng.email["password"])
 
-        except Exception as e:
-            ng.debugger.dump_exception("MailSend() FIXME")
+        if isinstance(ret, dict):
+            if ret:
+                failed_recipients = ", ".join(ret.keys())
+                ng.debugger.warning("failed to send email, failed receipients: %s", (failed_recipients,))
+            else:
+                ng.debugger.debug("email sent: %s", (ret,))
+
+    except Exception as e:
+        ng.debugger.dump_exception("MailSend() exception")

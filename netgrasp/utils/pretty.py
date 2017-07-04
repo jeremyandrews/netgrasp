@@ -1,11 +1,11 @@
 def time_ago(elapsed):
+    from netgrasp import netgrasp
+    ng = netgrasp.netgrasp_instance
+
     try:
         import datetime
 
-        from netgrasp.utils import debug
-        debugger = debug.debugger_instance
-
-        debugger.debug("time_ago(%s)", (elapsed,))
+        ng.debugger.debug("time_ago(%s)", (elapsed,))
 
         if not elapsed:
             return "never"
@@ -39,17 +39,18 @@ def time_ago(elapsed):
         if day_diff < 365:
             return str(day_diff / 30) + " months ago"
         return str(day_diff / 365) + " years ago"
+
     except exception as e:
-        debugger.dump_exception("time_ago() fixme")
+        ng.debugger.dump_exception("time_ago() fixme")
 
 def time_elapsed(elapsed):
+    from netgrasp import netgrasp
+    ng = netgrasp.netgrasp_instance
+
     try:
         import datetime
 
-        from netgrasp.utils import debug
-        debugger = debug.debugger_instance
-
-        debugger.debug("time_elapsed(%s)", (elapsed,))
+        ng.debugger.debug("time_elapsed(%s)", (elapsed,))
 
         if not elapsed:
             return "a second"
@@ -81,22 +82,19 @@ def time_elapsed(elapsed):
         if day_diff < 365:
             return str(day_diff / 30) + " months"
         return str(day_diff / 365) + " years"
+
     except Exception as e:
-        debugger.dump_exception("time_elapsed() caught exception")
+        ng.debugger.dump_exception("time_elapsed() caught exception")
 
 # Provides a human-friendly name for a mac-ip pair.
 def name_did(did, ip = None):
+    from netgrasp import netgrasp
+    ng = netgrasp.netgrasp_instance
+
     try:
         import datetime
 
-        from netgrasp import netgrasp
-        from netgrasp.utils import debug
-        from netgrasp.database import database
-
-        debugger = debug.debugger_instance
-        db = database.database_instance
-
-        debugger.debug("entering name_did(%s)", (did,))
+        ng.debugger.debug("entering name_did(%s)", (did,))
 
         details = netgrasp.get_details(did)
         if details:
@@ -119,7 +117,7 @@ def name_did(did, ip = None):
         return "Unrecognized device"
 
     except Exception as e:
-        debugger.dump_exception("name_did() caught exception")
+        ng.debugger.dump_exception("name_did() caught exception")
 
 # Truncate strings when they're too long.
 def truncate_string(string, maxlength, suffix = "..."):
