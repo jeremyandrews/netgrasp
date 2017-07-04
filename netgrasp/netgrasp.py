@@ -111,7 +111,11 @@ class Netgrasp:
         # Load logging parameters.
         self.logging["filename"] = self.configuration.GetText('Logging', 'filename', DEFAULT_LOGFILE)
         self.logging["pidfile"] = self.configuration.GetText('Logging', 'pidfile', DEFAULT_PIDFILE, False)
-        self.logging["level"] = self.configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False)
+        if self.verbose:
+            self.logging["level"] = logging.DEBUG
+            self.debugger.debug("log level forced to verbose")
+        else:
+            self.logging["level"] = self.configuration.GetText('Logging', 'level', DEFAULT_LOGLEVEL, False)
 
         # Load email parameters.
         self.email["enabled"] = self.configuration.GetBoolean("Email", "enabled", False, False)
