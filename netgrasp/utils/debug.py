@@ -99,6 +99,9 @@ class Debugger:
         if self.mode == FILE:
             self.logger.setLevel(level)
 
+    def logToStdout(self):
+        self.mode = PRINT
+
     def logToFile(self):
         self.mode = FILE
 

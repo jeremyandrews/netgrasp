@@ -98,7 +98,7 @@ if __name__ == "__main__":
         else:
             ng.daemonize = True
     except:
-        ng.daemonize = True
+        ng.daemonize = False
 
     # How verbose we should be.
     if args.verbose:
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     ng._load_configuration()
     ng._enable_debugger()
 
-    if not ng.daemonize:
+    if ng.verbose and not ng.daemonize:
         ng.debugger.warning("output forced to stdout, started with --foreground flag.")
 
     ng._include_dependencies()

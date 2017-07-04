@@ -11,18 +11,18 @@ def start(ng):
     if os.getuid() != 0:
         ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
 
-    # Test that we can write to the log.
-    try:
-        with open(ng.logging["filename"], "w"):
-            ng.debugger.info("successfully writing to logfile")
-    except Exception as e:
-        ng.debugger.dump_exception("start() exception")
-        ng.debugger.critical("failed to write to logfile: %s", (ng.logging["filename"],))
-
     netgrasp.netgrasp_instance = ng
 
     # Start netgrasp.
     if ng.daemonize:
+        # Test that we can write to the log.
+        try:
+            with open(ng.logging["filename"], "w"):
+                ng.debugger.info("successfully writing to logfile")
+        except Exception as e:
+            ng.debugger.dump_exception("start() exception")
+            ng.debugger.critical("failed to write to logfile: %s", (ng.logging["filename"],))
+
         import daemonize
         # test that we can write to the pidfile
         try:
@@ -88,23 +88,15 @@ def status(ng):
         ng.debugger.warning("Netgrasp is not running.")
 
 def update(ng):
-    from netgrasp.database import database
     from netgrasp.update import update
-    from netgrasp.utils import exclusive_lock
-    from netgrasp.utils import email
-    from netgrasp.notify import notify
 
     try:
-        ng.database_filename = ng.config.GetText('Database', 'filename')
-        ng.db = database.Database(ng.database_filename, ng.debugger)
-        database.database_instance = ng.db
+        ng.db = database.Database(ng.database["filename"], ng.debugger)
     except Exception as e:
         ng.debugger.error("error: %s", (e,))
-        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database_filename, ng.debugger.whoami()))
+        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database["filename"], ng.debugger.whoami()))
 
     ng.db.cursor = ng.db.connection.cursor()
-    ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', netgrasp.DEFAULT_DBLOCK, False), 5, "identify")
-    ng.db.lock = ng._database_lock
 
     query = database.SelectQueryBuilder("state", ng.debugger, ng.args.verbose)
     query.db_select("{%BASE}.value")
@@ -143,16 +135,13 @@ def list(ng):
     if not pid:
         ng.debugger.critical("Netgrasp is not running.")
 
-    ng.database_filename = ng.config.GetText('Database', 'filename')
-
     try:
-        ng.db = database.Database(ng.database_filename, ng.debugger)
-        database.database_instance = ng.db
+        ng.db = database.Database(ng.database["filename"], ng.debugger)
     except Exception as e:
         ng.debugger.error("error: %s", (e,))
-        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database_filename, ng.debugger.whoami()))
+        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database["filename"], ng.debugger.whoami()))
 
-    ng.debugger.info("Opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
+    ng.debugger.info("Opened %s as user %s", (ng.database["filename"], ng.debugger.whoami()))
 
     ng.db.cursor = ng.db.connection.cursor()
 
@@ -194,8 +183,7 @@ def list(ng):
             query.db_where("{%BASE}.timestamp >= ?", 1)
         else:
             description = "Recent alerts"
-            ng.active_timeout = ng.config.GetInt('Listen', 'active_timeout', 60 * 60 * 2, False)
-            recent = datetime.datetime.now() - datetime.timedelta(seconds=ng.active_timeout)
+            recent = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"])
             query.db_where("{%BASE}.timestamp >= ?", recent)
 
         if (not ng.args.all or ng.args.all == 1):
@@ -248,20 +236,15 @@ def identify(ng):
     if not pid:
         ng.debugger.critical("Netgrasp is not running.")
 
-    ng.database_filename = ng.config.GetText("Database", "filename")
-
     try:
-        ng.db = database.Database(ng.database_filename, ng.debugger)
-        database.database_instance = ng.db
+        ng.db = database.Database(ng.database["filename"], ng.debugger)
     except Exception as e:
         ng.debugger.error("%s", (e,))
-        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database_filename, ng.debugger.whoami()))
+        ng.debugger.critical("Failed to open or create database file %s (as user %s), exiting.", (ng.database["filename"], ng.debugger.whoami()))
 
-        ng.debugger.info("Opened %s as user %s", (ng.database_filename, ng.debugger.whoami()))
+        ng.debugger.info("Opened %s as user %s", (ng.database["filename"], ng.debugger.whoami()))
 
     ng.db.cursor = ng.db.connection.cursor()
-    ng._database_lock = exclusive_lock.ExclusiveFileLock(ng.config.GetText('Database', 'lockfile', netgrasp.DEFAULT_DBLOCK, False), 5, "identify")
-    ng.db.lock = ng._database_lock
 
     if not ng.args.set:
         description = "Use --set ID 'CUSTOM NAME' to set a custom name on a device"
@@ -316,7 +299,7 @@ def identify(ng):
         if ng.args.verbose > 1:
             print "id:", ng.args.set[0], "| custom name:", ng.args.set[1]
         ng.db.cursor.execute("SELECT vendor.vid FROM vendor LEFT JOIN mac ON vendor.vid = mac.vid LEFT JOIN host ON mac.mid = host.hid WHERE host.hid = ?", (ng.args.set[0],))
-        with exclusive_lock.ExclusiveFileLock(ng.db.lock, 5, "failed to set custom name, please try again"):
+        with exclusive_lock.ExclusiveFileLock(ng.database["lock"], 5, "failed to set custom name, please try again"):
             db_args = [ng.args.set[1]]
             db_args.append(ng.args.set[0])
             ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
@@ -325,7 +308,6 @@ def identify(ng):
 def template(ng):
     from netgrasp.database import database
     from netgrasp.utils import pretty
-    from netgrasp.utils import exclusive_lock
 
     import pkg_resources
 
