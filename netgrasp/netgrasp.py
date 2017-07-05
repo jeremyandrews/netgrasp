@@ -1266,7 +1266,7 @@ def detect_stale_ips():
                     if address:
                         ip, mid, mac = address
                         log_event(mid, iid, did, None, EVENT_STALE, True)
-                        ng.debugger.info("%s [%s] is no longer active)", (ip, mac))
+                        ng.debugger.info("%s [%s] is no longer active", (ip, mac))
                     else:
                         ng.debugger.error("aid(%d) did(%d) is no longer active, no ip/mac found)", (aid, did))
                     ng.db.cursor.execute("UPDATE activity SET active = 0 WHERE aid = ?", (aid,))
