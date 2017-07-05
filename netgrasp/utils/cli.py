@@ -294,12 +294,7 @@ def identify(ng):
             print """ %s:""" % description
             print rowFormat.format(*header)
         for row in rows:
-            ng.db.cursor.execute("SELECT custom_name FROM host WHERE hid = ? ORDER BY custom_name DESC", (row[0],))
-            custom_name = ng.db.cursor.fetchone()
-            if custom_name and custom_name[0]:
-                # Device changed IP and has custom name associated with previous IP.
-                ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", (custom_name[0], row[0]))
-                continue
+            # @TODO handle IP changes
             print rowFormat.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
     else:
         if ng.args.verbose > 1:
