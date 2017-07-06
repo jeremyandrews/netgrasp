@@ -1512,6 +1512,12 @@ def send_email_alerts():
                             talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
                             talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
 
+                    if talked_to_count == TALKED_TO_LIMIT:
+                      ng.db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count FROM arp WHERE src_ip = ? AND timestamp >= ?", (ip, day))
+                      proper_count = ng.db.cursor.fetchone()
+                      if proper_count:
+                          talked_to_count = proper_count[0]
+
                     devices = active_devices_with_ip(ip)
                     devices_with_ip_text = ""
                     devices_with_ip_html = ""
