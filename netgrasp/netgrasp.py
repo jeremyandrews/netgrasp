@@ -1769,6 +1769,7 @@ def send_email_digests():
                     noisy_devices_html += """<li>%s (%s) requested %d IP addresses""" % (noise[3], noise[1], noise[2])
                     if (noise[2] > 50):
                         noisy_devices_text += " (network scan?)"
+                        noisy_devices_html += " (network scan?)"
                     noisy_devices_html += "</li>"
 
             gone_devices_intro = ""
