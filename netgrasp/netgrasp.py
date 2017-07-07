@@ -1788,7 +1788,7 @@ def send_email_digests():
                 gone_devices_intro = """The following IPs were not active, but were active the previous %s:""" % (time_period_description)
                 for gone in gone_away:
                     gone_details = get_details(gone[0])
-                    gone_active, gone_counter, gone_ip, gone_mac, gone_host_name, gone_custom_name, gone_vendor = details
+                    gone_active, gone_counter, gone_ip, gone_mac, gone_host_name, gone_custom_name, gone_vendor = gone_details
                     gone_devices_text += """\n - %s (%s)""" % (pretty.name_did(gone[0]), gone_ip)
                     gone_devices_html += """<li>%s (%s)</li>""" % (pretty.name_did(gone[0]), gone_ip)
 
