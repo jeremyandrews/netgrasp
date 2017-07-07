@@ -1739,8 +1739,7 @@ def send_email_digests():
 
             noisy = []
             some_new = False
-            active_devices_text = ""
-            active_devices_html = ""
+            active_devices = []
             for unique_seen in seen:
                 did = unique_seen[0]
                 details = get_details(did)
@@ -1754,43 +1753,56 @@ def send_email_digests():
                 if (requests[0] > 10):
                     noisy.append((mac, ip, requests[0], pretty.name_did(did)))
                 if unique_seen in new:
-                    active_devices_text += """\n - %s (%s)*""" % (pretty.name_did(did), ip)
-                    active_devices_html += """<li>%s (%s)*</li>""" % (pretty.name_did(did), ip)
+                    active_devices.append("""%s (%s)*""" % (pretty.name_did(did), ip))
                     some_new = True
                 else:
-                    active_devices_text += """\n - %s (%s)""" % (pretty.name_did(did), ip)
-                    active_devices_html += """<li>%s (%s)</li>""" % (pretty.name_did(did), ip)
+                    active_devices.append("""%s (%s)""" % (pretty.name_did(did), ip))
             if some_new:
                 new_devices_text = "* = not active in the previous " + time_period_description
             else:
                 new_devices_text = ""
+            active_devices = sorted(active_devices, key=lambda s: s.lower())
+
+            active_devices_text = ""
+            active_devices_html = ""
+            for device in active_devices:
+                active_devices_text += " - " + device + "\n"
+                active_devices_html += "<li>" + device + "</li>"
 
             noisy_devices_intro = ""
-            noisy_devices_text = ""
-            noisy_devices_html = ""
+            noisy_devices = []
             if noisy:
                 noisy_devices_intro = "The following devices requested 10 or more IPs:"
                 for noise in noisy:
-                    noisy_devices_text += """\n - %s (%s) requested %d IP addresses""" % (noise[3], noise[1], noise[2])
-                    noisy_devices_html += """<li>%s (%s) requested %d IP addresses""" % (noise[3], noise[1], noise[2])
+                    noisy_text = """%s (%s) requested %d IP addresses""" % (noise[3], noise[1], noise[2])
                     if (noise[2] > 100):
-                        noisy_devices_text += " (network scan)"
-                        noisy_devices_html += " (network scan)"
+                        noisy_text += " (network scan)"
                     elif (noise[2] > 50):
-                        noisy_devices_text += " (network scan?)"
-                        noisy_devices_html += " (network scan?)"
-                    noisy_devices_html += "</li>"
+                        noisy_text += " (network scan?)"
+                    noisy_devices.append(noisy_text)
+            noisy_devices = sorted(noisy_devices, key=lambda s: s.lower())
+
+            noisy_devices_text = ""
+            noisy_devices_html = ""
+            for device in noisy_devices:
+                noisy_devices_text += " - " + device + "\n"
+                noisy_devices_html += "<li>" + device + "</li>"
 
             gone_devices_intro = ""
-            gone_devices_text = ""
-            gone_devices_html = ""
+            gone_devices = []
             if gone_away:
                 gone_devices_intro = """The following IPs were not active, but were active the previous %s:""" % (time_period_description)
                 for gone in gone_away:
                     gone_details = get_details(gone[0])
                     gone_active, gone_counter, gone_ip, gone_mac, gone_host_name, gone_custom_name, gone_vendor = gone_details
-                    gone_devices_text += """\n - %s (%s)""" % (pretty.name_did(gone[0]), gone_ip)
-                    gone_devices_html += """<li>%s (%s)</li>""" % (pretty.name_did(gone[0]), gone_ip)
+                    gone_devices.append("""%s (%s)""" % (pretty.name_did(gone[0]), gone_ip))
+            gone_devices = sorted(gone_devices, key=lambda s: s.lower())
+
+            gone_devices_text = ""
+            gone_devices_html = ""
+            for device in gone_devices:
+                gone_devices_text += " - " + device + "\n"
+                gone_devices_html += "<li>" + device + "</li>"
 
             device_breakdown_text = ""
             device_breakdown_html = ""
