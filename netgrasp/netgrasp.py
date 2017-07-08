@@ -1432,6 +1432,16 @@ def send_notifications():
     except Exception as e:
         ng.debugger.dump_exception("send_notifications() caught exception")
 
+def _text_and_html_list(items):
+    text = ''
+    html = ''
+    if items:
+        items_sorted = sorted(items, key=lambda s: s.lower())
+        for item in items_sorted:
+            text += " - " + item + "\n"
+            html += "<li>" + item + "</li>"
+    return (text, html)
+
 TALKED_TO_LIMIT = 50
 def send_email_alerts():
     ng = netgrasp_instance
@@ -1500,8 +1510,7 @@ def send_email_alerts():
 
                     ng.db.cursor.execute("SELECT dst_ip, dst_mac FROM arp WHERE src_ip = ? AND timestamp >= ? GROUP BY dst_ip LIMIT ?", (ip, day, TALKED_TO_LIMIT))
                     peers = ng.db.cursor.fetchall()
-                    talked_to_text = ""
-                    talked_to_html = ""
+                    talked_to = []
                     talked_to_count = 0
                     if peers:
                         talked_to_count = len(peers)
@@ -1509,8 +1518,8 @@ def send_email_alerts():
                             dst_ip, dst_mac = peer
                             dst_mid, dst_iid, dst_did = get_ids(dst_ip, dst_mac)
                             ng.debugger.debug("ip, mac, mid, iid, did: %s, %s, %s, %s, %s", (dst_ip, dst_mac, dst_mid, dst_iid, dst_did))
-                            talked_to_text += """\n - %s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
-                            talked_to_html += """<li>%s (%s)</li>""" % (pretty.name_did(dst_did, dst_ip), dst_ip)
+                            talked_to.append("""%s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip))
+                    talked_to_text, talked_to_html = _text_and_html_list(talked_to)
 
                     if talked_to_count == TALKED_TO_LIMIT:
                       ng.db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count FROM arp WHERE src_ip = ? AND timestamp >= ?", (ip, day))
@@ -1519,33 +1528,29 @@ def send_email_alerts():
                           talked_to_count = proper_count[0]
 
                     devices = active_devices_with_ip(ip)
-                    devices_with_ip_text = ""
-                    devices_with_ip_html = ""
+                    devices_with_ip = []
                     if devices:
                         for device in devices:
                             list_did, list_ip, list_mac = device
-                            devices_with_ip_text += """\n - %s [%s]""" % (pretty.name_did(list_did), list_mac)
-                            devices_with_ip_html += """<li>%s [%s]</li>""" % (pretty.name_did(list_did), list_mac)
+                            devices_with_ip.append("""%s [%s]""" % (pretty.name_did(list_did), list_mac))
+                    devices_with_ip_text, devices_with_ip_html = _text_and_html_list(devices_with_ip)
 
                     devices = active_devices_with_mac(mac)
-                    devices_with_mac_text = ""
-                    devices_with_mac_html = ""
+                    devices_with_mac = []
                     if devices:
                         for device in devices:
                             list_did, list_ip, list_mac = device
-                            devices_with_mac_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
-                            devices_with_mac_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
+                            devices_with_mac.append("""%s (%s)""" % (pretty.name_did(list_did), list_ip))
+                    devices_with_mac_text, devices_with_mac_html = _text_and_html_list(devices_with_mac)
 
                     devices = devices_requesting_ip(ip, ng.listen["active_timeout"])
-                    devices_requesting_ip_text = ""
-                    devices_requesting_ip_html = ""
+                    devices_requesting_ip = []
                     if devices:
                         for device in devices:
                             list_did, list_ip, list_mac = device
-                            devices_requesting_ip_text += """\n - %s (%s)""" % (pretty.name_did(list_did), list_ip)
-                            devices_requesting_ip_html += """<li>%s (%s)</li>""" % (pretty.name_did(list_did), list_ip)
+                            devices_requesting_ip.append("""%s (%s)""" % (pretty.name_did(list_did), list_ip))
+                    devices_requesting_ip_text, devices_requesting_ip_html = _text_and_html_list(devices_requesting_ip)
 
-                    # @TODO: fixme
                     email.MailSend(event, dict(
                         name=pretty.name_did(did),
                         ip=ip,
@@ -1761,13 +1766,7 @@ def send_email_digests():
                 new_devices_text = "* = not active in the previous " + time_period_description
             else:
                 new_devices_text = ""
-            active_devices = sorted(active_devices, key=lambda s: s.lower())
-
-            active_devices_text = ""
-            active_devices_html = ""
-            for device in active_devices:
-                active_devices_text += " - " + device + "\n"
-                active_devices_html += "<li>" + device + "</li>"
+            active_devices_text, active_devices_html = _text_and_html_list(active_devices)
 
             noisy_devices_intro = ""
             noisy_devices = []
@@ -1780,13 +1779,7 @@ def send_email_digests():
                     elif (noise[2] > 50):
                         noisy_text += " (network scan?)"
                     noisy_devices.append(noisy_text)
-            noisy_devices = sorted(noisy_devices, key=lambda s: s.lower())
-
-            noisy_devices_text = ""
-            noisy_devices_html = ""
-            for device in noisy_devices:
-                noisy_devices_text += " - " + device + "\n"
-                noisy_devices_html += "<li>" + device + "</li>"
+            noisy_devices_text, noisy_devices_html = _text_and_html_list(noisy_devices)
 
             gone_devices_intro = ""
             gone_devices = []
@@ -1796,13 +1789,7 @@ def send_email_digests():
                     gone_details = get_details(gone[0])
                     gone_active, gone_counter, gone_ip, gone_mac, gone_host_name, gone_custom_name, gone_vendor = gone_details
                     gone_devices.append("""%s (%s)""" % (pretty.name_did(gone[0]), gone_ip))
-            gone_devices = sorted(gone_devices, key=lambda s: s.lower())
-
-            gone_devices_text = ""
-            gone_devices_html = ""
-            for device in gone_devices:
-                gone_devices_text += " - " + device + "\n"
-                gone_devices_html += "<li>" + device + "</li>"
+            gone_devices_text, gone_devices_html = _text_and_html_list(gone_devices)
 
             device_breakdown_text = ""
             device_breakdown_html = ""
