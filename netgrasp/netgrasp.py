@@ -1544,12 +1544,12 @@ def send_email_alerts():
                     devices_with_mac_text, devices_with_mac_html = _text_and_html_list(devices_with_mac)
 
                     devices = devices_requesting_ip(ip, ng.listen["active_timeout"])
-                    devices_requesting_ip = []
+                    devices_requesting = []
                     if devices:
                         for device in devices:
                             list_did, list_ip, list_mac = device
-                            devices_requesting_ip.append("""%s (%s)""" % (pretty.name_did(list_did), list_ip))
-                    devices_requesting_ip_text, devices_requesting_ip_html = _text_and_html_list(devices_requesting_ip)
+                            devices_requesting.append("""%s (%s)""" % (pretty.name_did(list_did), list_ip))
+                    devices_requesting_ip_text, devices_requesting_ip_html = _text_and_html_list(devices_requesting)
 
                     email.MailSend(event, dict(
                         name=pretty.name_did(did),
