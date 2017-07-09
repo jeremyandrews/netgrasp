@@ -1,3 +1,7 @@
+v0.9.2, 9-July-2017
+ * minor improvements for alert and digest emails
+ * bug fixes
+
 v0.9.1, 4-July-2017
  * streamlined startup and configuration structure, improved startup debugging
 
