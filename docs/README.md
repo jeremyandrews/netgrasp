@@ -16,6 +16,32 @@ optionally notifying you when a new device joins your network. It can provide
 daily summary digests detailing devices on your network. It can also be used
 interactively to review devices and list events on your network.
 
+## Installation
+Run:
+```
+  pip install netgrasp
+```
+
+Or:
+```
+  sudo ./setup.py install
+```
+
+To configure netgrasp, save the configuration template to any of
+the following paths, as preferred for your local configuration:
+ * /etc/netgrasp.cfg
+ * /usr/local/etc/netgrasp.cfg
+ * ~/.netgrasp.cfg
+ * ./netgrasp.cfg
+
+For example:
+```
+  sudo netgrasp template > /usr/local/etc/netgrasp.cfg
+```
+
+Then edit the configuration file to suit your environment, as described in the
+configuration section below.
+
 ## Dependencies
  * Python 2
  * Installed when you run `./setup.py install`:
