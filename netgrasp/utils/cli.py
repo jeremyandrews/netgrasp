@@ -6,7 +6,7 @@ def start(ng):
     pid = ng.is_running()
     if pid:
         ng.debugger.critical("Netgrasp is already running with pid %d.", (pid,))
-    ng.debugger.info("Starting netgrasp...")
+    ng.debugger.warning("Starting netgrasp...")
 
     if os.getuid() != 0:
         ng.debugger.critical("netgrasp must be run as root (currently running as %s), exiting", (ng.debugger.whoami()))
@@ -56,7 +56,7 @@ def stop(ng, must_be_running = True):
         else:
             ng.debugger.info("Netgrasp is not running.")
     else:
-        ng.debugger.info("Stopping netgrasp...")
+        ng.debugger.warning("Stopping netgrasp...")
 
         try:
             os.kill(pid, signal.SIGTERM)
