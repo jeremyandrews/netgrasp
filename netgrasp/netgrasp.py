@@ -1136,11 +1136,12 @@ def time_seen(did):
     try:
         ng.debugger.debug("entering time_seen(%s)", (did,))
 
-        ng.db.cursor.execute('SELECT created, updated FROM activity WHERE did=? AND updated NOT NULL ORDER BY updated DESC LIMIT 1', (did,))
+        ng.db.cursor.execute('SELECT created, updated FROM activity WHERE did=? ORDER BY updated DESC LIMIT 1', (did,))
         active = ng.db.cursor.fetchone()
         if active:
-            firstSeen, lastSeen = active
-            return lastSeen - firstSeen
+            created, updated = active
+            ng.debugger.debug("did(%d) created(%s) updated(%s)", (did, created, updated))
+            return updated - created
         else:
             return False
 
