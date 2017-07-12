@@ -73,7 +73,11 @@ class Netgrasp:
         import logging.handlers
 
         if self.daemonize:
-            self.debugger.handler = logging.FileHandler(self.logging["filename"])
+            try:
+                self.debugger.handler = logging.FileHandler(self.logging["filename"])
+            except Exception as e:
+                self.debugger.error("fatal exception: %s", (e,))
+                self.debugger.critical("failed to open log file %s for writing (as user %s), exiting", (self.logging["filename"], self.debugger.whoami()))
         else:
             self.debugger.handler = logging.StreamHandler()
         formatter = logging.Formatter(DEFAULT_LOGFORMAT)
