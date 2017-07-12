@@ -1,6 +1,8 @@
-v0.9.3, ???
- * fix regression breaking 'template' command for initial installation
+v0.9.3, 12-July-2017
+ * fix regression breaking 'template' command for initial installation (only
+   check interface at startup)
  * provide visual feedback when starting/stopping netgrasp
+ * bug fixes
 
 v0.9.2, 9-July-2017
  * minor improvements for alert and digest emails
