@@ -13,6 +13,10 @@ def start(ng):
 
     netgrasp.netgrasp_instance = ng
 
+    # @TODO: use pcap to set and test interface
+    if not ng.listen["interface"]:
+        ng.debugger.critical("Required [Listen] 'interface' not defined in configuration file, exiting.")
+
     # Start netgrasp.
     if ng.daemonize:
         # Test that we can write to the log.

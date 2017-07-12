@@ -85,9 +85,7 @@ class Netgrasp:
         self.configuration = config.Config(self.debugger)
         
         # Load listen parameters.
-        # @TODO: use pcap to set devices
-        #self.listen["interface"] = self.configuration.GetText("Listen", "interface", devices[0], False)
-        self.listen["interface"] = self.configuration.GetText("Listen", "interface")
+        self.listen["interface"] = self.configuration.GetText("Listen", "interface", False, False)
         self.listen["active_timeout"] = self.configuration.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
         delay = self.configuration.GetInt("Listen", "delay", 15, False)
         if (delay > 30):
