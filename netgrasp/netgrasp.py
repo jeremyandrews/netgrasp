@@ -89,12 +89,12 @@ class Netgrasp:
         self.configuration = config.Config(self.debugger)
         
         # Load listen parameters.
-        self.listen["interface"] = self.configuration.GetText("Listen", "interface", False, False)
+        self.listen["interface"] = self.configuration.GetText("Listen", "interface", None, False)
         self.listen["active_timeout"] = self.configuration.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
         delay = self.configuration.GetInt("Listen", "delay", 15, False)
-        if (delay > 30):
+        if delay > 30:
             delay = 30
-        elif (delay < 1):
+        elif delay < 1:
             delay = 1
         self.listen["delay"] = delay
 
@@ -103,7 +103,7 @@ class Netgrasp:
         self.security["group"] = self.configuration.GetText("Security", "group", DEFAULT_GROUP, False)
 
         # Load database parameters.
-        self.database["filename"] = self.configuration.GetText('Database', 'filename')
+        self.database["filename"] = self.configuration.GetText("Database", "filename", None, False)
         self.database["lock"] = self.configuration.GetText("Database", "lockfile", DEFAULT_DBLOCK, False)
         self.database["gcenabled"] = self.configuration.GetBoolean("Database", "gcenabled", True, False)
         if self.database["gcenabled"]:
