@@ -17,6 +17,9 @@ def start(ng):
     if not ng.listen["interface"]:
         ng.debugger.critical("Required [Listen] 'interface' not defined in configuration file, exiting.")
 
+    if not ng.database["filename"]:
+        ng.debugger.critical("Required [Database] 'filename' not defined in configuration file, exiting.")
+
     # Start netgrasp.
     if ng.daemonize:
         # Test that we can write to the log.

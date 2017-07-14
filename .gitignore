@@ -14,3 +14,11 @@
 # Ignore sqlite-related files
 *shm
 *wal
+
+# Ignore PyCharm/IntelliJ IDEA
+.idea/
+
+# Ignore builds/eggs
+*.egg-info/
+build/
+dist/
