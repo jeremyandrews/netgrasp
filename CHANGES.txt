@@ -1,3 +1,7 @@
+v0.9.4, ???
+ * fix startup with -c option for custom configuration file
+ * cleanup, bug fixes
+
 v0.9.3, 12-July-2017
  * fix regression breaking 'template' command for initial installation (only
    check interface at startup)
