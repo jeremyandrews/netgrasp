@@ -44,11 +44,8 @@ DEFAULT_DBLOCK    = "/tmp/.netgrasp_database_lock"
 
 
 class Netgrasp(object):
-    def __init__(self, cfg):
-        if config:
-            self.config = cfg
-        else:
-            self.config = DEFAULT_CONFIG
+    def __init__(self, config_filename=None):
+        self.config = config_filename or DEFAULT_CONFIG
 
         self.listen = {}
         self.security = {}
