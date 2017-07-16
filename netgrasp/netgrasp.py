@@ -1028,11 +1028,11 @@ def get_details(did):
     try:
         ng.debugger.debug("entering get_details(%s)", (did,))
 
-        ng.db.cursor.execute("SELECT activity.active, activity.counter, ip.address, mac.address, host.name, host.custom_name, vendor.name FROM activity LEFT JOIN device ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ?", (did,))
+        ng.db.cursor.execute("SELECT activity.active, activity.counter, ip.address, mac.address, host.name, host.custom_name, vendor.name FROM activity LEFT JOIN device ON activity.did = device.did LEFT JOIN host ON device.hid = host.hid LEFT JOIN ip ON device.iid = ip.iid LEFT JOIN mac ON device.mid = mac.mid LEFT JOIN vendor ON device.vid = vendor.vid WHERE device.did = ? ORDER BY activity.updated DESC LIMIT 1", (did,))
         info = ng.db.cursor.fetchone()
         if info:
             active, counter, ip, mac, host_name, custom_name, vendor = info
-            return (active, counter, ip, mac, host_name, custom_name, vendor)
+            return active, counter, ip, mac, host_name, custom_name, vendor
         else:
             ng.debugger.warning("unknown device %d", (did,))
             return False
