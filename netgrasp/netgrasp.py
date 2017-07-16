@@ -10,17 +10,19 @@ from database import database
 import logging
 import logging.handlers
 import pwd
-import sys
 import os
 import datetime
 import time
-import traceback
 
 netgrasp_instance = None
 
 BROADCAST = 'ff:ff:ff:ff:ff:ff'
 
-ALERT_TYPES = ['requested_ip', 'first_requested_ip', 'first_requested_ip_recently', 'seen_device', 'first_seen_device', 'first_seen_device_recently', 'seen_mac', 'first_seen_mac', 'seen_ip', 'first_seen_ip', 'seen_host', 'first_seen_host', 'seen_vendor', 'first_seen_vendor', 'device_stale', 'request_stale', 'changed_ip', 'duplicate_ip', 'duplicate_mac', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast', 'requested_self']
+ALERT_TYPES = ['requested_ip', 'first_requested_ip', 'first_requested_ip_recently', 'seen_device', 'first_seen_device',
+               'first_seen_device_recently', 'seen_mac', 'first_seen_mac', 'seen_ip', 'first_seen_ip', 'seen_host',
+               'first_seen_host', 'seen_vendor', 'first_seen_vendor', 'device_stale', 'request_stale', 'changed_ip',
+               'duplicate_ip', 'duplicate_mac', 'network_scan', 'ip_not_on_network', 'src_mac_broadcast',
+               'requested_self']
 
 EVENT_REQUEST_IP, EVENT_FIRST_REQUEST_IP, EVENT_FIRST_REQUEST_RECENTLY_IP, EVENT_SEEN_DEVICE, EVENT_FIRST_SEEN_DEVICE, EVENT_FIRST_SEEN_DEVICE_RECENTLY, EVENT_SEEN_MAC, EVENT_FIRST_SEEN_MAC, EVENT_SEEN_IP, EVENT_FIRST_SEEN_IP, EVENT_SEEN_HOST, EVENT_FIRST_SEEN_HOST, EVENT_SEEN_VENDOR, EVENT_FIRST_SEEN_VENDOR, EVENT_STALE, EVENT_REQUEST_STALE, EVENT_CHANGED_IP, EVENT_DUPLICATE_IP, EVENT_DUPLICATE_MAC, EVENT_SCAN, EVENT_IP_NOT_ON_NETWORK, EVENT_SRC_MAC_BROADCAST, EVENT_REQUESTED_SELF = ALERT_TYPES
 
@@ -40,10 +42,11 @@ DEFAULT_LOGFORMAT = "%(asctime)s [%(levelname)s/%(processName)s] %(message)s"
 DEFAULT_PIDFILE   = "/var/run/netgrasp.pid"
 DEFAULT_DBLOCK    = "/tmp/.netgrasp_database_lock"
 
-class Netgrasp:
-    def __init__(self, config):
+
+class Netgrasp(object):
+    def __init__(self, cfg):
         if config:
-            self.config = config
+            self.config = cfg
         else:
             self.config = DEFAULT_CONFIG
 
@@ -57,9 +60,6 @@ class Netgrasp:
         self.pcap = {}
 
     def _load_debugger(self):
-        import logging
-        import logging.handlers
-
         # We've not yet loaded configuration, so log to stdout.
         self.logger = logging.getLogger(__name__)
         self.debugger = debug.Debugger(self.verbose, self.logger, debug.PRINT)
@@ -69,9 +69,6 @@ class Netgrasp:
         self.logger.addHandler(self.debugger.handler)
 
     def _enable_debugger(self):
-        import logging
-        import logging.handlers
-
         if self.daemonize:
             try:
                 self.debugger.handler = logging.FileHandler(self.logging["filename"])
@@ -86,8 +83,8 @@ class Netgrasp:
         self.logger.setLevel(self.logging["level"])
 
     def _load_configuration(self):
-        self.configuration = config.Config(self.debugger)
-        
+        self.configuration = config.Config(self.debugger, filename=self.config)
+
         # Load listen parameters.
         self.listen["interface"] = self.configuration.GetText("Listen", "interface", None, False)
         self.listen["active_timeout"] = self.configuration.GetInt("Listen", "active_timeout", 60 * 60 * 2, False)
@@ -142,7 +139,7 @@ class Netgrasp:
             import sqlite3
         except Exception as e:
             self.debugger.error("fatal exception: %s", (e,))
-            self.debugger.critical("failed to import sqlite3 (as user %s), try 'pip install sqlite3', exiting", (ng.debugger.whoami()))
+            self.debugger.critical("failed to import sqlite3 (as user %s), try 'pip install sqlite3', exiting", (self.debugger.whoami()))
         self.debugger.info("successfuly imported sqlite3")
 
         try:
@@ -173,7 +170,7 @@ class Netgrasp:
                 import ntfy
             except Exception as e:
                 self.debugger.error("fatal exception: %s", e)
-                self.debugger.critical("failed to import ntfy (as user %s), try 'pip install ntfy', exiting", (debugger.whoami()))
+                self.debugger.critical("failed to import ntfy (as user %s), try 'pip install ntfy', exiting", (self.debugger.whoami()))
             self.debugger.info('successfuly imported ntfy')
 
     # Drop root permissions when no longer needed.
@@ -187,7 +184,6 @@ class Netgrasp:
 
     # Determine if pid in pidfile is a running process.
     def is_running(self):
-        import os
         import errno
 
         running = False
@@ -211,10 +207,12 @@ class Netgrasp:
                         running = pid
         return running
 
+
 # Simple, short text string used for heartbeat.
 HEARTBEAT = 'nghb'
 # Macimum seconds to process before returning to main loop
 MAXSECONDS = 2
+
 
 # This is our main program loop.
 def main(*pcap):
@@ -303,7 +301,7 @@ def main(*pcap):
             heartbeat = False
             while parent_conn.poll():
                 message = parent_conn.recv()
-                if (message == HEARTBEAT):
+                if message == HEARTBEAT:
                     heartbeat = True
             # It's possible to receive multiple heartbeats, but many or one is the same to us.
             if heartbeat:
@@ -316,15 +314,16 @@ def main(*pcap):
 
             # If we haven't heard from the wiretap process in >1 minute, exit.
             time_to_exit = last_heartbeat + datetime.timedelta(minutes=3)
-            if (now >= time_to_exit):
+            if now >= time_to_exit:
                 run = False
                 ng.debugger.error("No heartbeats from wiretap process for >3 minutes.")
-        except Exception as e:
+        except Exception:
             ng.debugger.dump_exception("main() while loop caught exception")
+
     ng.debugger.critical("Exiting")
 
+
 def get_pcap():
-    import sys
     import socket
 
     assert os.getuid() == 0, 'Unable to initiate pcap, must be run as root.'
@@ -352,10 +351,9 @@ def get_pcap():
     ng.debugger.warning("listening for arp traffic on %s: %s/%s", (ng.listen["interface"], socket.inet_ntoa(ng.pcap["network"]), socket.inet_ntoa(ng.pcap["netmask"])))
     return ng.pcap
 
+
 # Child process: wiretap, uses pcap to sniff arp packets.
 def wiretap(pc, child_conn):
-    import sys
-
     ng = netgrasp_instance
     ng.debugger.debug('top of wiretap')
 
@@ -397,7 +395,7 @@ def wiretap(pc, child_conn):
             heartbeat = False
             while child_conn.poll():
                 message = child_conn.recv()
-                if (message == HEARTBEAT):
+                if message == HEARTBEAT:
                     heartbeat = True
             # It's possible to receive multiple heartbeats, but many or one is the same to us.
             if heartbeat:
@@ -406,11 +404,12 @@ def wiretap(pc, child_conn):
 
             # If we haven't heard from the main process in >1 minute, exit.
             time_to_exit = last_heartbeat + datetime.timedelta(minutes=3)
-            if (now >= time_to_exit):
+            if now >= time_to_exit:
                 run = False
-        except Exception as e:
+        except Exception:
             ng.debugger.dump_exception("wiretap() while loop caught exception")
     ng.debugger.critical("No heartbeats from main process for >3 minutes, exiting.")
+
 
 def ip_on_network(ip):
     ng = netgrasp_instance
@@ -429,6 +428,7 @@ def ip_on_network(ip):
     except:
         ng.debugger.dump_exception("address_in_network() caught exception")
 
+
 # Assumes we already have the database lock.
 def log_event(mid, iid, did, rid, event, have_lock = False):
     ng = netgrasp_instance
@@ -437,7 +437,8 @@ def log_event(mid, iid, did, rid, event, have_lock = False):
         ng.debugger.debug("entering log_event(%s, %s, %s, %s, %s, %s)", (mid, iid, did, rid, event, have_lock))
 
         # Only log events for which there are subscribers.
-        if ((ng.email["enabled"] and event in ng.email["alerts"]) or (ng.notification["enabled"] and event in ng.notification["alerts"])):
+        if (ng.email["enabled"] and event in ng.email["alerts"]) \
+            or (ng.notification["enabled"] and event in ng.notification["alerts"]):
             if have_lock:
                 _log_event(mid, iid, did, rid, event)
             else:
@@ -447,8 +448,9 @@ def log_event(mid, iid, did, rid, event, have_lock = False):
         else:
             ng.debugger.debug("log_event: ignoring %s event, no subscribers", (event,))
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("log_event() caught exception")
+
 
 def _log_event(mid, iid, did, rid, event):
     ng = netgrasp_instance
@@ -458,8 +460,9 @@ def _log_event(mid, iid, did, rid, event):
 
         ng.db.connection.execute("INSERT INTO event (mid, iid, did, rid, timestamp, processed, type) VALUES(?, ?, ?, ?, ?, ?, ?)", (mid, iid, did, rid, now, 0, event))
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("_log_event() caught exception")
+
 
 def ip_is_mine(ip):
     ng = netgrasp_instance
@@ -468,11 +471,14 @@ def ip_is_mine(ip):
         import socket
         ng.debugger.debug("entering ip_is_mine(%s)", (ip,))
 
-        return (ip == socket.gethostbyname(socket.gethostname()))
-    except Exception as e:
+        return ip == socket.gethostbyname(socket.gethostname())
+    except Exception:
         ng.debugger.dump_exception("ip_is_mine() caught exception")
 
+
 def ip_has_changed(did):
+    ng = netgrasp_instance
+
     try:
         ng.debugger.debug("entering ip_has_changed(%s)", (did,))
 
@@ -500,8 +506,9 @@ def ip_has_changed(did):
             ng.debugger.debug("ip for did %s has not changed", (did,))
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("ip_has_changed() caught exception")
+
 
 # Database definitions.
 def create_database():
@@ -671,8 +678,9 @@ def create_database():
             ng.db.cursor.execute("ANALYZE")
 
             ng.db.connection.commit()
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("create_database() caught exception")
+
 
 # We've sniffed an arp packet off the wire.
 def received_arp(hdr, data, child_conn):
@@ -697,7 +705,7 @@ def received_arp(hdr, data, child_conn):
         dst_mac = "%x:%x:%x:%x:%x:%x" % struct.unpack("BBBBBB", packet.dst)
 
         seen, requested, mid, iid, did, rid, src_mac_broadcast, ip_not_on_network, requested_self = (True, True, None, None, None, None, False, False, False)
-        if (src_mac == BROADCAST):
+        if src_mac == BROADCAST:
             seen = False
             ng.debugger.info("Ignoring arp source of %s [%s], destination %s [%s]", (src_ip, src_mac, dst_ip, dst_mac))
             src_mac_broadcast = True
@@ -713,7 +721,7 @@ def received_arp(hdr, data, child_conn):
             requested_self = True
 
         # ARP REQUEST
-        if (packet.data.op == dpkt.arp.ARP_OP_REQUEST):
+        if packet.data.op == dpkt.arp.ARP_OP_REQUEST:
             ng.debugger.debug('ARP REQUEST from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
             if seen:
                 mid, iid, did = device_seen(src_ip, src_mac)
@@ -721,7 +729,7 @@ def received_arp(hdr, data, child_conn):
                 rid = device_request(dst_ip, dst_mac)
 
         # ARP REPLY
-        elif (packet.data.op == dpkt.arp.ARP_OP_REPLY):
+        elif packet.data.op == dpkt.arp.ARP_OP_REPLY:
             ng.debugger.debug('ARP REPLY from %s [%s] to %s [%s]', (src_ip, src_mac, dst_ip, dst_mac))
             if seen:
                 mid, iid, did = device_seen(src_ip, src_mac)
@@ -737,8 +745,9 @@ def received_arp(hdr, data, child_conn):
                 log_event(mid, iid, did, rid, EVENT_REQUESTED_SELF, True)
             ng.db.connection.commit()
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("received_arp() caught exception")
+
 
 def device_seen(ip, mac):
     ng = netgrasp_instance
@@ -809,7 +818,6 @@ def device_seen(ip, mac):
             host_name = dns_lookup(ip)
             with exclusive_lock.ExclusiveFileLock(ng, 6, "device_seen, new host"):
                 ng.db.cursor.execute("INSERT INTO host (iid, name, custom_name, created, updated) VALUES(?, ?, ?, ?, ?)", (iid, host_name, None, now, now))
-
                 ng.db.connection.commit()
             first_seen_host = True
             hid = ng.db.cursor.lastrowid
@@ -877,10 +885,11 @@ def device_seen(ip, mac):
                 log_event(mid, iid, did, rid, EVENT_FIRST_SEEN_DEVICE, True)
             ng.db.connection.commit()
 
-        return (mid, iid, did)
+        return mid, iid, did
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("device_seen() caught exception")
+
 
 def device_request(ip, mac):
     ng = netgrasp_instance
@@ -920,8 +929,9 @@ def device_request(ip, mac):
 
         return rid
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("device_request() caught exception")
+
 
 def get_mac(ip):
     ng = netgrasp_instance
@@ -936,8 +946,9 @@ def get_mac(ip):
         else:
             return None
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("get_mac() caught exception")
+
 
 def get_ids(ip, mac):
     ng = netgrasp_instance
@@ -1005,10 +1016,11 @@ def get_ids(ip, mac):
                 did = None
 
         ng.debugger.debug("mid(%s) iid(%s) did(%s)", (mid, iid, did))
-        return (mid, iid, did)
+        return mid, iid, did
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("get_ids() caught exception")
+
 
 def get_details(did):
     ng = netgrasp_instance
@@ -1025,8 +1037,9 @@ def get_details(did):
             ng.debugger.warning("unknown device %d", (did,))
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("get_details() caught exception")
+
 
 def first_seen(did):
     ng = netgrasp_instance
@@ -1044,8 +1057,9 @@ def first_seen(did):
         else:
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("first_seen() caught exception")
+
 
 def first_seen_recently(did):
     ng = netgrasp_instance
@@ -1063,8 +1077,9 @@ def first_seen_recently(did):
         else:
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("first_seen_recently() caught exception")
+
 
 def last_seen(did):
     ng = netgrasp_instance
@@ -1079,8 +1094,9 @@ def last_seen(did):
         else:
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("last_seen() caught exception")
+
 
 def previously_seen(did):
     ng = netgrasp_instance
@@ -1095,8 +1111,9 @@ def previously_seen(did):
         else:
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("previously_seen() caught exception")
+
 
 def first_requested(did):
     ng = netgrasp_instance
@@ -1111,8 +1128,9 @@ def first_requested(did):
         else:
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("first_requested() caught exception")
+
 
 def last_requested(did):
     ng = netgrasp_instance
@@ -1127,8 +1145,9 @@ def last_requested(did):
         else:
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("last_requested() caught exception")
+
 
 def time_seen(did):
     ng = netgrasp_instance
@@ -1145,8 +1164,9 @@ def time_seen(did):
         else:
             return False
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("time_seen() caught exception")
+
 
 def previous_ip(did):
     ng = netgrasp_instance
@@ -1154,19 +1174,20 @@ def previous_ip(did):
     try:
         ng.debugger.debug("entering previous_ip(%s)", (did,))
 
-        previous_ip = None
+        prev_ip = None
         ng.db.cursor.execute("SELECT DISTINCT iid FROM activity WHERE did = ? ORDER BY updated DESC LIMIT 2", (did,))
         ips = ng.db.cursor.fetchall()
         if ips and len(ips) == 2:
             ng.db.cursor.execute("SELECT address FROM ip WHERE iid = ?", (ips[1]))
-            previous_ip = ng.db.cursor.fetchone()
-        if previous_ip:
-            return previous_ip[0]
+            prev_ip = ng.db.cursor.fetchone()
+        if prev_ip:
+            return prev_ip[0]
         else:
             return None
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("previous_ip() caught exception")
+
 
 def active_devices_with_ip(ip):
     ng = netgrasp_instance
@@ -1193,8 +1214,9 @@ def active_devices_with_ip(ip):
         else:
             return None
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("active_devices_with_ip() caught exception")
+
 
 def active_devices_with_mac(mac):
     ng = netgrasp_instance
@@ -1221,8 +1243,9 @@ def active_devices_with_mac(mac):
         else:
             return None
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("active_devices_with_mac() caught exception")
+
 
 def devices_requesting_ip(ip, timeout):
     ng = netgrasp_instance
@@ -1244,8 +1267,9 @@ def devices_requesting_ip(ip, timeout):
         ng.debugger.debug("did, dst_ip, dst_mac(%s)", (dids,))
         return dids
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("devices_requesting_ip() caught exception")
+
 
 # Mark IP/MAC pairs as no longer active if we've not seen ARP activity for >active_timeout seconds
 def detect_stale_ips():
@@ -1288,8 +1312,9 @@ def detect_stale_ips():
                     ng.db.cursor.execute("UPDATE request SET active = 0 WHERE rid = ?", (rid,))
                 ng.db.connection.commit()
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("detect_stale_ips() caught exception")
+
 
 def detect_netscans():
     ng = netgrasp_instance
@@ -1315,8 +1340,9 @@ def detect_netscans():
                     log_event(mid, iid, did, None, EVENT_SCAN)
                     ng.debugger.info("network scan by %s [%s]", (src_ip, src_mac))
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("detect_netscans() caught exception")
+
 
 def detect_anomalies():
     ng = netgrasp_instance
@@ -1325,7 +1351,6 @@ def detect_anomalies():
         from utils import exclusive_lock
 
         ng.debugger.debug("entering detect_anomalies()")
-        now = datetime.datetime.now()
         stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"])
 
         # Multiple MACs with the same IP.
@@ -1367,8 +1392,9 @@ def detect_anomalies():
                     log_event(mid, iid, did, None, EVENT_DUPLICATE_MAC)
                     ng.debugger.info("multiple IPs with same MAC: mid=%d, iid=%d", (mid, iid))
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("detect_anomalies() caught exception")
+
 
 def send_notifications():
     ng = netgrasp_instance
@@ -1388,7 +1414,6 @@ def send_notifications():
 
         import ntfy
 
-        day = datetime.datetime.now() - datetime.timedelta(days=1)
         timer = simple_timer.Timer()
 
         # only send notifications for configured events
@@ -1396,7 +1421,6 @@ def send_notifications():
 
         rows = ng.db.cursor.fetchall()
         if rows:
-            counter = 0
             max_eid = 0
             for row in rows:
                 eid, mid, iid, did, timestamp, event, processed = row
@@ -1411,29 +1435,35 @@ def send_notifications():
                         continue
                     active, counter, ip, mac, host_name, custom_name, vendor = details
 
-                    ng.debugger.info("event %s [%d] in %s, generating notification alert", (event, eid, ng.notification["alerts"]))
-                    firstSeen = first_seen(did)
-                    lastSeen = first_seen_recently(did)
-                    previouslySeen = previously_seen(did)
-                    title = """Netgrasp alert: %s""" % (event)
-                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % (pretty.name_did(did), ip, mac, pretty.time_ago(lastSeen), pretty.time_ago(previouslySeen), pretty.time_ago(firstSeen))
+                    ng.debugger.info("event %s [%d] in %s, generating notification alert",
+                                     (event, eid, ng.notification["alerts"]))
+                    frstseen = first_seen(did)
+                    lastseen = first_seen_recently(did)
+                    prevseen = previously_seen(did)
+                    title = """Netgrasp alert: %s""" % event
+                    body = """%s with IP %s [%s], seen %s, previously seen %s, first seen %s""" % \
+                           (pretty.name_did(did), ip, mac, pretty.time_ago(lastseen), pretty.time_ago(prevseen),
+                            pretty.time_ago(frstseen))
                     ntfy.notify(body, title)
                 else:
                     ng.debugger.debug("event %s [%d] NOT in %s", (event, eid, ng.notification["alerts"]))
 
-                if (timer.elapsed() > MAXSECONDS):
+                if timer.elapsed() > MAXSECONDS:
                     ng.debugger.debug("processing notifications >%d seconds, aborting", (MAXSECONDS,))
                     with exclusive_lock.ExclusiveFileLock(ng, 5, "send_notifications, aborting"):
-                        ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
+                        ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)",
+                                             (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                         ng.db.connection.commit()
                     return
 
             with exclusive_lock.ExclusiveFileLock(ng, 5, "send_notifications"):
-                ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)", (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
+                ng.db.cursor.execute("UPDATE event SET processed=processed + ? WHERE eid <= ? AND NOT (processed & ?)",
+                                     (PROCESSED_NOTIFICATION, max_eid, PROCESSED_NOTIFICATION))
                 ng.db.connection.commit()
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("send_notifications() caught exception")
+
 
 def _text_and_html_list(items):
     text = ''
@@ -1443,9 +1473,12 @@ def _text_and_html_list(items):
         for item in items_sorted:
             text += " - " + item + "\n"
             html += "<li>" + item + "</li>"
-    return (text, html)
+    return text, html
+
 
 TALKED_TO_LIMIT = 50
+
+
 def send_email_alerts():
     ng = netgrasp_instance
 
@@ -1504,12 +1537,12 @@ def send_email_alerts():
                             duplicate_ips.append(ip)
 
                     ng.debugger.info("event %s [%d] in %s, generating notification email", (event, eid, ng.email["alerts"]))
-                    firstSeen = first_seen(did)
-                    firstRequested = first_requested(did)
-                    lastSeen = last_seen(did)
-                    timeSeen = time_seen(did)
-                    previouslySeen = previously_seen(did)
-                    lastRequested = last_requested(did)
+                    frstseen = first_seen(did)
+                    frstrequ = first_requested(did)
+                    lastseen = last_seen(did)
+                    timeseen = time_seen(did)
+                    prevseen = previously_seen(did)
+                    lastrequ = last_requested(did)
 
                     ng.db.cursor.execute("SELECT dst_ip, dst_mac FROM arp WHERE src_ip = ? AND timestamp >= ? GROUP BY dst_ip LIMIT ?", (ip, day, TALKED_TO_LIMIT))
                     peers = ng.db.cursor.fetchall()
@@ -1562,13 +1595,13 @@ def send_email_alerts():
                         vendor=vendor,
                         hostname=host_name,
                         custom_name=custom_name,
-                        first_seen=pretty.time_ago(firstSeen),
-                        last_seen=pretty.time_ago(lastSeen),
+                        first_seen=pretty.time_ago(frstseen),
+                        last_seen=pretty.time_ago(lastseen),
                         recently_seen_count=counter,
-                        time_seen=pretty.time_elapsed(timeSeen),
-                        previously_seen=pretty.time_ago(previouslySeen),
-                        first_requested=pretty.time_ago(firstRequested),
-                        last_requested=pretty.time_ago(lastRequested),
+                        time_seen=pretty.time_elapsed(timeseen),
+                        previously_seen=pretty.time_ago(prevseen),
+                        first_requested=pretty.time_ago(frstrequ),
+                        last_requested=pretty.time_ago(lastrequ),
                         previous_ip=previous_ip(did),
                         devices_with_ip_text=devices_with_ip_text,
                         devices_with_ip_html=devices_with_ip_html,
@@ -1590,8 +1623,9 @@ def send_email_alerts():
                 ng.db.connection.commit()
             ng.debugger.debug("send_email_alerts: processed %d events", (processed_events,))
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("send_email_alerts() caught exception")
+
 
 # Identify vendor associated with MAC.
 def mac_lookup(mac):
@@ -1631,8 +1665,9 @@ def mac_lookup(mac):
 
         return vendor
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("mac_lookup() caught exception")
+
 
 def refresh_dns_cache():
     ng = netgrasp_instance
@@ -1653,8 +1688,9 @@ def refresh_dns_cache():
                 ng.db.cursor.execute("UPDATE host SET name = ?, updated = ? WHERE hid = ?", (name, now, hid))
                 ng.db.connection.commit()
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("refresh_dns_cache() caught exception")
+
 
 def dns_lookup(ip):
     ng = netgrasp_instance
@@ -1673,8 +1709,9 @@ def dns_lookup(ip):
             ng.debugger.debug("dns_lookup() socket.gethostbyaddr(%s) failed, host_name = %s: %s", (ip, host_name, e))
             return host_name
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("dns_lookup() caught exception")
+
 
 # Generates daily and weekly email digests.
 def send_email_digests():
@@ -1699,17 +1736,17 @@ def send_email_digests():
 
         # @TODO make sure we validate available digests
         for digest in ng.email["digests"]:
-            if (timer.elapsed() > MAXSECONDS):
+            if timer.elapsed() > MAXSECONDS:
                 ng.debugger.debug("processing digests >%d seconds, aborting digest", (MAXSECONDS,))
                 return
 
-            if (digest == "daily"):
+            if digest == "daily":
                 timestamp_string = "daily_digest_timestamp"
                 future_digest_timestamp = now + datetime.timedelta(days=1)
                 time_period = now - datetime.timedelta(days=1)
                 time_period_description = "24 hours"
                 previous_time_period = now - datetime.timedelta(days=2)
-            elif (digest == "weekly"):
+            elif digest == "weekly":
                 timestamp_string = "weekly_digest_timestamp"
                 future_digest_timestamp = now + datetime.timedelta(weeks=1)
                 time_period = now - datetime.timedelta(weeks=1)
@@ -1758,7 +1795,7 @@ def send_email_digests():
 
                 ng.db.cursor.execute("SELECT COUNT(DISTINCT(dst_ip)) FROM arp WHERE rid IS NOT NULL AND src_ip = ? AND timestamp >= ? AND timestamp <= ?", (ip, time_period, now))
                 requests = ng.db.cursor.fetchone()
-                if (requests[0] > 10):
+                if requests[0] > 10:
                     noisy.append((mac, ip, requests[0], pretty.name_did(did)))
                 if unique_seen in new:
                     active_devices.append("""%s (%s)*""" % (pretty.name_did(did), ip))
@@ -1777,9 +1814,9 @@ def send_email_digests():
                 noisy_devices_intro = "The following devices requested 10 or more IPs:"
                 for noise in noisy:
                     noisy_text = """%s (%s) requested %d IP addresses""" % (noise[3], noise[1], noise[2])
-                    if (noise[2] > 100):
+                    if noise[2] > 100:
                         noisy_text += " (network scan)"
-                    elif (noise[2] > 50):
+                    elif noise[2] > 50:
                         noisy_text += " (network scan?)"
                     noisy_devices.append(noisy_text)
             noisy_devices_text, noisy_devices_html = _text_and_html_list(noisy_devices)
@@ -1787,7 +1824,7 @@ def send_email_digests():
             gone_devices_intro = ""
             gone_devices = []
             if gone_away:
-                gone_devices_intro = """The following IPs were not active, but were active the previous %s:""" % (time_period_description)
+                gone_devices_intro = """The following IPs were not active, but were active the previous %s:""" % time_period_description
                 for gone in gone_away:
                     gone_details = get_details(gone[0])
                     gone_active, gone_counter, gone_ip, gone_mac, gone_host_name, gone_custom_name, gone_vendor = gone_details
@@ -1796,22 +1833,22 @@ def send_email_digests():
 
             device_breakdown_text = ""
             device_breakdown_html = ""
-            if (digest == "daily"):
-                range = 24
-                while (range > 0):
-                    lower = now - datetime.timedelta(hours=range)
-                    range = range - 1
-                    upper = now - datetime.timedelta(hours=range)
+            if digest == "daily":
+                rnge = 24
+                while rnge > 0:
+                    lower = now - datetime.timedelta(hours=rnge)
+                    rnge = rnge - 1
+                    upper = now - datetime.timedelta(hours=rnge)
                     ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
                     distinct = ng.db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
                     device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%I %p, %x"), len(distinct))
-            elif (digest == "weekly"):
-                range = 7
-                while (range > 0):
-                    lower = now - datetime.timedelta(days=range)
-                    range = range - 1
-                    upper = now - datetime.timedelta(days=range)
+            elif digest == "weekly":
+                rnge = 7
+                while rnge > 0:
+                    lower = now - datetime.timedelta(days=rnge)
+                    rnge = rnge - 1
+                    upper = now - datetime.timedelta(days=rnge)
                     ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
                     distinct = ng.db.cursor.fetchall()
                     device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
@@ -1838,8 +1875,9 @@ def send_email_digests():
                 device_breakdown_html=device_breakdown_html
                 ))
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("send_email_digests() caught exception")
+
 
 # Don't let the arp or event tables grow too big.
 def garbage_collection():
@@ -1885,5 +1923,5 @@ def garbage_collection():
         ng.debugger.debug("deleted %d arp entries older than %s", (arp_count[0], now - ng.database["oldest_arp"]))
         ng.debugger.debug("deleted %d event entries older than %s", (event_count[0], now - ng.database["oldest_event"]))
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("garbage_collection() caught exception")
