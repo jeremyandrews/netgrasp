@@ -1,16 +1,15 @@
 from netgrasp.utils import debug
 
 import ConfigParser
-import sys
 
 config_instance = None
 
-class Config:
-    def __init__(self, debugger):
+class Config(object):
+    def __init__(self, debugger, filename=None):
         from netgrasp import netgrasp
         self.parser = ConfigParser.ConfigParser()
         self.debugger = debugger
-        self.found = self.parser.read(netgrasp.DEFAULT_CONFIG)
+        self.found = self.parser.read(filename or netgrasp.DEFAULT_CONFIG)
 
     def _GetValue(self, section, option, value, default, required, secret):
         if not value and default:
@@ -19,7 +18,7 @@ class Config:
         if required and not value and value != False:
             self.debugger.critical("Required [%s] '%s' not defined in configuration file, exiting.", (section, option))
 
-        if value != None:
+        if value is not None:
             if secret:
                 self.debugger.info2("configuration [%s] '%s' set", (section, option))
             else:
@@ -38,7 +37,7 @@ class Config:
 
     def GetText(self, section, option, default = None, required = True, secret = False):
         try:
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+            if self.parser.has_section(section) and self.parser.has_option(section, option):
                 value = self.parser.get(section, option)
             else:
                 value = None
@@ -49,7 +48,7 @@ class Config:
 
     def GetInt(self, section, option, default = None, required = True, secret = False):
         try:
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+            if self.parser.has_section(section) and self.parser.has_option(section, option):
                 value = self.parser.getint(section, option)
             else:
                 value = None
@@ -60,7 +59,7 @@ class Config:
 
     def GetBoolean(self, section, option, default = None, required = True, secret = False):
         try:
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+            if self.parser.has_section(section) and self.parser.has_option(section, option):
                 value = self.parser.getboolean(section, option)
             else:
                 value = None
@@ -71,7 +70,7 @@ class Config:
 
     def GetTextList(self, section, option, default = None, required = True, secret = False, quiet = False):
         try:
-            if (self.parser.has_section(section) and self.parser.has_option(section, option)):
+            if self.parser.has_section(section) and self.parser.has_option(section, option):
                 text = self.parser.get(section, option)
                 values = text.split(",")
                 textlist = []
@@ -117,7 +116,7 @@ class Config:
         try:
             pairs = {}
             valid = True
-            if (self.parser.has_section(section)):
+            if self.parser.has_section(section):
                 temp = []
                 items = self.parser.items(section)
                 for key, value in items:
@@ -171,7 +170,7 @@ class Config:
                 pairs = None
             return pairs
 
-        except Exception as e:
+        except Exception:
             self.debugger.dump_exception("GetItems() exception while reading configuration")
 
 # Perform simplistic email address validation.
@@ -183,5 +182,5 @@ def valid_email_address(address):
         else:
             return True
 
-    except Exception as e:
+    except Exception:
         self.debugger.dump_exception("valid_email_address() exception while reading configuration")
