@@ -74,7 +74,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Instantiate netgrasp instance.
-    ng = netgrasp.Netgrasp(args.config)
+    ng = netgrasp.Netgrasp(config_filename=args.config)
 
     # Whether or not we will daemonize.
     try:
