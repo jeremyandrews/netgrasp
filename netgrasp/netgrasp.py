@@ -245,7 +245,7 @@ def main(*pcap):
 
     try:
         ng.db = database.Database()
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("main() caught exception creating database")
         ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database["filename"], ng.debugger.whoami()))
     ng.debugger.info("opened %s as user %s", (ng.database["filename"], ng.debugger.whoami()))
@@ -372,7 +372,7 @@ def wiretap(pc, child_conn):
         ng.db = database.Database()
     except Exception as e:
         ng.debugger.error("%s", (e,))
-        ng.debugger.critical("failed to open or create %s (as user %s), exiting", (database["filename"], ng.debugger.whoami()))
+        ng.debugger.critical("failed to open or create %s (as user %s), exiting", (ng.database["filename"], ng.debugger.whoami()))
 
     ng.debugger.info("opened %s as user %s", (ng.database["filename"], ng.debugger.whoami()))
     ng.db.cursor = ng.db.connection.cursor()
@@ -509,7 +509,6 @@ def ip_has_changed(did):
 
 # Database definitions.
 def create_database():
-    from utils import exclusive_lock
     ng = netgrasp_instance
 
     try:
@@ -904,7 +903,6 @@ def device_request(ip, mac):
         # Log request.
         ng.db.cursor.execute("SELECT request.rid, request.active FROM request WHERE request.ip = ? ORDER BY updated DESC LIMIT 1", (ip,))
         seen = ng.db.cursor.fetchone()
-        rid, active = (False, False)
         if seen:
             rid, active = seen
             if active:
@@ -1273,8 +1271,6 @@ def detect_stale_ips():
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-
         ng.debugger.debug("entering detect_stale_ips()")
         stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"])
 
@@ -1317,8 +1313,6 @@ def detect_netscans():
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-
         ng.debugger.debug("entering detect_netscans()")
         now = datetime.datetime.now()
         stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"]) - datetime.timedelta(minutes=10)
@@ -1345,8 +1339,6 @@ def detect_anomalies():
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-
         ng.debugger.debug("entering detect_anomalies()")
         stale = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"])
 
@@ -1397,8 +1389,6 @@ def send_notifications():
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-
         ng.debugger.debug("entering send_notifications()")
 
         if not ng.notification["enabled"]:
@@ -1480,9 +1470,6 @@ def send_email_alerts():
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-        from utils import email
-
         ng.debugger.debug("entering send_email_alerts()")
 
         if not ng.email["enabled"]:
@@ -1629,8 +1616,6 @@ def mac_lookup(mac):
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-
         ng.debugger.debug("entering mac_lookup(%s)", (mac,))
 
         import re
@@ -1715,9 +1700,6 @@ def send_email_digests():
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-        from utils import email
-
         ng.debugger.debug("entering send_email_digests()")
 
         if not ng.email["enabled"]:
@@ -1881,8 +1863,6 @@ def garbage_collection():
     ng = netgrasp_instance
 
     try:
-        from utils import exclusive_lock
-
         ng.debugger.debug("entering garbage_collection()")
 
         if not ng.database["gcenabled"]:
