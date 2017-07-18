@@ -65,21 +65,31 @@ def LoadTemplate(template, replace):
             autoescape = jinja2.select_autoescape(['html']),
             extensions=['jinja2.ext.i18n']
         )
+        # For now we're just using i18n for pluralization, not translations.
+        env.install_null_translations()
+
+        try:
+            specific_subject_template = "template." + template + ".subject.html"
+            subject_template = env.get_template(specific_subject_template)
+            ng.debugger.debug("loaded specific subject template: %s", (specific_subject_template,))
+        except jinja2.TemplateNotFound:
+            default_subject_template = "template.default.subject.html"
+            subject_template = env.get_template(default_subject_template)
+            ng.debugger.debug("loaded default subject template: %s", (default_subject_template,))
 
         try:
             specific_template = "template." + template + ".html"
-            template = env.get_template(specific_template)
+            body_template = env.get_template(specific_template)
             ng.debugger.debug("loaded specific template: %s", (specific_template,))
         except jinja2.TemplateNotFound:
             default_template = "template.default.html"
-            template = env.get_template(default_template)
+            body_template = env.get_template(default_template)
             ng.debugger.debug("loaded default template: %s", (default_template,))
 
-        if template:
-            return template.render(replace)
-        else:
-            ng.debugger.error("failed to load template")
-            return None
+        subject = subject_template.render(replace)
+        body = body_template.render(replace)
+
+        return subject, body
 
     except:
         ng.debugger.dump_exception("LoadTemplate() exception")
@@ -93,9 +103,7 @@ def MailSend(template, replace):
 
         import pyzmail
 
-        # @TODO: template subject
-        subject = "@TODO"
-        body_html = LoadTemplate(template, replace)
+        subject, body_html = LoadTemplate(template, replace)
         # @TODO: auto-generate text version of body
         body_text = "@TODO"
 

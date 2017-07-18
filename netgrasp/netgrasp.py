@@ -1543,7 +1543,7 @@ def send_email_alerts():
 
                     ng.db.cursor.execute("SELECT dst_ip, dst_mac FROM arp WHERE src_ip = ? AND timestamp >= ? GROUP BY dst_ip LIMIT ?", (ip, day, TALKED_TO_LIMIT))
                     peers = ng.db.cursor.fetchall()
-                    talked_to = []
+                    talked_to_list = []
                     talked_to_count = 0
                     if peers:
                         talked_to_count = len(peers)
@@ -1551,8 +1551,7 @@ def send_email_alerts():
                             dst_ip, dst_mac = peer
                             dst_mid, dst_iid, dst_did = get_ids(dst_ip, dst_mac)
                             ng.debugger.debug("ip, mac, mid, iid, did: %s, %s, %s, %s, %s", (dst_ip, dst_mac, dst_mid, dst_iid, dst_did))
-                            talked_to.append("""%s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip))
-                    talked_to_text, talked_to_html = _text_and_html_list(talked_to)
+                            talked_to_list.append("""%s (%s)""" % (pretty.name_did(dst_did, dst_ip), dst_ip))
 
                     if talked_to_count == TALKED_TO_LIMIT:
                       ng.db.cursor.execute("SELECT COUNT(DISTINCT dst_ip) AS count FROM arp WHERE src_ip = ? AND timestamp >= ?", (ip, day))
@@ -1608,8 +1607,7 @@ def send_email_alerts():
                         devices_requesting_ip_html=devices_requesting_ip_html,
                         active_boolean=active,
                         talked_to_count=talked_to_count,
-                        talked_to_list_text=talked_to_text,
-                        talked_to_list_html=talked_to_html,
+                        talked_to_list=talked_to_list,
                         event=event
                         ))
                 else:
