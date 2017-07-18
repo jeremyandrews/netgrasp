@@ -1,0 +1,20 @@
+        "html": "<html><body><p>The following device is no longer active on your network:</p><ul><li>${name}</li><li>ip: ${ip} [${mac}]</li><li>last seen: ${last_seen}</li><li>seen ${recently_seen_count} times in ${time_seen}</li><li>first seen: ${first_seen}</li></ul><p>In the past 24 hours, this device talked to ${talked_to_count} devices:<ul>${talked_to_list_html}</ul></p></body></html>",
+{% extends "template.alert.default.html" %}
+{% block intro %}
+<P>The following device is no longer active on your network:</P>
+{% endblock intro %}
+{% block content %}
+<P>
+    <UL>
+        <LI>{{ name }}</LI>
+        <LI>ip: {{ ip }} [{{ mac }}]</LI>
+	<LI>last seen: {{ last_seen }}</LI>
+        {% trans count=recently_seen_count %}
+	<LI>recently seen {{ recently_seen_count }} time in {{ time_seen }}</LI>
+        {% pluralize %}
+	<LI>recently seen {{ recently_seen_count }} times in {{ time_seen }}</LI>
+        {% endtrans %}
+        <LI>first seen: {{ first_seen }}</LI>
+    </UL>
+</P>
+{% endblock content %}

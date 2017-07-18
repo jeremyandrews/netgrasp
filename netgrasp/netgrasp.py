@@ -1565,7 +1565,6 @@ def send_email_alerts():
                         for device in devices:
                             list_did, list_ip, list_mac = device
                             devices_with_ip.append("""%s [%s]""" % (pretty.name_did(list_did), list_mac))
-                    devices_with_ip_text, devices_with_ip_html = _text_and_html_list(devices_with_ip)
 
                     devices = active_devices_with_mac(mac)
                     devices_with_mac = []
@@ -1573,7 +1572,6 @@ def send_email_alerts():
                         for device in devices:
                             list_did, list_ip, list_mac = device
                             devices_with_mac.append("""%s (%s)""" % (pretty.name_did(list_did), list_ip))
-                    devices_with_mac_text, devices_with_mac_html = _text_and_html_list(devices_with_mac)
 
                     devices = devices_requesting_ip(ip, ng.listen["active_timeout"])
                     devices_requesting = []
@@ -1581,7 +1579,6 @@ def send_email_alerts():
                         for device in devices:
                             list_did, list_ip, list_mac = device
                             devices_requesting.append("""%s (%s)""" % (pretty.name_did(list_did), list_ip))
-                    devices_requesting_ip_text, devices_requesting_ip_html = _text_and_html_list(devices_requesting)
 
                     email.MailSend(event, dict(
                         name=pretty.name_did(did),
@@ -1599,12 +1596,9 @@ def send_email_alerts():
                         first_requested=pretty.time_ago(frstrequ),
                         last_requested=pretty.time_ago(lastrequ),
                         previous_ip=previous_ip(did),
-                        devices_with_ip_text=devices_with_ip_text,
-                        devices_with_ip_html=devices_with_ip_html,
-                        devices_with_mac_text=devices_with_mac_text,
-                        devices_with_mac_html=devices_with_mac_html,
-                        devices_requesting_ip_text=devices_requesting_ip_text,
-                        devices_requesting_ip_html=devices_requesting_ip_html,
+                        devices_with_ip=devices_with_ip,
+                        devices_with_mac=devices_with_mac,
+                        devices_requesting=devices_requesting,
                         active_boolean=active,
                         talked_to_count=talked_to_count,
                         talked_to_list=talked_to_list,
