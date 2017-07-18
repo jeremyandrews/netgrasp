@@ -19,10 +19,9 @@ setup(name="NetGrasp",
       scripts=["bin/netgrasp"],
       download_url = "https://github.com/jeremyandrews/netgrasp/archive/v0.9.4-beta.tar.gz",
       include_package_data=True,
-      install_requires=["pypcap>=1.1.6", "dpkt>=1.8.0", "daemonize>=2.4.7"],
+      install_requires=["pypcap>=1.1.6", "dpkt>=1.8.0", "daemonize>=2.4.7", "pyzmail>=1.0.3", "jinja2>=2.9.6"],
       # @TODO Require sqlite3 if not on FreeBSD
       extras_require = {
-          "email": ["pyzmail"],
           "notification": ["notify"],
       },
      )
