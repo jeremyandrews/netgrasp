@@ -1,0 +1,50 @@
+{% extends "template.digest.base.html" %}
+{% block intro %}
+{% endblock intro %}
+{% block content %}
+{% trans count=active_devices_count %}
+<P>In the previous {{ time_period }}, {{ active_devices_count }} device was active:</P>
+{% pluralize %}
+<P>In the previous {{ time_period }}, {{ active_devices_count }} devices were active:</P>
+{% endtrans %}
+    <UL>
+    {% for device in active_devices %}
+        <LI>{{ device }}</LI>
+    {% endfor %}
+    </UL>
+    {{ new_devices_text }}
+</P>
+<P>
+{% trans count=ips_requested %}
+    {{ ips_requested }} unique IP was requested.
+{% pluralize %}
+    {{ ips_requested }} unique IPs were requested.
+{% endtrans %}
+</P>
+<P>
+    {{ noisy_devices_intro }}
+    <UL>
+    {% for device in noisy_devices %}
+        <LI>{{ device }}</LI>
+    {% endfor %}
+    </UL>
+</P>
+<P>
+    {{ gone_devices_intro }}
+    <UL>
+    {% for device in gone_devices %}
+        <LI>{{ device }}</LI>
+    {% endfor %}
+    </UL>
+</P>
+{% endblock content %}
+{% block summary %}
+<P>
+    Active devices during the past {{time_period }}
+    <UL>
+    {% for device in device_breakdown %}
+        <LI>{{ device }}</LI>
+    {% endfor %}
+    </UL>
+</P>
+{% endblock summary %}

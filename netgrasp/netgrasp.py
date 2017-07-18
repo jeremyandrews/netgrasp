@@ -1461,20 +1461,7 @@ def send_notifications():
     except Exception:
         ng.debugger.dump_exception("send_notifications() caught exception")
 
-
-def _text_and_html_list(items):
-    text = ''
-    html = ''
-    if items:
-        items_sorted = sorted(items, key=lambda s: s.lower())
-        for item in items_sorted:
-            text += " - " + item + "\n"
-            html += "<li>" + item + "</li>"
-    return text, html
-
-
 TALKED_TO_LIMIT = 50
-
 
 def send_email_alerts():
     ng = netgrasp_instance
@@ -1580,7 +1567,7 @@ def send_email_alerts():
                             list_did, list_ip, list_mac = device
                             devices_requesting.append("""%s (%s)""" % (pretty.name_did(list_did), list_ip))
 
-                    email.MailSend(event, dict(
+                    email.MailSend(event, 'alert', dict(
                         name=pretty.name_did(did),
                         ip=ip,
                         mac=mac,
@@ -1795,7 +1782,6 @@ def send_email_digests():
                 new_devices_text = "* = not active in the previous " + time_period_description
             else:
                 new_devices_text = ""
-            active_devices_text, active_devices_html = _text_and_html_list(active_devices)
 
             noisy_devices_intro = ""
             noisy_devices = []
@@ -1808,7 +1794,6 @@ def send_email_digests():
                     elif noise[2] > 50:
                         noisy_text += " (network scan?)"
                     noisy_devices.append(noisy_text)
-            noisy_devices_text, noisy_devices_html = _text_and_html_list(noisy_devices)
 
             gone_devices_intro = ""
             gone_devices = []
@@ -1818,10 +1803,8 @@ def send_email_digests():
                     gone_details = get_details(gone[0])
                     gone_active, gone_counter, gone_ip, gone_mac, gone_host_name, gone_custom_name, gone_vendor = gone_details
                     gone_devices.append("""%s (%s)""" % (pretty.name_did(gone[0]), gone_ip))
-            gone_devices_text, gone_devices_html = _text_and_html_list(gone_devices)
 
-            device_breakdown_text = ""
-            device_breakdown_html = ""
+            device_breakdown = []
             if digest == "daily":
                 rnge = 24
                 while rnge > 0:
@@ -1830,8 +1813,7 @@ def send_email_digests():
                     upper = now - datetime.timedelta(hours=rnge)
                     ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
                     distinct = ng.db.cursor.fetchall()
-                    device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%I %p, %x"), len(distinct))
-                    device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%I %p, %x"), len(distinct))
+                    device_breakdown.append("""%s: %d""" % (lower.strftime("%I %p, %x"), len(distinct)))
             elif digest == "weekly":
                 rnge = 7
                 while rnge > 0:
@@ -1840,28 +1822,23 @@ def send_email_digests():
                     upper = now - datetime.timedelta(days=rnge)
                     ng.db.cursor.execute("SELECT DISTINCT did FROM arp WHERE timestamp >= ? AND timestamp < ?", (lower, upper))
                     distinct = ng.db.cursor.fetchall()
-                    device_breakdown_text += """\n - %s: %d""" % (lower.strftime("%A, %x"), len(distinct))
-                    device_breakdown_html += """<li>%s: %d</li>""" % (lower.strftime("%A, %x"), len(distinct))
+                    device_breakdown.append("""%s: %d""" % (lower.strftime("%A, %x"), len(distinct)))
 
             ng.debugger.info("Sending %s digest", (digest,))
 
             # @TODO fixme
-            email.MailSend('digest', dict(
+            email.MailSend('digest', 'digest', dict(
                 type=digest,
                 time_period=time_period_description,
                 active_devices_count=len(seen),
-                active_devices_text=active_devices_text,
-                active_devices_html=active_devices_html,
+                active_devices=active_devices,
                 new_devices_text=new_devices_text,
                 ips_requested=requested[0],
                 noisy_devices_intro=noisy_devices_intro,
-                noisy_devices_text=noisy_devices_text,
-                noisy_devices_html=noisy_devices_html,
+                noisy_devices=noisy_devices,
                 gone_devices_intro=gone_devices_intro,
-                gone_devices_text=gone_devices_text,
-                gone_devices_html=gone_devices_html,
-                device_breakdown_text=device_breakdown_text,
-                device_breakdown_html=device_breakdown_html
+                gone_devices=gone_devices,
+                device_breakdown=device_breakdown
                 ))
 
     except Exception:

@@ -48,7 +48,7 @@ class Email:
                 ng.debugger.warning("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
         ng.email["digests"] = digests
 
-def LoadTemplate(template, replace):
+def LoadTemplate(template, template_type, replace):
     import jinja2
 
     from netgrasp import netgrasp
@@ -56,7 +56,7 @@ def LoadTemplate(template, replace):
     ng = netgrasp.netgrasp_instance
 
     try:
-        ng.debugger.debug("entering email.LoadTemplate(%s, %s)", (template, replace))
+        ng.debugger.debug("entering email.LoadTemplate(%s, %s)", (template, template_type, replace))
 
         # @TODO allow template overrides
 
@@ -69,20 +69,20 @@ def LoadTemplate(template, replace):
         env.install_null_translations()
 
         try:
-            specific_subject_template = "template.alert." + template + ".subject.html"
+            specific_subject_template = "template." + template_type +  "." + template + ".subject.html"
             subject_template = env.get_template(specific_subject_template)
             ng.debugger.debug("loaded specific subject template: %s", (specific_subject_template,))
         except jinja2.TemplateNotFound:
-            default_subject_template = "template.alert.default.subject.html"
+            default_subject_template = "template." + template_type + ".default.subject.html"
             subject_template = env.get_template(default_subject_template)
             ng.debugger.debug("loaded default subject template: %s", (default_subject_template,))
 
         try:
-            specific_template = "template.alert." + template + ".html"
+            specific_template = "template." + template_type + "." + template + ".html"
             body_template = env.get_template(specific_template)
             ng.debugger.debug("loaded specific template: %s", (specific_template,))
         except jinja2.TemplateNotFound:
-            default_template = "template.alert.default.html"
+            default_template = "template." + template_type + ".default.html"
             body_template = env.get_template(default_template)
             ng.debugger.debug("loaded default template: %s", (default_template,))
 
@@ -94,16 +94,16 @@ def LoadTemplate(template, replace):
     except:
         ng.debugger.dump_exception("LoadTemplate() exception")
 
-def MailSend(template, replace):
+def MailSend(template, template_type, replace):
     from netgrasp import netgrasp
     ng = netgrasp.netgrasp_instance
 
     try:
-        ng.debugger.debug("entering email.MailSend(%s, %s)", (template, replace))
+        ng.debugger.debug("entering email.MailSend(%s, %s, %s)", (template, template_type, replace))
 
         import pyzmail
 
-        subject, body_html = LoadTemplate(template, replace)
+        subject, body_html = LoadTemplate(template, template_type, replace)
         # @TODO: auto-generate text version of body
         body_text = "@TODO"
 
