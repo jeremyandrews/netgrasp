@@ -1,10 +1,12 @@
+import datetime
+
+
 def time_ago(elapsed):
     from netgrasp import netgrasp
+
     ng = netgrasp.netgrasp_instance
 
     try:
-        import datetime
-
         ng.debugger.debug("time_ago(%s)", (elapsed,))
 
         if not elapsed:
@@ -40,16 +42,16 @@ def time_ago(elapsed):
             return str(day_diff / 30) + " months ago"
         return str(day_diff / 365) + " years ago"
 
-    except exception as e:
+    except Exception:
         ng.debugger.dump_exception("time_ago() fixme")
+
 
 def time_elapsed(elapsed):
     from netgrasp import netgrasp
+
     ng = netgrasp.netgrasp_instance
 
     try:
-        import datetime
-
         ng.debugger.debug("time_elapsed(%s)", (elapsed,))
 
         if not elapsed:
@@ -83,17 +85,17 @@ def time_elapsed(elapsed):
             return str(day_diff / 30) + " months"
         return str(day_diff / 365) + " years"
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("time_elapsed() caught exception")
 
+
 # Provides a human-friendly name for a mac-ip pair.
-def name_did(did, ip = None):
+def name_did(did, ip=None):
     from netgrasp import netgrasp
+
     ng = netgrasp.netgrasp_instance
 
     try:
-        import datetime
-
         ng.debugger.debug("entering name_did(%s, %s)", (did, ip))
 
         if did:
@@ -105,7 +107,7 @@ def name_did(did, ip = None):
                 elif hostname and (hostname != "unknown"):
                     return hostname
                 elif vendor:
-                    return """%s device""" % (vendor)
+                    return """%s device""" % vendor
                 else:
                     return """%s [%s]""" % (ip, mac)
 
@@ -117,11 +119,12 @@ def name_did(did, ip = None):
 
         return "Unrecognized device"
 
-    except Exception as e:
+    except Exception:
         ng.debugger.dump_exception("name_did() caught exception")
 
+
 # Truncate strings when they're too long.
-def truncate_string(string, maxlength, suffix = "..."):
+def truncate_string(string, maxlength, suffix="..."):
     if not string or len(string) <= maxlength:
         return string
     return """%s%s""" % (string[:(maxlength - len(suffix))], suffix)

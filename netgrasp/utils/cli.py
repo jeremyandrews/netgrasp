@@ -1,4 +1,7 @@
 from netgrasp import netgrasp
+from netgrasp.database import database
+from netgrasp.utils import pretty
+
 
 def start(ng):
     import os
@@ -25,18 +28,19 @@ def start(ng):
         # Test that we can write to the log.
         try:
             with open(ng.logging["filename"], "w"):
-                ng.debugger.info("successfully writing to logfile")
+                ng.debugger.info("successfully opened logfile for writing")
         except Exception as e:
             ng.debugger.dump_exception("start() exception")
-            ng.debugger.critical("failed to write to logfile: %s", (ng.logging["filename"],))
+            ng.debugger.critical("failed to open logfile '%s' for writing: %s", (ng.logging["filename"], e))
 
         import daemonize
-        # test that we can write to the pidfile
+
+        # Test that we can write to the pidfile.
         try:
             with open(ng.logging["pidfile"], "w"):
-                ng.debugger.info("successfully writing to pidfile")
-        except IOError:
-            ng.debugger.critical("failed to write to pidfile: %s", (ng.logging["pidfile"],))
+                ng.debugger.info("successfully opened pidfile for writing")
+        except IOError as e:
+            ng.debugger.critical("failed to open pidfile '%s' for writing: %s", (ng.logging["pidfile"], e))
 
         ng.debugger.info("daemonizing app=netgrasp, pidfile=%s, user=%s, group=%s, verbose=True", (ng.logging["pidfile"], ng.security["user"], ng.security["group"]))
         ng.debugger.warning("daemonizing, output redirected to log file: %s", (ng.logging["filename"],))
@@ -50,7 +54,8 @@ def start(ng):
     else:
         netgrasp.main()
 
-def stop(ng, must_be_running = True):
+
+def stop(ng, must_be_running=True):
     import os
     import signal
     import errno
@@ -69,9 +74,10 @@ def stop(ng, must_be_running = True):
             os.kill(pid, signal.SIGTERM)
         except OSError as e:
             if e.errno == errno.EPERM:
-                ng.debugger.critical("Failed (perhaps try with sudo): %s", (e))
+                ng.debugger.critical("Failed (perhaps try with sudo): %s", (e,))
             else:
                 ng.debugger.critical("Failed: %s", (e,))
+
 
 def restart(ng):
     import time
@@ -81,11 +87,12 @@ def restart(ng):
     loops = 0
     while running:
         loops += 1
-        if (loops > 15):
+        if loops > 15:
             ng.debugger.critical("Failed to stop netgrasp.")
         time.sleep(0.2)
         running = ng.is_running()
     start(ng)
+
 
 def status(ng):
     pid = ng.is_running()
@@ -93,6 +100,7 @@ def status(ng):
         ng.debugger.warning("Netgrasp is running with pid %d", (pid,))
     else:
         ng.debugger.warning("Netgrasp is not running.")
+
 
 def update(ng):
     from netgrasp.update import update
@@ -129,16 +137,14 @@ def update(ng):
 
     netgrasp.netgrasp_instance = ng
 
-    email.email_instance = None
-    notify.notify_instance = None
+    netgrasp.email.email_instance = None
+    netgrasp.notify.notify_instance = None
 
     update.run_updates(version)
 
+
 def list(ng):
     import datetime
-
-    from netgrasp.database import database
-    from netgrasp.utils import pretty
 
     netgrasp.netgrasp_instance = ng
 
@@ -171,12 +177,12 @@ def list(ng):
             query.db_where("{%BASE}.active = ?", 1)
         query.db_where("{%BASE}.updated IS NOT NULL")
 
-        if (not ng.args.all or ng.args.all == 1):
+        if not ng.args.all or ng.args.all == 1:
             query.db_group("{%BASE}.did")
 
         query.db_order("{%BASE}.updated DESC")
 
-        rowFormat = "{:>16}{:>34}{:>22}"
+        rowfmt = "{:>16}{:>34}{:>22}"
         header = ["IP", "Name", "Last seen"]
 
     elif ng.args.type == 'event':
@@ -197,13 +203,13 @@ def list(ng):
             recent = datetime.datetime.now() - datetime.timedelta(seconds=ng.listen["active_timeout"])
             query.db_where("{%BASE}.timestamp >= ?", recent)
 
-        if (not ng.args.all or ng.args.all == 1):
+        if not ng.args.all or ng.args.all == 1:
             query.db_group("{%BASE}.did")
             query.db_group("{%BASE}.type")
 
         query.db_order("{%BASE}.timestamp DESC")
 
-        rowFormat = "{:>16}{:>24}{:>21}{:>18}"
+        rowfmt = "{:>16}{:>24}{:>21}{:>18}"
         header = ["IP", "Name", "Event", "Last seen"]
 
     query.db_leftjoin("device", "{%BASE}.did = device.did")
@@ -231,16 +237,15 @@ def list(ng):
     rows = ng.db.cursor.fetchall()
     if rows:
         print """ %s:""" % description
-        print rowFormat.format(*header)
+        print rowfmt.format(*header)
     for row in rows:
         if ng.args.type == 'device':
-            print rowFormat.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 32), pretty.truncate_string(pretty.time_ago(row[3]), 20))
+            print rowfmt.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 32), pretty.truncate_string(pretty.time_ago(row[3]), 20))
         else:
-            print rowFormat.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 22), pretty.truncate_string(row[4], 19), pretty.truncate_string(pretty.time_ago(row[3]), 16))
+            print rowfmt.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 22), pretty.truncate_string(row[4], 19), pretty.truncate_string(pretty.time_ago(row[3]), 16))
+
 
 def identify(ng):
-    from netgrasp.database import database
-    from netgrasp.utils import pretty
     from netgrasp.utils import exclusive_lock
 
     netgrasp.netgrasp_instance = ng
@@ -262,7 +267,7 @@ def identify(ng):
     if not ng.args.set:
         description = "Use --set ID 'CUSTOM NAME' to set a custom name on a device"
         header = ["ID", "IP", "Name", "Last seen"]
-        rowFormat = "{:>7}{:>16}{:>34}{:>22}"
+        rowfmt = "{:>7}{:>16}{:>34}{:>22}"
 
         query = database.SelectQueryBuilder("host")
         query.db_select("{%BASE}.hid")
@@ -299,10 +304,10 @@ def identify(ng):
         rows = ng.db.cursor.fetchall()
         if rows:
             print """ %s:""" % description
-            print rowFormat.format(*header)
+            print rowfmt.format(*header)
         for row in rows:
             # @TODO handle IP changes
-            print rowFormat.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
+            print rowfmt.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
     else:
         if ng.args.verbose > 1:
             print "id:", ng.args.set[0], "| custom name:", ng.args.set[1]
@@ -313,20 +318,18 @@ def identify(ng):
             ng.db.cursor.execute("UPDATE host SET custom_name = ? WHERE hid = ?", db_args)
             ng.db.connection.commit()
 
-def template(ng):
-    from netgrasp.database import database
-    from netgrasp.utils import pretty
 
+def template(ng):
     import pkg_resources
 
     if ng.args.alert or ng.args.type == 'alert':
         template_file = "mail_templates/template." + ng.args.alert + ".json"
         if ng.args.alert:
             if not pkg_resources.resource_exists("netgrasp", template_file):
-                template = pkg_resources.resource_string("netgrasp", "mail_templates/template.default.json")
+                tmpl = pkg_resources.resource_string("netgrasp", "mail_templates/template.default.json")
             else:
-                template = pkg_resources.resource_string("netgrasp", "mail_templates/template." + ng.args.alert + ".json")
-            print template
+                tmpl = pkg_resources.resource_string("netgrasp", "mail_templates/template." + ng.args.alert + ".json")
+            print tmpl
     elif ng.args.type == "config":
-        template = pkg_resources.resource_string("netgrasp", "template.netgrasp.cfg")
-        print template
+        tmpl = pkg_resources.resource_string("netgrasp", "template.netgrasp.cfg")
+        print tmpl
