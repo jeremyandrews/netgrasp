@@ -1,0 +1,15 @@
+{% extends "template.alert.default.html" %}
+{% block intro %}
+{% endblock intro %}
+{% block content %}
+<P>
+    The following devices have the same IP:
+    <UL>
+    {% for device in devices_with_ip %}
+        <LI>{{ device }}</LI>
+    {% endfor %}
+    </UL>
+</P>
+{% endblock content %}
+{% block summary %}
+{% endblock

@@ -48,48 +48,64 @@ class Email:
                 ng.debugger.warning("ignoring unrecognized digest type (%s), supported types: %s", (digest, netgrasp.DIGEST_TYPES))
         ng.email["digests"] = digests
 
-def LoadTemplate(template):
+def LoadTemplate(template, template_type, replace):
+    import jinja2
+
     from netgrasp import netgrasp
+
     ng = netgrasp.netgrasp_instance
 
     try:
-        ng.debugger.debug("entering email.LoadTemplate(%s)", (template,))
-
-        import pkg_resources
-        import json
+        ng.debugger.debug("entering email.LoadTemplate(%s, %s)", (template, template_type, replace))
 
         # @TODO allow template overrides
 
-        specific_template = "mail_templates/template." + template + ".json"
-        default_template = "mail_templates/template.default.json"
-        if pkg_resources.resource_exists("netgrasp", specific_template):
-            json_template = pkg_resources.resource_string("netgrasp", specific_template)
-        elif pkg_resources.resource_exists("netgrasp", default_template):
-            json_template = pkg_resources.resource_string("netgrasp", default_template)
+        env = jinja2.Environment(
+            loader = jinja2.PackageLoader("netgrasp", "mail_templates"),
+            autoescape = jinja2.select_autoescape(['html']),
+            extensions=['jinja2.ext.i18n']
+        )
+        # For now we're just using i18n for pluralization, not translations.
+        env.install_null_translations()
 
-        ng.debugger.debug("template loaded: %s", (json_template,))
-        data = json.loads(json_template)
+        try:
+            specific_subject_template = "template." + template_type +  "." + template + ".subject.html"
+            subject_template = env.get_template(specific_subject_template)
+            ng.debugger.debug("loaded specific subject template: %s", (specific_subject_template,))
+        except jinja2.TemplateNotFound:
+            default_subject_template = "template." + template_type + ".default.subject.html"
+            subject_template = env.get_template(default_subject_template)
+            ng.debugger.debug("loaded default subject template: %s", (default_subject_template,))
 
-        ng.debugger.debug("template parsed: %s", (data,))
-        return (data["subject"], data["body"]["html"], data["body"]["text"])
+        try:
+            specific_template = "template." + template_type + "." + template + ".html"
+            body_template = env.get_template(specific_template)
+            ng.debugger.debug("loaded specific template: %s", (specific_template,))
+        except jinja2.TemplateNotFound:
+            default_template = "template." + template_type + ".default.html"
+            body_template = env.get_template(default_template)
+            ng.debugger.debug("loaded default template: %s", (default_template,))
+
+        subject = subject_template.render(replace)
+        body = body_template.render(replace)
+
+        return subject, body
+
     except:
         ng.debugger.dump_exception("LoadTemplate() exception")
 
-def MailSend(template, replace):
+def MailSend(template, template_type, replace):
     from netgrasp import netgrasp
     ng = netgrasp.netgrasp_instance
 
     try:
-        ng.debugger.debug("entering email.MailSend(%s, %s)", (template, replace))
-
-        from string import Template
+        ng.debugger.debug("entering email.MailSend(%s, %s, %s)", (template, template_type, replace))
 
         import pyzmail
-        template_subject, template_body_html, template_body_text = LoadTemplate(template)
 
-        subject = Template(template_subject).substitute(replace)
-        body_html = Template(template_body_html).substitute(replace)
-        body_text = Template(template_body_text).substitute(replace)
+        subject, body_html = LoadTemplate(template, template_type, replace)
+        # @TODO: auto-generate text version of body
+        body_text = "@TODO"
 
         payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email["from"], ng.email["to"], subject, "iso-8859-1", (body_text, "us-ascii"), (body_html, "us-ascii"))
         ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email["hostname"], ng.email["port"], ng.email["mode"], ng.email["username"], ng.email["password"])

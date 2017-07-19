@@ -1,0 +1,19 @@
+{% extends "template.alert.default.html" %}
+{% block intro %}
+<P>A device on your network has a new IP:</P>
+{% endblock intro %}
+{% block content %}
+<P>
+    <UL>
+        <LI>{{ name }}</LI>
+        <LI>ip: {{ ip }} [{{ mac }}]</LI>
+	<LI>previously seen with ip {{ previous_ip}}: {{ previously_seen }}</LI>
+        <LI>first seen: {{ first_seen }}</LI>
+        {% trans count=recently_seen_count %}
+        <LI>recently seen {{ recently_seen_count }} time</LI>
+        {% pluralize %}
+        <LI>recently seen {{ recently_seen_count }} times</LI>
+        {% endtrans %}
+    </UL>
+</P>
+{% endblock content %}

@@ -1,0 +1,23 @@
+{% extends "template.alert.default.html" %}
+{% block intro %}
+<P>New IP requested on your network:</P>
+{% endblock intro %}
+{% block content %}
+<P>
+    <UL>
+        <LI>{{ name }}</LI>
+        <LI>ip: {{ ip }} [{{ mac }}]</LI>
+        <LI>first requested: {{ first_requested }}</LI>
+    </UL>
+</P>
+{% endblock content %}
+{% block summary %}
+<P>
+    IP requested by:
+    <UL>
+    {% for device in devices_requesting %}
+        <LI>{{ device }}</LI>
+    {% endfor %}
+    </UL>
+</P>
+{% endblock summary %}

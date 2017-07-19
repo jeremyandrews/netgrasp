@@ -1,0 +1,33 @@
+{% extends "template.alert.base.html" %}
+{% block intro %}
+<P></P>
+{% endblock intro %}
+{% block content %}
+<P>
+    <UL>
+        <LI>{{ name }}</LI>
+        <LI>ip: {{ ip }} [{{ mac }}]</LI>
+        <LI>previously seen: {{ previously_seen }}</LI>
+        <LI>first seen: {{ first_seen }}</LI>
+        {% trans count=recently_seen_count %}
+        <LI>recently seen {{ recently_seen_count }} time</LI>
+        {% pluralize %}
+        <LI>recently seen {{ recently_seen_count }} times</LI>
+        {% endtrans %}
+    </UL>
+</P>
+{% endblock content %}
+{% block summary %}
+<P>
+{% trans count=talked_to_count %}
+    In the past 24 hours, this device talked to {{ talked_to_count }} device:
+{% pluralize %}
+    In the past 24 hours, this device talked to {{ talked_to_count }} devices:
+{% endtrans %}
+    <UL>
+    {% for device in talked_to_list %}
+        <LI>{{ device }}</LI>
+    {% endfor %}
+    </UL>
+</P>
+{% endblock summary %}
