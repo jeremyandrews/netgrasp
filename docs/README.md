@@ -49,8 +49,8 @@ configuration section below.
    * [pycap](https://github.com/dugsong/pypcap)
    * [daemonize](https://github.com/thesharp/daemonize)
    * [jinja2](http://jinja.pocoo.org)
+   * [pyzmail](http://www.magiksys.net/pyzmail/)
  * sqlite3
- * (_OPTIONAL_) [pyzmail](http://www.magiksys.net/pyzmail/) (`pip install pyzmail`)
  * (_OPTIONAL_) [ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
 
 ### Current limitations
