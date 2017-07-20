@@ -48,6 +48,7 @@ configuration section below.
    * [dpkt](https://github.com/kbandla/dpkt)
    * [pycap](https://github.com/dugsong/pypcap)
    * [daemonize](https://github.com/thesharp/daemonize)
+   * [jinja2](http://jinja.pocoo.org)
  * sqlite3
  * (_OPTIONAL_) [pyzmail](http://www.magiksys.net/pyzmail/) (`pip install pyzmail`)
  * (_OPTIONAL_) [ntfy](https://github.com/dschep/ntfy) (`pip install ntfy`)
