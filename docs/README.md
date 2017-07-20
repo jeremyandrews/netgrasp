@@ -2,19 +2,19 @@
 
 # Overview
 
-Must be started as root. Will spawn another process and initiate pcap to listen
-for MAC request and reply packets on the network. Root privilieges are dropped
-as soon as possible during startup.
+Netgrasp tracks IP and MAC address pairs seen on the network while it runs,
+optionally notifying you when a new device joins your network. It can provide
+daily summary digests detailing devices on your network. It can also be used
+interactively to review devices and list events on your network.
+
+Netgrasp must be started as root. It will spawn another process and initiate
+pcap to listen for MAC request and reply packets on the network. Root
+privilieges are dropped as soon as possible during startup.
 
 Netgrasp is started as follows:
 ```
   sudo netgrasp start
 ```
-
-Netgrasp tracks IP and MAC address pairs seen on the network while it runs,
-optionally notifying you when a new device joins your network. It can provide
-daily summary digests detailing devices on your network. It can also be used
-interactively to review devices and list events on your network.
 
 ## Installation
 Run:
