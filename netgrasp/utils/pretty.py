@@ -79,8 +79,12 @@ def time_ago(elapsed, precision = True):
 
         if day_diff < 31:
             time_string = str(day_diff / 7) + " weeks "
-            if precision and day_diff % 7:
-                return time_string + str(day_diff % 7) + " days ago"
+            day_remainder = day_diff % 30
+            if precision and day_remainder:
+                if day_remainder == 1:
+                    return time_string + "1 day ago"
+                else:
+                    return time_string + str(day_diff % 7) + " days ago"
             else:
                 return time_string + "ago"
 
