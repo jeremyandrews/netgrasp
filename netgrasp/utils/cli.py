@@ -240,9 +240,9 @@ def list(ng):
         print rowfmt.format(*header)
     for row in rows:
         if ng.args.type == 'device':
-            print rowfmt.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 32), pretty.truncate_string(pretty.time_ago(row[3]), 20))
+            print rowfmt.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 32), pretty.truncate_string(pretty.time_ago(row[3], False), 20))
         else:
-            print rowfmt.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 22), pretty.truncate_string(row[4], 19), pretty.truncate_string(pretty.time_ago(row[3]), 16))
+            print rowfmt.format(pretty.truncate_string(row[2], 15), pretty.truncate_string(pretty.name_did(row[0]), 22), pretty.truncate_string(row[4], 19), pretty.truncate_string(pretty.time_ago(row[3], False), 16))
 
 
 def identify(ng):
@@ -307,7 +307,7 @@ def identify(ng):
             print rowfmt.format(*header)
         for row in rows:
             # @TODO handle IP changes
-            print rowfmt.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4]), 20))
+            print rowfmt.format(row[0], pretty.truncate_string(row[3], 15), pretty.truncate_string(pretty.name_did(row[1]), 32), pretty.truncate_string(pretty.time_ago(row[4], False), 20))
     else:
         if ng.args.verbose > 1:
             print "id:", ng.args.set[0], "| custom name:", ng.args.set[1]

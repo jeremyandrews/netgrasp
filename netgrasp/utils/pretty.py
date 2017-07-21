@@ -1,7 +1,6 @@
 import datetime
 
-
-def time_ago(elapsed):
+def time_ago(elapsed, precision = True):
     from netgrasp import netgrasp
 
     ng = netgrasp.netgrasp_instance
@@ -17,29 +16,89 @@ def time_ago(elapsed):
         day_diff = diff.days
 
         if day_diff < 0:
-            return ''
+            return False
 
         if day_diff == 0:
             if second_diff < 10:
                 return "just now"
+
             if second_diff < 60:
                 return str(second_diff) + " seconds ago"
+
             if second_diff < 120:
                 return "a minute ago"
+
             if second_diff < 3600:
-                return str(second_diff / 60) + " minutes ago"
+                time_string = str(second_diff / 60) + " minutes "
+                if precision and second_diff % 60:
+                    time_string += str(second_diff % 60) + " seconds ago"
+                else:
+                    time_string += "ago"
+                return time_string
+
             if second_diff < 7200:
                 return "an hour ago"
+
             if second_diff < 86400:
-                return str(second_diff / 3600) + " hours ago"
+                time_string = str(second_diff / 3600) + " hours "
+                if precision and second_diff % 3600:
+                    time_string += str((second_diff % 3600) / 60) + " minutes ago"
+                else:
+                    time_string += "ago"
+                return time_string
+
         if day_diff == 1:
-            return "yesterday"
+            if precision and second_diff:
+                time_string = "1 day "
+                if second_diff < 120:
+                    time_string += "ago"
+                elif second_diff < 3600:
+                    time_string += str(second_diff / 60) + " minutes ago"
+                elif second_diff < 7200:
+                    time_string += "1 hour ago"
+                elif second_diff < 86400:
+                    time_string += str(second_diff / 3600) + " hours ago"
+                else:
+                    time_string += "ago"
+                return time_string
+            else:
+                return "yesterday"
+
         if day_diff < 7:
-            return str(day_diff) + " days ago"
+            time_string = str(day_diff) + " days "
+            if precision and second_diff:
+                if second_diff < 7200:
+                    time_string += "ago"
+                elif second_diff < 86400:
+                    time_string += str(second_diff / 3600) + " hours ago"
+                else:
+                    time_string += "ago"
+                return time_string
+            else:
+                return time_string + "ago"
+
         if day_diff < 31:
-            return str(day_diff / 7) + " weeks ago"
+            time_string = str(day_diff / 7) + " weeks "
+            if precision and day_diff % 7:
+                return time_string + str(day_diff % 7) + " days ago"
+            else:
+                return time_string + "ago"
+
         if day_diff < 365:
-            return str(day_diff / 30) + " months ago"
+            time_string = str(day_diff / 30) + " months "
+            day_remainder = day_diff % 30
+            if precision and day_remainder:
+                if day_remainder == 1:
+                    time_string += "1 day ago"
+                elif day_remainder < 7:
+                    time_string += str(day_remainder) + " days ago"
+                else:
+                    time_string += str(day_remainder / 7) + " weeks ago"
+                return time_string
+            else:
+                return time_string + "ago"
+
+        # @TODO add precision to years
         return str(day_diff / 365) + " years ago"
 
     except Exception:
