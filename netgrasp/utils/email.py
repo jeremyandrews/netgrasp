@@ -69,11 +69,11 @@ def LoadTemplate(template, template_type, replace):
         env.install_null_translations()
 
         try:
-            specific_subject_template = "template." + template_type +  "." + template + ".subject.html"
+            specific_subject_template = "template." + template_type +  "." + template + ".subject.txt"
             subject_template = env.get_template(specific_subject_template)
             ng.debugger.debug("loaded specific subject template: %s", (specific_subject_template,))
         except jinja2.TemplateNotFound:
-            default_subject_template = "template." + template_type + ".default.subject.html"
+            default_subject_template = "template." + template_type + ".default.subject.txt"
             subject_template = env.get_template(default_subject_template)
             ng.debugger.debug("loaded default subject template: %s", (default_subject_template,))
 
