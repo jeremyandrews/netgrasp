@@ -30,8 +30,14 @@ def time_ago(elapsed, precision = True):
 
             if second_diff < 3600:
                 time_string = str(second_diff / 60) + " minutes "
-                if precision and second_diff % 60:
-                    time_string += str(second_diff % 60) + " seconds ago"
+                if precision:
+                    second_remainder = (second_diff % 60)
+                    if second_remainder == 1:
+                        time_string += "1 second ago"
+                    elif second_remainder:
+                        time_string += str(second_diff % 60) + " seconds ago"
+                    else:
+                        time_string += "ago"
                 else:
                     time_string += "ago"
                 return time_string
@@ -41,8 +47,14 @@ def time_ago(elapsed, precision = True):
 
             if second_diff < 86400:
                 time_string = str(second_diff / 3600) + " hours "
-                if precision and second_diff % 3600:
-                    time_string += str((second_diff % 3600) / 60) + " minutes ago"
+                if precision:
+                    minutes_remainder = (second_diff % 3600) / 60
+                    if minutes_remainder == 1:
+                        time_string += "1 minute ago"
+                    elif minutes_reminader:
+                        time_string += str(minutes_remainder) + " minutes ago"
+                    else:
+                        time_string += "ago"
                 else:
                     time_string += "ago"
                 return time_string
@@ -66,7 +78,7 @@ def time_ago(elapsed, precision = True):
 
         if day_diff < 7:
             time_string = str(day_diff) + " days "
-            if precision and second_diff:
+            if precision:
                 if second_diff < 7200:
                     time_string += "ago"
                 elif second_diff < 86400:
@@ -79,31 +91,59 @@ def time_ago(elapsed, precision = True):
 
         if day_diff < 31:
             time_string = str(day_diff / 7) + " weeks "
-            day_remainder = day_diff % 30
-            if precision and day_remainder:
+            if precision:
+                day_remainder = day_diff % 7
                 if day_remainder == 1:
-                    return time_string + "1 day ago"
+                    time_string += "1 day ago"
+                elif day_remainder:
+                    time_string += str(day_remainder) + " days ago"
                 else:
-                    return time_string + str(day_diff % 7) + " days ago"
+                    time_string += "ago"
+                return time_string
             else:
                 return time_string + "ago"
 
         if day_diff < 365:
             time_string = str(day_diff / 30) + " months "
-            day_remainder = day_diff % 30
-            if precision and day_remainder:
-                if day_remainder == 1:
+            if precision:
+                day_remainder = day_diff % 30
+                week_remainder = day_remainder / 7
+                if not day_remainder:
+                    time_string += "ago"
+                elif day_remainder == 1:
                     time_string += "1 day ago"
                 elif day_remainder < 7:
                     time_string += str(day_remainder) + " days ago"
+                elif week_remainder == 1:
+                    time_string += "1 week ago"
                 else:
-                    time_string += str(day_remainder / 7) + " weeks ago"
+                    time_string += str(week_remainder) + " weeks ago"
                 return time_string
             else:
                 return time_string + "ago"
 
-        # @TODO add precision to years
-        return str(day_diff / 365) + " years ago"
+        time_string = str(day_diff / 365) + " years "
+        if precision:
+            day_remainder = day_diff % 365
+            month_remainder = day_diff % 12
+            week_remainder = day_diff % 7
+            if not day_remainder:
+                time_string += "ago"
+            elif day_remainder == 1:
+                time_string += "1 day ago"
+            elif day_remainder < 7:
+                time_string += str(day_remainder) + " days ago"
+            elif week_remainder == 1:
+                time_string += "1 week ago"
+            elif week_remainder < 5:
+                time_string += str(week_remainder) + " weeks ago"
+            elif month_remainder == 1:
+                week_string += "1 month ago"
+            else:
+                time_string += str(month_remainder) + " months ago"
+            return time_string
+        else:
+            return time_string + "ago"
 
     except Exception:
         ng.debugger.dump_exception("time_ago() fixme")
