@@ -10,13 +10,16 @@ def time_ago(elapsed, precision = True):
 
         if not elapsed:
             return "never"
+
         now = datetime.datetime.now()
         diff = now - elapsed
         second_diff = diff.seconds
         day_diff = diff.days
 
+        ng.debugger.debug("time_ago second_diff(%d) day_diff(%d)", (second_diff, day_diff))
+
         if day_diff < 0:
-            return False
+            return "unknown"
 
         if day_diff == 0:
             if second_diff < 10:
@@ -45,19 +48,18 @@ def time_ago(elapsed, precision = True):
             if second_diff < 7200:
                 return "an hour ago"
 
-            if second_diff < 86400:
-                time_string = str(second_diff / 3600) + " hours "
-                if precision:
-                    minutes_remainder = (second_diff % 3600) / 60
-                    if minutes_remainder == 1:
-                        time_string += "1 minute ago"
-                    elif minutes_reminader:
-                        time_string += str(minutes_remainder) + " minutes ago"
-                    else:
-                        time_string += "ago"
+            time_string = str(second_diff / 3600) + " hours "
+            if precision:
+                minutes_remainder = (second_diff % 3600) / 60
+                if minutes_remainder == 1:
+                    time_string += "1 minute ago"
+                elif minutes_remainder:
+                    time_string += str(minutes_remainder) + " minutes ago"
                 else:
                     time_string += "ago"
-                return time_string
+            else:
+                time_string += "ago"
+            return time_string
 
         if day_diff == 1:
             if precision and second_diff:
