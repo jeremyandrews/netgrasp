@@ -1,0 +1,1 @@
+{% include 'template.header.txt' %}{% block intro %}{% endblock %}{% block content %}{% endblock %}{% block summary %}{% endblock %}{% include 'template.footer.txt' %}

@@ -68,28 +68,22 @@ def LoadTemplate(template, template_type, replace):
         # For now we're just using i18n for pluralization, not translations.
         env.install_null_translations()
 
-        try:
-            specific_subject_template = "template." + template_type +  "." + template + ".subject.txt"
-            subject_template = env.get_template(specific_subject_template)
-            ng.debugger.debug("loaded specific subject template: %s", (specific_subject_template,))
-        except jinja2.TemplateNotFound:
-            default_subject_template = "template." + template_type + ".default.subject.txt"
-            subject_template = env.get_template(default_subject_template)
-            ng.debugger.debug("loaded default subject template: %s", (default_subject_template,))
+        templates = {}
+        for extension in ["subject.txt", "html", "txt"]:
+            try:
+                specific_template = "template." + template_type +  "." + template + "." + extension
+                templates[extension] = env.get_template(specific_template)
+                ng.debugger.debug("loaded specific %s template: %s", (extension, specific_template))
+            except jinja2.TemplateNotFound:
+                default_template = "template." + template_type + ".default." + extension
+                templates[extension] = env.get_template(default_template)
+                ng.debugger.debug("loaded default %s template: %s", (extension, default_template))
 
-        try:
-            specific_template = "template." + template_type + "." + template + ".html"
-            body_template = env.get_template(specific_template)
-            ng.debugger.debug("loaded specific template: %s", (specific_template,))
-        except jinja2.TemplateNotFound:
-            default_template = "template." + template_type + ".default.html"
-            body_template = env.get_template(default_template)
-            ng.debugger.debug("loaded default template: %s", (default_template,))
+        subject = templates["subject.txt"].render(replace)
+        body_html = templates["html"].render(replace)
+        body_text = templates["txt"].render(replace)
 
-        subject = subject_template.render(replace)
-        body = body_template.render(replace)
-
-        return subject, body
+        return subject, body_html, body_text
 
     except:
         ng.debugger.dump_exception("LoadTemplate() exception")
@@ -103,9 +97,7 @@ def MailSend(template, template_type, replace):
 
         import pyzmail
 
-        subject, body_html = LoadTemplate(template, template_type, replace)
-        # @TODO: auto-generate text version of body
-        body_text = "@TODO"
+        subject, body_html, body_text = LoadTemplate(template, template_type, replace)
 
         payload, mail_from, rcpt_to, msg_id = pyzmail.generate.compose_mail(ng.email["from"], ng.email["to"], subject, "iso-8859-1", (body_text, "us-ascii"), (body_html, "us-ascii"))
         ret = pyzmail.generate.send_mail(payload, mail_from, rcpt_to, ng.email["hostname"], ng.email["port"], ng.email["mode"], ng.email["username"], ng.email["password"])
