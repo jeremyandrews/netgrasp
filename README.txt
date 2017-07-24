@@ -6,7 +6,7 @@ optionally generating notifications. For example, it can notify you when a new
 device joins your network. It can also send daily and weekly emails summarizing
 the devices using your network.
 
-Netgrasp requires Python 2.
+Netgrasp currently requires Python 2.
 
 ============
 Installation
