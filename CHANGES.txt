@@ -1,4 +1,5 @@
 v0.9.4, ???
+ * use jinja for email templates
  * fix startup with -c option for custom configuration file
  * cleanup, bug fixes
 
