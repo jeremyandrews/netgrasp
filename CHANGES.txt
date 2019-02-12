@@ -1,5 +1,11 @@
-v0.9.5, ???
- * ???
+v0.10.0, ???
+ * convert to Rust
+ * pypcap -> https://github.com/ebfull/pcap
+ * daemonize -> https://github.com/knsd/daemonize
+ * pymail -> https://github.com/lettre/lettre
+ * dpkg -> ? (raw/native)
+ * jinja2 -> ? (http://www.arewewebyet.org/topics/templating/)
+ * sqlite3 -> https://github.com/jgallagher/rusqlite
 
 v0.9.4, 24-July-2017
  * use jinja for email templates
